@@ -1,6 +1,6 @@
 // src/economy.js — server-side economy security + rich list + admin
 import { db } from "./firebase.js";
-import { ref, onValue, set, update, get, runTransaction } from "firebase/database";
+import { ref, onValue, set, update, get, runTransaction, push } from "firebase/database";
 
 // Validate that a money change is legitimate
 // (client sends the delta, server validates via transaction)

@@ -7,7 +7,7 @@ import { createMinimap } from "./minimap.js";
 import { addCity } from "./city.js";
 import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAILY_QUESTS, DAILY_REWARDS } from "./config.js";
 import { createGameState } from "./needs.js";
-import { auth } from "./firebase.js";
+import { auth, db } from "./firebase.js";
 import { initAuth, showAuthModal, wireAuthUI } from "./auth.js";
 import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName } from "./multiplayer.js";
 import { startRide, travelToZone } from "./travel.js";
@@ -15,6 +15,7 @@ import { subscribeRichList } from "./economy.js";
 import { createNPCs } from "./npcs.js";
 import { initAdmin, showAdminDashboard, hideAdminDashboard, isAdmin, adminTab } from "./admin.js";
 import { checkDailyReward, getDailyStatus, claimQuestReward } from "./daily.js";
+import { ref, onValue } from "firebase/database";
 
 const $ = (id) => document.getElementById(id);
 const showError = (m) => { const e = $("err"); e.style.display = "flex"; e.textContent = m; };
@@ -201,7 +202,43 @@ initAuth((user) => {
     if (reward) { game.state.money += reward.money; updateHUD(); toast(`${reward.label}! Welcome back.`); }
   });
 });
-initAdmin((user) => { toast("Admin access detected"); });
+initAdmin((user) => {
+  toast("Admin access detected — welcome, " + (user.email || "Admin"));
+  const badge = document.getElementById("admin-user-badge");
+  if (badge) badge.textContent = user.email ? user.email.split("@")[0] : "Admin";
+});
+
+// Wire admin HUD button (revealed automatically when isAdmin becomes true)
+$("admin-hud-btn")?.addEventListener("click", () => {
+  if (isAdmin()) showAdminDashboard();
+  else toast("Admin access required");
+});
+
+// Listen for global announcements → show as toast
+let _lastAnnounceTs = Date.now();
+onValue(ref(db, "announcements"), (snap) => {
+  const data = snap.val() || {};
+  const list = Object.values(data).sort((a,b) => (a.ts||0)-(b.ts||0));
+  for (const a of list) {
+    if ((a.ts||0) > _lastAnnounceTs) {
+      const prefix = a.alert ? "⚠️ " : "📢 ";
+      toast(prefix + (a.text || ""));
+    }
+  }
+  if (list.length) _lastAnnounceTs = list[list.length-1].ts || _lastAnnounceTs;
+});
+
+// Listen for live events → show as toast
+let _shownEvents = {};
+onValue(ref(db, "events"), (snap) => {
+  const data = snap.val() || {};
+  for (const [k, e] of Object.entries(data)) {
+    if (!_shownEvents[k] && e.icon && e.name) {
+      _shownEvents[k] = true;
+      toast(`${e.icon} ${e.name}! ${e.bonus || ""}`);
+    }
+  }
+});
 
 // ---- Main loop ----
 const clock = new THREE.Clock();
