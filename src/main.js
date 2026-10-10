@@ -147,6 +147,11 @@ window.bookRide = (rideId) => {
       if (result.ok) {
         toast("Welcome to " + result.zone.name + "!");
         travelToZone(getMyUid(), result.zone.id);
+        // Update HUD location label
+        const titleEl = document.querySelector(".chip.title");
+        if (titleEl) titleEl.firstChild.textContent = "📍 " + result.zone.name;
+        const subEl = document.getElementById("zone-sub");
+        if (subEl) subEl.textContent = result.zone.desc;
         updateHUD();
         // Teleport player to new zone start position
         player.pos.set(-9, 0, 11);

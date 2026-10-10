@@ -1,4 +1,5 @@
-// src/multiplayer.js — real-time presence + chat
+// src/multiplayer.js — real-time presence + chat (FIXED: import THREE)
+import * as THREE from "three";
 import { auth, db } from "./firebase.js";
 import { ref, onValue, set, update, onDisconnect, push, serverTimestamp } from "firebase/database";
 import { onAuthStateChanged } from "firebase/auth";
