@@ -7,6 +7,9 @@ import { createMinimap } from "./minimap.js";
 import { addCity } from "./city.js";
 import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS } from "./config.js";
 import { createGameState } from "./needs.js";
+import { initAuth, showAuthModal, hideAuthModal, wireAuthUI } from "./auth.js";
+import { initMultiplayer, sendPosition, sendChat, getPlayerCount, getMyName, getMyUid } from "./multiplayer.js";
+import { auth } from "./firebase.js";
 
 const $ = (id) => document.getElementById(id);
 const showError = (m) => { const e = $("err"); e.style.display = "flex"; e.textContent = m; };
@@ -194,10 +197,67 @@ function frame() {
   // Update needs every frame, HUD every 0.5s
   game.updateNeeds(dt);
   hudT += dt; if (hudT > 0.5) { hudT = 0; updateHUD(); }
+  // Send position to multiplayer (throttled inside sendPosition)
+  sendPosition(player.pos.x, player.pos.z, player.heading);
   mmT += dt; if (mmT > 0.1) { mmT = 0; mmDraw(player.pos.x, player.pos.z, ctl.yaw, player.heading, traffic.positions); }
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
+
+// ---- Auth + Multiplayer init ----
+wireAuthUI();
+initAuth((user) => {
+  // User is logged in — init multiplayer
+  initMultiplayer(scene, (count) => {
+    // Update online count display
+    const el = $("online-count");
+    if (el) el.textContent = count + " here";
+  }, (msg, total) => {
+    // New chat message
+    const chatLog = $("chat-log");
+    if (chatLog) {
+      const div = document.createElement("div");
+      div.style.cssText = "padding:4px 8px;font-size:12px;border-bottom:1px solid #eee;";
+      div.innerHTML = `<b style="color:${msg.uid === getMyUid() ? "var(--green)" : "#1d5fa8"};">${msg.name}:</b> ${msg.text}`;
+      chatLog.appendChild(div);
+      chatLog.scrollTop = chatLog.scrollHeight;
+      // Keep last 30 messages
+      while (chatLog.children.length > 30) chatLog.removeChild(chatLog.firstChild);
+    }
+    // Unread badge
+    const badge = $("chat-badge");
+    const chatDock = $("chat-dock");
+    if (badge && chatDock && !chatDock.classList.contains("open")) {
+      const n = (parseInt(badge.textContent) || 0) + 1;
+      badge.textContent = n;
+      badge.style.display = "block";
+    }
+  });
+});
+
+window.getMyUid = getMyUid;
+
+// Chat send
+window.sendChatMsg = function() {
+  const input = $("chat-input");
+  if (input && input.value.trim()) {
+    sendChat(input.value);
+    input.value = "";
+  }
+};
+
+// Chat dock toggle
+window.toggleChat = function() {
+  const dock = $("chat-dock");
+  if (!dock) return;
+  dock.classList.toggle("open");
+  if (dock.classList.contains("open")) {
+    const badge = $("chat-badge");
+    if (badge) { badge.style.display = "none"; badge.textContent = "0"; }
+    const input = $("chat-input");
+    if (input) input.focus();
+  }
+};
 
 Promise.all([loadPlayer(manager, scene), addCity(scene, world, manager)]).then(([r]) => {
   mmDraw = createMinimap($("mm"), world.mapShapes);
@@ -205,6 +265,10 @@ Promise.all([loadPlayer(manager, scene), addCity(scene, world, manager)]).then((
   setProgress(1);
   ctl.yaw = player.heading + Math.PI;
   updateHUD();
+  // Show auth modal on load if not logged in
+  setTimeout(() => {
+    if (!auth.currentUser) showAuthModal();
+  }, 500);
   frame();
   $("loading").classList.add("done");
   window.__ready = true;
