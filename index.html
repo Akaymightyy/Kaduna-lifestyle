@@ -126,6 +126,45 @@
   </div>
 </div>
 
+<!-- Auth modal -->
+<div id="auth-modal" style="position:fixed;inset:0;z-index:45;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.6);">
+  <div class="card" style="width:min(340px,90vw);padding:24px;text-align:center;">
+    <h3 style="margin:0 0 6px;font-size:20px;color:var(--green);">Welcome to Kaduna</h3>
+    <p style="font-size:13px;color:#666;margin:0 0 18px;">Sign in to play with others</p>
+    <button id="auth-guest" class="btn wide" style="width:100%;margin-bottom:10px;">🎮 Continue as Guest</button>
+    <button id="auth-google" class="btn wide" style="width:100%;margin-bottom:14px;">🔵 Google Sign In</button>
+    <div style="border-top:1px solid #ddd;margin:14px 0;padding-top:14px;">
+      <input id="auth-email" type="email" placeholder="Email" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;margin-bottom:8px;font-family:inherit;font-size:14px;" />
+      <input id="auth-pass" type="password" placeholder="Password" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;margin-bottom:10px;font-family:inherit;font-size:14px;" />
+      <button id="auth-login-btn" class="btn wide on" style="width:48%;">Login</button>
+      <button id="auth-signup-btn" class="btn wide" style="width:48%;margin-left:4%;">Sign Up</button>
+    </div>
+    <button id="auth-close" style="margin-top:10px;background:none;border:none;color:#999;cursor:pointer;font-size:13px;">Maybe later</button>
+  </div>
+</div>
+
+<!-- Chat dock -->
+<div id="chat-dock" style="position:fixed;right:12px;bottom:calc(90px + env(safe-area-inset-bottom));width:260px;max-height:300px;display:none;flex-direction:column;background:var(--cream);border-radius:16px;box-shadow:0 4px 20px rgba(0,0,0,.2);z-index:35;pointer-events:auto;">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid #ddd;">
+    <span style="font-size:13px;font-weight:600;color:var(--green);">💬 Kaduna Chat</span>
+    <span id="online-count" style="font-size:11px;color:#999;">1 here</span>
+    <button onclick="toggleChat()" style="background:none;border:none;font-size:16px;cursor:pointer;color:#999;">✕</button>
+  </div>
+  <div id="chat-log" style="flex:1;overflow-y:auto;max-height:200px;padding:4px;"></div>
+  <div style="display:flex;gap:4px;padding:6px;border-top:1px solid #ddd;">
+    <input id="chat-input" type="text" placeholder="Type message..." style="flex:1;padding:6px 10px;border:1px solid #ddd;border-radius:8px;font-family:inherit;font-size:12px;" onkeydown="if(event.key==='Enter')sendChatMsg()" />
+    <button onclick="sendChatMsg()" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:12px;font-weight:600;">Send</button>
+  </div>
+</div>
+
+<!-- Chat toggle button -->
+<button id="chat-toggle" onclick="toggleChat()" style="position:fixed;right:12px;bottom:calc(26px + env(safe-area-inset-bottom));width:48px;height:48px;border-radius:14px;background:var(--green);color:#fff;border:2.5px solid var(--green);font-size:22px;cursor:pointer;box-shadow:0 3px 0 var(--green);z-index:35;pointer-events:auto;display:flex;align-items:center;justify-content:center;">💬<span id="chat-badge" style="position:absolute;top:-4px;right:-4px;background:#e11d48;color:#fff;font-size:10px;font-weight:700;border-radius:10px;padding:1px 5px;display:none;">0</span></button>
+
+<style>
+  #auth-modal.show { display: flex; }
+  #chat-dock.open { display: flex; }
+</style>
+
 <div id="loading">
   <h1>Kaduna <span>Lifestyle</span></h1>
   <div class="sub" id="ltip">Loading Kaduna…</div>
