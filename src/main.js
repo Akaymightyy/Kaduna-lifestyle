@@ -4,6 +4,7 @@ import { createTraffic } from "./traffic.js";
 import { loadPlayer, collide } from "./player.js";
 import { createControls, updateCamera } from "./controls.js";
 import { createMinimap } from "./minimap.js";
+import { addCity } from "./city.js";
 import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS } from "./config.js";
 import { createGameState } from "./needs.js";
 
@@ -41,7 +42,7 @@ addEventListener("resize", resize); resize();
 
 const world = buildWorld(scene);
 const traffic = createTraffic(scene);
-const mmDraw = createMinimap($("mm"), world.mapShapes);
+let mmDraw = () => {};
 const ctl = createControls(canvas, camera, { joy: $("joy"), knob: $("knob") });
 
 // ---- game state (needs, money, etc.) ----
@@ -198,7 +199,8 @@ function frame() {
   requestAnimationFrame(frame);
 }
 
-loadPlayer(manager, scene).then((r) => {
+Promise.all([loadPlayer(manager, scene), addCity(scene, world, manager)]).then(([r]) => {
+  mmDraw = createMinimap($("mm"), world.mapShapes);
   rig = r; rig.group.castShadow = true;
   setProgress(1);
   ctl.yaw = player.heading + Math.PI;

@@ -161,7 +161,7 @@ export function buildWorld(scene) {
       if (!nearSide && !nearMosque && !nearMarket && !nearPetrol) {
         const d = 12 + R() * 10;
         const h = 7 + Math.floor(R() * 5) * 3.6 + (R() < 0.12 ? 14 : 0);
-        addBuilding(cx, side * (17 + d / 2), w, d, h, C(palette[Math.floor(R() * palette.length)]), side);
+        addBuilding(cx, side * (34 + d / 2), w, d, h, C(palette[Math.floor(R() * palette.length)]), side);
       }
       x += w + 3 + R() * 5;
     }
