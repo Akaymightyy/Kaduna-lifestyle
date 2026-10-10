@@ -109,3 +109,57 @@ export const ECONOMY = {
   maxTransactionLog: 50,
   richListSize: 10,
 };
+
+// Kaduna map locations (for Map feature)
+export const MAP_LOCATIONS = [
+  { name: "Ahmadu Bello Way", type: "road", x: 0, z: 0, major: true, desc: "Main road — where it all starts" },
+  { name: "Kawo Market", type: "market", x: -30, z: -25, major: true, desc: "Bustling market — best suya on weekends" },
+  { name: "Central Mosque", type: "landmark", x: 48, z: 34, major: true, desc: "The heart of Kaduna" },
+  { name: "Petrol Station", type: "service", x: -110, z: 28, major: false, desc: "Fill up your tank" },
+  { name: "Keke Park", type: "transport", x: 60, z: -28, major: true, desc: "Keke napep stand" },
+  { name: "Bus Stop (North)", type: "transport", x: -40, z: 13, major: false, desc: "Bus stop heading north" },
+  { name: "Bus Stop (South)", type: "transport", x: 30, z: -13, major: false, desc: "Bus stop heading south" },
+  { name: "Bus Stop (Far North)", type: "transport", x: 120, z: 13, major: false, desc: "Bus stop at city edge" },
+  { name: "Bus Stop (Far South)", type: "transport", x: -130, z: -13, major: false, desc: "Bus stop at city edge" },
+  // Real Kaduna areas (shown on map for travel)
+  { name: "Kawo", type: "district", x: 0, z: 0, major: true, desc: "Bustling market district" },
+  { name: "Sabon Tasha", type: "district", x: 0, z: 0, major: true, desc: "Residential area with shops" },
+  { name: "Barnawa", type: "district", x: 0, z: 0, major: true, desc: "Riverside leisure zone" },
+  { name: "Kakuri", type: "district", x: 0, z: 0, major: false, desc: "Industrial area" },
+  { name: "Tudun Wada", type: "district", x: 0, z: 0, major: false, desc: "Dense residential" },
+  { name: "Narayi", type: "district", x: 0, z: 0, major: false, desc: "Growing suburb" },
+  { name: "High Court", type: "landmark", x: 0, z: 0, major: false, desc: "Kaduna State High Court" },
+  { name: "Murtala Square", type: "landmark", x: 0, z: 0, major: true, desc: "Sports & events ground" },
+  { name: "Kaduna Polytechnic", type: "landmark", x: 0, z: 0, major: true, desc: "Centre of Learning" },
+  { name: " Ahmadu Bello Stadium", type: "landmark", x: 0, z: 0, major: false, desc: "Football stadium" },
+  { name: "Railway Station", type: "transport", x: 0, z: 0, major: true, desc: "Kaduna train station" },
+  { name: " Lugard Hall", type: "landmark", x: 0, z: 0, major: false, desc: "Historic government building" },
+  { name: "Golf Club", type: "landmark", x: 0, z: 0, major: false, desc: "Kaduna Golf Club" },
+  { name: "Hamdala Hotel", type: "landmark", x: 0, z: 0, major: true, desc: "Historic hotel on Ahmadu Bello Way" },
+];
+
+// Daily quest definitions
+export const DAILY_QUESTS = [
+  { id: "eat", desc: "Eat any food", reward: 300 },
+  { id: "work", desc: "Complete any job", reward: 500 },
+  { id: "chat", desc: "Send a chat message", reward: 200 },
+  { id: "travel", desc: "Travel to another zone", reward: 400 },
+];
+
+// Daily login rewards (7-day cycle)
+export const DAILY_REWARDS = [
+  { day: 1, money: 500 },
+  { day: 2, money: 1000 },
+  { day: 3, money: 1500 },
+  { day: 4, money: 2000 },
+  { day: 5, money: 3000 },
+  { day: 6, money: 5000 },
+  { day: 7, money: 10000 },
+];
+
+// Sickness thresholds
+export const SICKNESS = {
+  hygieneThreshold: 15,  // below this → sick
+  energyThreshold: 10,   // below this → exhausted
+  recoveryRate: 0.5,     // how fast sickness recovers when hygiene is good
+};
