@@ -68,7 +68,13 @@ function applyTime() {
   sun.position.set(player.pos.x+Math.cos(ang)*40, Math.max(8,Math.sin(ang)*60), player.pos.z+20);
   sun.target.position.set(player.pos.x,0,player.pos.z);
   const night = hour<6||hour>18.7;
-  traffic.setNight(night); world.lamps.material.color.set(night?0xfff0b0:0x555555);
+  traffic.setNight(night);
+  world.lamps.material.color.set(night?0xfff0b0:0x555555);
+  // Turn on street lamp PointLights at night
+  if (world.lampLights) {
+    const intensity = night ? 1.2 : 0;
+    for (const pl of world.lampLights) pl.intensity = intensity;
+  }
   const hh=Math.floor(hour),mm=Math.floor((hour-hh)*60);
   const txt = `${DAYS[Math.floor(mins/24)%7]} · ${((hh+11)%12)+1}:${String(mm).padStart(2,"0")} ${hh<12?"AM":"PM"}`;
   if(txt!==lastClock){lastClock=txt;$("clock").textContent=txt;$("sun").textContent=night?"🌙":"☀️";}
@@ -92,38 +98,183 @@ window.closePhone=closePhone;
 
 function showPhoneApp(appId) {
   const c=$("phone-content");
+  const backBtn='<button onclick="window.showApp(\'home\')" style="margin-top:14px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;font-weight:600;">← Back to Phone</button>';
   if(appId==="home"){
-    const apps=[{id:"food",icon:"🍛",label:"Chop"},{id:"jobs",icon:"💼",label:"Hustle"},{id:"bank",icon:"🏦",label:"Bank"},{id:"ride",icon:"🛺",label:"Ride"},{id:"chat",icon:"💬",label:"Chat"},{id:"map",icon:"🗺️",label:"Map"},{id:"daily",icon:"🎁",label:"Daily"},{id:"health",icon:"💊",label:"Health"},{id:"richlist",icon:"🏆",label:"Rich List"},{id:"settings",icon:"⚙️",label:"Settings"}];
+    const apps=[
+      {id:"food",icon:"🍛",label:"Chop"},
+      {id:"jobs",icon:"💼",label:"Hustle"},
+      {id:"bank",icon:"🏦",label:"Bank"},
+      {id:"ride",icon:"🛺",label:"Ride"},
+      {id:"chat",icon:"💬",label:"Chat"},
+      {id:"map",icon:"🗺️",label:"Map"},
+      {id:"daily",icon:"🎁",label:"Daily"},
+      {id:"health",icon:"💊",label:"Health"},
+      {id:"richlist",icon:"🏆",label:"Rich List"},
+      {id:"profile",icon:"👤",label:"Profile"},
+      {id:"events",icon:"🎉",label:"Events"},
+      {id:"news",icon:"📰",label:"Gist"},
+      {id:"boutique",icon:"👕",label:"Boutique"},
+      {id:"contacts",icon:"📲",label:"Contacts"},
+      {id:"settings",icon:"⚙️",label:"Settings"}
+    ];
     if(isAdmin()) apps.push({id:"admin",icon:"🔐",label:"Admin"});
-    c.innerHTML='<div style="font-size:13px;margin-bottom:10px;font-weight:600;">Kaduna Phone</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">'+apps.map(a=>`<button onclick="window.showApp('${a.id}')" style="background:var(--cream);border:2px solid var(--green);border-radius:12px;padding:12px 6px;cursor:pointer;font-family:inherit;"><div style="font-size:24px;">${a.icon}</div><div style="font-size:11px;color:var(--green);font-weight:600;">${a.label}</div></button>`).join("")+'</div>';
-  } else if(appId==="food"){
-    c.innerHTML='<div style="font-size:13px;margin-bottom:10px;font-weight:600;">Buy Food</div>'+FOOD_ITEMS.map(f=>`<div style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid #ddd;"><span style="font-size:20px;">${f.emoji}</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;">${f.name}</div><div style="font-size:11px;color:#666;">Hunger +${f.hunger}${f.fun?` · Fun +${f.fun}`:""}${f.energy?` · Energy +${f.energy}`:""}</div></div><button onclick="window.buyFood('${f.id}')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;">₦${f.price}</button></div>`).join("")+'<button onclick="window.showApp(\'home\')" style="margin-top:10px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;">← Back</button>';
-  } else if(appId==="jobs"){
-    c.innerHTML='<div style="font-size:13px;margin-bottom:10px;font-weight:600;">Find Work</div>'+JOBS.map(j=>`<div style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid #ddd;"><div style="flex:1;"><div style="font-size:13px;font-weight:600;">${j.name}</div><div style="font-size:11px;color:#666;">${j.desc} · Pays ₦${j.pay}</div></div><button onclick="window.doJob('${j.id}')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;">Work</button></div>`).join("")+'<button onclick="window.showApp(\'home\')" style="margin-top:10px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;">← Back</button>';
-  } else if(appId==="bank"){
-    c.innerHTML=`<div style="text-align:center;padding:20px 0;"><div style="font-size:28px;font-weight:800;color:var(--green);">₦${game.state.money.toLocaleString()}</div><div style="font-size:12px;color:#666;margin-top:4px;">Your Balance</div><div style="margin-top:12px;font-size:13px;">Rank: <span style="color:${game.getRank().color};font-weight:600;">${game.getRank().name}</span></div></div><button onclick="window.showApp('home')" style="margin-top:10px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;">← Back</button>`;
-  } else if(appId==="ride"){
-    c.innerHTML='<div style="font-size:13px;margin-bottom:10px;font-weight:600;">Book a Ride</div>'+RIDES.map(r=>`<div style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid #ddd;"><span style="font-size:20px;">${r.icon}</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;">${r.name}</div><div style="font-size:11px;color:#666;">${r.time}s · ₦${r.price}</div></div><select id="ride-dest-${r.id}" style="padding:4px;border:1px solid #ddd;border-radius:6px;font-size:11px;">${ZONES.map(z=>`<option value="${z.id}">${z.name}</option>`).join("")}</select><button onclick="window.bookRide('${r.id}')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:12px;font-weight:600;">Go</button></div>`).join("")+'<button onclick="window.showApp(\'home\')" style="margin-top:10px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;">← Back</button>';
-  } else if(appId==="chat"){
-    c.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #ddd;margin-bottom:8px;"><span style="font-size:13px;font-weight:600;color:var(--green);">Kaduna Chat</span><span id="online-count" style="font-size:11px;color:#999;">1 here</span></div><div id="chat-log" style="height:200px;overflow-y:auto;font-size:12px;margin-bottom:8px;border:1px solid #eee;border-radius:8px;padding:6px;"></div><div style="display:flex;gap:4px;"><input id="chat-input" type="text" placeholder="Type message..." style="flex:1;padding:6px 10px;border:1px solid #ddd;border-radius:8px;font-family:inherit;font-size:12px;" onkeydown="if(event.key===\'Enter\')sendChatMsg()" /><button onclick="sendChatMsg()" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:12px;font-weight:600;">Send</button></div><button onclick="window.showApp(\'home\')" style="margin-top:10px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;">← Back</button>';
-  } else if(appId==="map"){
-    const major=MAP_LOCATIONS.filter(l=>l.major), minor=MAP_LOCATIONS.filter(l=>!l.major);
-    c.innerHTML='<div style="font-size:13px;margin-bottom:8px;font-weight:600;">🗺️ Kaduna Map</div><div style="font-size:11px;color:#666;margin-bottom:6px;">Major Locations:</div>'+major.map(l=>`<div style="padding:6px 8px;background:#e8f5e9;border-radius:8px;margin-bottom:4px;font-size:12px;font-weight:600;color:var(--green);">📍 ${l.name}<div style="font-size:10px;color:#666;font-weight:400;">${l.desc}</div></div>`).join("")+'<div style="font-size:11px;color:#666;margin:8px 0 6px;">More Places:</div>'+minor.map(l=>`<div style="padding:4px 8px;font-size:11px;color:#666;">• ${l.name} — ${l.desc}</div>`).join("")+'<button onclick="window.showApp(\'home\')" style="margin-top:10px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;">← Back</button>';
-  } else if(appId==="daily"){
-    c.innerHTML='<div style="font-size:13px;margin-bottom:8px;font-weight:600;">🎁 Daily Rewards</div><div id="daily-content" style="font-size:12px;color:#666;">Loading...</div><div style="font-size:13px;margin:12px 0 8px;font-weight:600;">Daily Quests</div><div id="quests-content" style="font-size:12px;color:#666;">Loading...</div><button onclick="window.showApp(\'home\')" style="margin-top:10px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;">← Back</button>';
-    loadDaily();
-  } else if(appId==="richlist"){
-    c.innerHTML='<div style="font-size:13px;margin-bottom:10px;font-weight:600;">🏆 Rich List</div><div id="richlist-content" style="font-size:12px;color:#666;">Loading...</div><button onclick="window.showApp(\'home\')" style="margin-top:10px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;">← Back</button>';
-    subscribeRichList((list)=>{const el=document.getElementById("richlist-content");if(el)el.innerHTML=list.length?list.map((p,i)=>`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;"><span>${i+1}. ${p.name}</span><span style="font-weight:600;color:var(--green);">₦${p.balance.toLocaleString()}</span></div>`).join(""):"No data yet.";});
-  } else if(appId==="admin"){
-    showAdminDashboard(); closePhone();
-  } else {
-    c.innerHTML=`<div style="padding:20px;text-align:center;color:#666;font-size:13px;">${appId.charAt(0).toUpperCase()+appId.slice(1)} coming soon!</div><button onclick="window.showApp('home')" style="margin-top:10px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;">← Back</button>`;
+    // header
+    const head='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid #ddd;"><div><div style="font-size:11px;color:#666;">Welcome back,</div><div style="font-size:14px;font-weight:700;color:var(--green);">'+(getMyName()||"Player")+'</div></div><div style="text-align:right;"><div style="font-size:11px;color:#666;">Balance</div><div style="font-size:14px;font-weight:700;color:var(--green);">₦'+game.state.money.toLocaleString()+'</div></div></div>';
+    c.innerHTML=head+'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">'+apps.map(a=>'<button onclick="window.showApp(\''+a.id+'\')" style="background:var(--cream);border:2px solid var(--green);border-radius:12px;padding:14px 6px;cursor:pointer;font-family:inherit;"><div style="font-size:26px;">'+a.icon+'</div><div style="font-size:11px;color:var(--green);font-weight:600;margin-top:4px;">'+a.label+'</div></button>').join("")+'</div>';
+    return;
   }
+  if(appId==="food"){
+    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">🍛 Kaduna Buka — Buy Food</div>'+FOOD_ITEMS.map(f=>{const extras=(f.fun?' · Fun +'+f.fun:'')+(f.energy?' · Energy +'+f.energy:'');return '<div style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid #eee;border-radius:8px;margin-bottom:6px;"><span style="font-size:24px;">'+f.emoji+'</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;">'+f.name+'</div><div style="font-size:11px;color:#666;">Hunger +'+f.hunger+extras+'</div></div><button onclick="window.buyFood(\''+f.id+'\')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;">₦'+f.price+'</button></div>';}).join("")+backBtn;
+    return;
+  }
+  if(appId==="jobs"){
+    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">💼 Hustle — Find Work</div>'+JOBS.map(j=>'<div style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid #eee;border-radius:8px;margin-bottom:6px;"><div style="flex:1;"><div style="font-size:13px;font-weight:600;">'+j.name+'</div><div style="font-size:11px;color:#666;">'+j.desc+' · Pays ₦'+j.pay+' · '+j.time+'s</div></div><button onclick="window.doJob(\''+j.id+'\')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;">Work</button></div>').join("")+backBtn;
+    return;
+  }
+  if(appId==="bank"){
+    const rank=game.getRank();
+    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">🏦 Kaduna Bank</div><div style="text-align:center;padding:18px 0;background:linear-gradient(135deg,var(--green),#1a1a2e);color:#fff;border-radius:14px;margin-bottom:14px;"><div style="font-size:11px;opacity:0.8;">Your Balance</div><div style="font-size:30px;font-weight:800;margin-top:4px;">₦'+game.state.money.toLocaleString()+'</div><div style="margin-top:8px;font-size:11px;opacity:0.9;">Rank: <span style="color:'+rank.color+';font-weight:600;">'+rank.name+'</span></div></div><div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:11px;color:#666;">Next rank:</div>'+(rank.id==="bigoga"?'<div style="font-size:13px;font-weight:600;">Maximum rank achieved 🏆</div>':'<div style="font-size:13px;font-weight:600;color:var(--green);">'+RANKS[RANKS.findIndex(r=>r.id===rank.id)+1].name+' at ₦'+RANKS[RANKS.findIndex(r=>r.id===rank.id)+1].minMoney.toLocaleString()+'</div>')+'</div>'+backBtn;
+    return;
+  }
+  if(appId==="ride"){
+    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">🛺 Book a Ride</div>'+RIDES.map(r=>'<div style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid #eee;border-radius:8px;margin-bottom:6px;"><span style="font-size:24px;">'+r.icon+'</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;">'+r.name+'</div><div style="font-size:11px;color:#666;">'+r.time+'s ride · ₦'+r.price+'</div></div><select id="ride-dest-'+r.id+'" style="padding:5px;border:1px solid #ddd;border-radius:6px;font-size:11px;font-family:inherit;">'+ZONES.map(z=>'<option value="'+z.id+'">'+z.name+'</option>').join("")+'</select><button onclick="window.bookRide(\''+r.id+'\')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:12px;font-weight:600;">Go</button></div>').join("")+backBtn;
+    return;
+  }
+  if(appId==="chat"){
+    c.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #ddd;margin-bottom:8px;"><span style="font-size:14px;font-weight:700;color:var(--green);">💬 Kaduna Chat</span><span id="online-count" style="font-size:11px;color:#999;">1 here</span></div><div id="chat-log" style="height:240px;overflow-y:auto;font-size:12px;margin-bottom:8px;border:1px solid #eee;border-radius:8px;padding:8px;background:#fff;"></div><div style="display:flex;gap:4px;"><input id="chat-input" type="text" placeholder="Type message..." style="flex:1;padding:8px 10px;border:1px solid #ddd;border-radius:8px;font-family:inherit;font-size:12px;" onkeydown="if(event.key===\'Enter\')sendChatMsg()" /><button onclick="sendChatMsg()" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600;">Send</button></div>'+backBtn;
+    return;
+  }
+  if(appId==="map"){
+    const major=MAP_LOCATIONS.filter(l=>l.major), minor=MAP_LOCATIONS.filter(l=>!l.major);
+    const safeName=(n)=>String(n||"").replace(/'/g,"").replace(/"/g,"");
+    c.innerHTML='<div style="font-size:14px;margin-bottom:8px;font-weight:700;color:var(--green);">🗺️ Kaduna Map</div><div style="background:var(--green);color:#fff;border-radius:10px;padding:8px;margin-bottom:10px;font-size:11px;">📍 Major Locations — tap to travel there</div>'+major.map(l=>'<div onclick="window.travelToPlace(\''+safeName(l.name)+'\')" style="padding:8px;background:#e8f5e9;border-radius:8px;margin-bottom:5px;font-size:12px;font-weight:600;color:var(--green);cursor:pointer;">📍 '+l.name+'<div style="font-size:10px;color:#666;font-weight:400;">'+l.desc+'</div></div>').join("")+'<div style="font-size:11px;color:#666;margin:10px 0 6px;font-weight:600;">More Places in Kaduna:</div>'+minor.map(l=>'<div style="padding:6px 8px;font-size:11px;color:#666;">• '+l.name+' — '+l.desc+'</div>').join("")+backBtn;
+    return;
+  }
+  if(appId==="daily"){
+    c.innerHTML='<div style="font-size:14px;margin-bottom:8px;font-weight:700;color:var(--green);">🎁 Daily Rewards</div><div id="daily-content" style="font-size:12px;color:#666;">Loading...</div><div style="font-size:14px;margin:14px 0 8px;font-weight:700;color:var(--green);">Daily Quests</div><div id="quests-content" style="font-size:12px;color:#666;">Loading...</div>'+backBtn;
+    loadDaily();
+    return;
+  }
+  if(appId==="richlist"){
+    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">🏆 Kaduna Rich List</div><div id="richlist-content" style="font-size:12px;color:#666;">Loading...</div>'+backBtn;
+    subscribeRichList((list)=>{const el=document.getElementById("richlist-content");if(el)el.innerHTML=list.length?list.map((p,i)=>'<div style="display:flex;justify-content:space-between;padding:8px;border-bottom:1px solid #eee;"><span style="font-weight:600;">'+(i+1)+'. '+p.name+'</span><span style="font-weight:700;color:var(--green);">₦'+p.balance.toLocaleString()+'</span></div>').join(""):"No data yet.";});
+    return;
+  }
+  if(appId==="health"){
+    const s=game.state;
+    const sickness = (s.needs.hygiene<15)?"🤒 Sick — low hygiene":(s.needs.energy<10)?"😴 Exhausted — sleep needed":"😊 Healthy";
+    const sicknessColor = (s.needs.hygiene<15||s.needs.energy<10)?"#e11d48":"#2e7d4f";
+    const meds=[
+      {id:"panadol",name:"Panadol",emoji:"💊",price:200,desc:"Cures headache · Energy +10"},
+      {id:"antimalarial",name:"Antimalarial",emoji:"💉",price:800,desc:"Cures malaria · Hygiene +20"},
+      {id:"energydrink",name:"Energy Drink",emoji:"🥤",price:350,desc:"Energy +30"},
+      {id:"vitamins",name:"Vitamins",emoji:"🍊",price:500,desc:"Boost all needs +5"},
+    ];
+    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">💊 Health Clinic</div><div style="background:'+sicknessColor+';color:#fff;border-radius:10px;padding:14px;margin-bottom:14px;text-align:center;"><div style="font-size:20px;font-weight:700;">'+sickness+'</div><div style="font-size:11px;opacity:0.85;margin-top:4px;">Hygiene: '+Math.round(s.needs.hygiene)+'% · Energy: '+Math.round(s.needs.energy)+'%</div></div><div style="font-size:12px;font-weight:600;margin-bottom:6px;color:#666;">Pharmacy:</div>'+meds.map(m=>'<div style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid #eee;border-radius:8px;margin-bottom:6px;"><span style="font-size:22px;">'+m.emoji+'</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;">'+m.name+'</div><div style="font-size:11px;color:#666;">'+m.desc+'</div></div><button onclick="window.buyMed(\''+m.id+'\')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;">₦'+m.price+'</button></div>').join("")+backBtn;
+    return;
+  }
+  if(appId==="profile"){
+    const rank=game.getRank();
+    const needs=game.state.needs;
+    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">👤 Your Profile</div><div style="text-align:center;padding:14px;background:linear-gradient(135deg,var(--green),#1a1a2e);color:#fff;border-radius:14px;margin-bottom:14px;"><div style="font-size:48px;">🧑</div><div style="font-size:16px;font-weight:700;margin-top:6px;">'+(getMyName()||"Player")+'</div><div style="font-size:11px;opacity:0.85;margin-top:2px;">UID: '+(getMyUid()||"guest").slice(0,12)+'</div></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;"><div style="background:var(--cream);border-radius:10px;padding:10px;text-align:center;"><div style="font-size:11px;color:#666;">Rank</div><div style="font-size:14px;font-weight:700;color:'+rank.color+';">'+rank.name+'</div></div><div style="background:var(--cream);border-radius:10px;padding:10px;text-align:center;"><div style="font-size:11px;color:#666;">Balance</div><div style="font-size:14px;font-weight:700;color:var(--green);">₦'+game.state.money.toLocaleString()+'</div></div></div><div style="background:var(--cream);border-radius:10px;padding:10px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--green);">Needs Status</div>'+NEEDS.map(n=>{const v=Math.round(needs[n.key]||0);const color=v<20?'#e11d48':v<40?'#f2b134':'#2e7d4f';return '<div style="display:flex;align-items:center;gap:6px;font-size:11px;margin-bottom:4px;"><span>'+n.icon+'</span><div style="flex:1;height:6px;background:#e0ddd5;border-radius:3px;overflow:hidden;"><div style="height:100%;width:'+v+'%;background:'+color+';transition:width .3s;"></div></div><span style="width:30px;text-align:right;color:#666;">'+v+'%</span></div>';}).join("")+'</div>'+backBtn;
+    return;
+  }
+  if(appId==="events"){
+    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">🎉 Live Events</div><div id="events-content" style="font-size:12px;color:#666;">Loading active events...</div>'+backBtn;
+    onValue(ref(db,"events"),(snap)=>{
+      const data=snap.val()||{};
+      const list=Object.entries(data).filter(([,e])=>!e.endsAt||e.endsAt>Date.now());
+      const el=document.getElementById("events-content");
+      if(el) el.innerHTML=list.length?list.map(([k,e])=>{
+        const left=e.endsAt?Math.max(0,Math.floor((e.endsAt-Date.now())/60000))+" min left":"";
+        return '<div style="padding:10px;background:#fff3e0;border-radius:10px;margin-bottom:8px;"><div style="font-size:14px;font-weight:600;color:var(--green);">'+(e.icon||"🎉")+' '+e.name+'</div><div style="font-size:11px;color:#666;margin-top:2px;">'+(e.bonus||"")+'</div>'+(left?'<div style="font-size:10px;color:#999;margin-top:4px;">⏱ '+left+'</div>':'')+'</div>';
+      }).join(""):'<div style="text-align:center;color:#999;padding:20px;">No active events right now. Check back later!</div>';
+    });
+    return;
+  }
+  if(appId==="news"){
+    const news=[
+      {time:"Today",title:"Sallah Festival Approaching",body:"Hamdala Hotel preparing for the biggest Sallah celebration in Kaduna. Free food for all residents!"},
+      {time:"Yesterday",title:"Kaduna Poly Students Win Tech Competition",body:"Students from Kaduna Polytechnic took first place at the Northern Nigeria tech hackathon."},
+      {time:"This Week",title:"Market Day at Kawo",body:"Kawo Market now open late. Best suya spots and fresh produce. Bring your keke!"},
+      {time:"This Week",title:"Football Match at Ahmadu Bello Stadium",body:"Kaduna United vs Rangers — Friday 4 PM. Free entry for first 100 students."},
+      {time:"Recent",title:"Railway Station Modernization",body:"Rigasa Train Station gets new Lagos-Kaduna route. Travel time now under 3 hours."},
+    ];
+    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">📰 Kaduna Gist</div>'+news.map(n=>'<div style="padding:10px;border-bottom:1px solid #eee;margin-bottom:6px;"><div style="font-size:10px;color:#999;text-transform:uppercase;">'+n.time+'</div><div style="font-size:13px;font-weight:600;color:var(--ink);margin-top:2px;">'+n.title+'</div><div style="font-size:11px;color:#666;margin-top:4px;line-height:1.4;">'+n.body+'</div></div>').join("")+backBtn;
+    return;
+  }
+  if(appId==="boutique"){
+    const items=[
+      {id:"ankara",name:"Ankara Outfit",emoji:"👗",price:3000,desc:"Beautiful African print · Fun +15"},
+      {id:"babanriga",name:"Baban Riga",emoji:"🧥",price:8000,desc:"Northern Nigeria traditional · Social +20"},
+      {id:"kufi",name:"Kufi Cap",emoji:"🎩",price:1500,desc:"Traditional cap · Status boost"},
+      {id:"agbada",name:"Agbada Set",emoji:"🥻",price:6500,desc:"Flowing robe · Social +15 · Fun +10"},
+      {id:"sneakers",name:"Designer Sneakers",emoji:"👟",price:4000,desc:"Move faster · Energy +5"},
+      {id:"watch",name:"Gold Watch",emoji:"⌚",price:12000,desc:"Status symbol · Rank boost"},
+    ];
+    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">👕 Kaduna Boutique</div>'+items.map(it=>'<div style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid #eee;border-radius:8px;margin-bottom:6px;"><span style="font-size:24px;">'+it.emoji+'</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;">'+it.name+'</div><div style="font-size:11px;color:#666;">'+it.desc+'</div></div><button onclick="window.buyClothing(\''+it.id+'\','+it.price+',\''+it.name.replace(/'/g,"")+'\')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;">₦'+it.price+'</button></div>').join("")+backBtn;
+    return;
+  }
+  if(appId==="contacts"){
+    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">📲 Contacts</div><div id="contacts-list" style="font-size:12px;">Loading players...</div>'+backBtn;
+    onValue(ref(db,"players"),(snap)=>{
+      const data=snap.val()||{};
+      const myUid=getMyUid();
+      const list=Object.entries(data).filter(([uid])=>uid!==myUid).slice(0,20);
+      const el=document.getElementById("contacts-list");
+      if(el) el.innerHTML=list.length?list.map(([uid,p])=>{const nm=(p.name||"Player").replace(/'/g,"");return '<div style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid #eee;"><div style="width:32px;height:32px;background:var(--green);color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;">'+(p.name||"?").charAt(0).toUpperCase()+'</div><div style="flex:1;"><div style="font-size:13px;font-weight:600;">'+(p.name||"Unknown")+'</div><div style="font-size:10px;color:#999;">'+(p.x||0).toFixed(0)+', '+(p.z||0).toFixed(0)+'</div></div><button onclick="window.sendMessage(\''+uid+'\',\''+nm+'\')" style="background:var(--green);color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;">Wave 👋</button></div>';}).join(""):'<div style="text-align:center;padding:20px;color:#999;">No other players online right now.</div>';
+    });
+    return;
+  }
+  if(appId==="settings"){
+    const s=game.state;
+    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">⚙️ Settings</div><div style="background:var(--cream);border-radius:10px;padding:12px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:8px;">Game</div><button onclick="window.saveGame()" style="width:100%;background:var(--green);color:#fff;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:13px;font-weight:600;margin-bottom:6px;">💾 Save Game</button><button onclick="window.resetGame()" style="width:100%;background:#e11d48;color:#fff;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:13px;font-weight:600;">🗑 Reset Game (lose all progress)</button></div><div style="background:var(--cream);border-radius:10px;padding:12px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">Account</div><div style="font-size:11px;color:#666;">Signed in as: <b>'+(getMyName()||"Guest")+'</b></div><div style="font-size:10px;color:#999;margin-top:4px;">UID: '+(getMyUid()||"guest").slice(0,20)+'</div></div><div style="background:var(--cream);border-radius:10px;padding:12px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">About</div><div style="font-size:11px;color:#666;line-height:1.5;">Kaduna Lifestyle v0.3 — A 3D multiplayer life-sim set in Kaduna, Nigeria. Built with Three.js + Firebase.</div></div>'+backBtn;
+    return;
+  }
+  if(appId==="admin"){
+    if(!isAdmin()){toast("Admin access required");return;}
+    showAdminDashboard(); closePhone();
+    return;
+  }
+  // fallback (shouldn't reach here)
+  c.innerHTML='<div style="padding:20px;text-align:center;color:#666;font-size:13px;">App "'+appId+'" not found.</div>'+backBtn;
 }
 window.showApp=showPhoneApp;
 window.buyFood=(id)=>{const r=game.eat(id);toast(r.msg||r.error);updateHUD();if(r.ok)showPhoneApp("food");};
 window.doJob=(id)=>{const r=game.work(id);toast(r.msg||r.error);updateHUD();if(r.ok)showPhoneApp("jobs");};
+window.buyMed=(id)=>{
+  const meds={panadol:{price:200,energy:10,hygiene:0,all:0},antimalarial:{price:800,energy:0,hygiene:20,all:0},energydrink:{price:350,energy:30,hygiene:0,all:0},vitamins:{price:500,energy:5,hygiene:5,all:5}};
+  const m=meds[id]; if(!m){toast("Unknown medicine");return;}
+  if(game.state.money<m.price){toast("Not enough money");return;}
+  game.state.money-=m.price;
+  game.state.needs.energy=Math.min(100,(game.state.needs.energy||0)+m.energy);
+  game.state.needs.hygiene=Math.min(100,(game.state.needs.hygiene||0)+m.hygiene);
+  if(m.all){for(const n of NEEDS){game.state.needs[n.key]=Math.min(100,(game.state.needs[n.key]||0)+m.all);}}
+  game.save?.(); updateHUD(); toast("Medicine taken! Feel better now.");
+  showPhoneApp("health");
+};
+window.buyClothing=(id,price,name)=>{
+  if(game.state.money<price){toast("Not enough money for "+name);return;}
+  game.state.money-=price;
+  game.state.needs.fun=Math.min(100,(game.state.needs.fun||0)+15);
+  game.state.needs.social=Math.min(100,(game.state.needs.social||0)+10);
+  game.save?.(); updateHUD(); toast(name+" purchased! You look sharp.");
+  showPhoneApp("boutique");
+};
+window.travelToPlace=(name)=>{
+  toast("Opening travel to "+name+"...");
+  showPhoneApp("ride");
+};
+window.sendMessage=(uid,name)=>{
+  sendChat("👋 Hi "+name+"!");
+  toast("Waved at "+name);
+};
+window.saveGame=()=>{game.save?.();toast("Game saved!");};
+window.resetGame=()=>{
+  if(!confirm("Reset all progress? You'll lose your money, needs, and rank."))return;
+  localStorage.removeItem("kaduna-state");
+  location.reload();
+};
 window.bookRide=(rideId)=>{const destSel=document.getElementById("ride-dest-"+rideId);if(!destSel)return;const zoneId=destSel.value;const ride=RIDES.find(r=>r.id===rideId);if(game.state.money<ride.price){toast("Not enough money for "+ride.name);return;}game.state.money-=ride.price;closePhone();startRide(rideId,zoneId,game.state.money,()=>{},(result)=>{if(result.ok){toast("Welcome to "+result.zone.name+"!");travelToZone(getMyUid(),result.zone.id);const titleEl=document.querySelector(".chip.title");if(titleEl)titleEl.firstChild.textContent="📍 "+result.zone.name;const subEl=document.getElementById("zone-sub");if(subEl)subEl.textContent=result.zone.desc;updateHUD();player.pos.set(-9,0,11);player.heading=Math.PI;}else{toast(result.error||"Travel failed");}});};
 window.sendChatMsg=function(){const i=$("chat-input");if(i&&i.value.trim()){sendChat(i.value);i.value="";}};
 
@@ -139,15 +290,15 @@ async function loadDaily() {
   const dcEl = document.getElementById("daily-content");
   if (dcEl) {
     if (status.claimed) {
-      dcEl.innerHTML = `<div style="padding:10px;background:#e8f5e9;border-radius:8px;color:var(--green);font-weight:600;">✓ Claimed today! Streak: ${status.streak} days</div>`;
+      dcEl.innerHTML = '<div style="padding:10px;background:#e8f5e9;border-radius:8px;color:var(--green);font-weight:600;">✓ Claimed today! Streak: '+status.streak+' days</div>';
     } else {
       const nextReward = DAILY_REWARDS[Math.min(status.streak, 6)];
-      dcEl.innerHTML = `<div style="padding:10px;background:#fff3e0;border-radius:8px;"><div style="font-weight:600;color:var(--green);">Day ${status.streak + 1}: ₦${nextReward.money.toLocaleString()}</div><button onclick="window.claimDaily()" style="margin-top:6px;background:var(--green);color:#fff;border:none;border-radius:6px;padding:6px 16px;cursor:pointer;font-size:12px;font-weight:600;">Claim Now</button></div>`;
+      dcEl.innerHTML = '<div style="padding:10px;background:#fff3e0;border-radius:8px;"><div style="font-weight:600;color:var(--green);">Day '+(status.streak + 1)+': ₦'+nextReward.money.toLocaleString()+'</div><button onclick="window.claimDaily()" style="margin-top:6px;background:var(--green);color:#fff;border:none;border-radius:6px;padding:6px 16px;cursor:pointer;font-size:12px;font-weight:600;">Claim Now</button></div>';
     }
   }
   const qEl = document.getElementById("quests-content");
   if (qEl) {
-    qEl.innerHTML = status.quests.map(q => `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #eee;"><div style="flex:1;">${q.desc}</div><div style="font-size:11px;color:var(--green);font-weight:600;">₦${q.reward}</div>${q.done ? '<span style="color:#2e7d4f;">✓</span>' : `<button onclick="window.claimQuest('${q.id}')" style="background:var(--green);color:#fff;border:none;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:10px;">Claim</button>`}</div>`).join("");
+    qEl.innerHTML = status.quests.map(q => '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #eee;"><div style="flex:1;">'+q.desc+'</div><div style="font-size:11px;color:var(--green);font-weight:600;">₦'+q.reward+'</div>'+(q.done ? '<span style="color:#2e7d4f;">✓</span>' : '<button onclick="window.claimQuest(\''+q.id+'\')" style="background:var(--green);color:#fff;border:none;border-radius:4px;padding:2px 8px;cursor:pointer;font-size:10px;">Claim</button>')+'</div>').join("");
   }
 }
 window.claimDaily = async function() {
@@ -158,7 +309,7 @@ window.claimDaily = async function() {
     game.state.money += reward.money;
     game.save?.();
     updateHUD();
-    toast(`${reward.label} claimed!`);
+    toast(reward.label+' claimed!');
     loadDaily();
   } else {
     toast("Already claimed today!");
@@ -171,7 +322,7 @@ window.claimQuest = async function(questId) {
   if (reward) {
     game.state.money += reward;
     updateHUD();
-    toast(`Quest reward: ₦${reward}`);
+    toast('Quest reward: ₦'+reward);
     loadDaily();
   }
 };
@@ -193,13 +344,13 @@ initAuth((user) => {
       const log=$("chat-log"); if(!log)return;
       const div=document.createElement("div");
       div.style.cssText="padding:4px 6px;border-bottom:1px solid #eee;";
-      div.innerHTML=`<b style="color:${msg.uid===getMyUid()?"var(--green)":"#1d5fa8"};">${msg.name}:</b> ${msg.text}`;
+      div.innerHTML='<b style="color:'+(msg.uid===getMyUid()?"var(--green)":"#1d5fa8")+';">'+msg.name+':</b> '+msg.text;
       log.appendChild(div); log.scrollTop=log.scrollHeight;
       while(log.children.length>30) log.removeChild(log.firstChild);
     });
   // Check daily reward on login
   checkDailyReward(user.uid).then((reward) => {
-    if (reward) { game.state.money += reward.money; updateHUD(); toast(`${reward.label}! Welcome back.`); }
+    if (reward) { game.state.money += reward.money; updateHUD(); toast(reward.label+'! Welcome back.'); }
   });
 });
 initAdmin((user) => {
@@ -235,7 +386,7 @@ onValue(ref(db, "events"), (snap) => {
   for (const [k, e] of Object.entries(data)) {
     if (!_shownEvents[k] && e.icon && e.name) {
       _shownEvents[k] = true;
-      toast(`${e.icon} ${e.name}! ${e.bonus || ""}`);
+      toast(e.icon+' '+e.name+'! '+(e.bonus || ""));
     }
   }
 });

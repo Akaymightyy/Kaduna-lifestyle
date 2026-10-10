@@ -290,17 +290,58 @@ export function buildWorld(scene) {
     cm.castShadow = true; world.add(cm);
   }
 
-  // ---- street lights ----
+  // ---- street lights (real PointLights everywhere) ----
+  // Dense lamp grid on both sidewalks so night is bright and walkable
   const lampPos = [];
-  for (let x = -WORLD_HALF_X + 12; x < WORLD_HALF_X; x += 24) for (const side of [1, -1]) lampPos.push([x, side * (ROAD_HALF + 0.7), side]);
+  for (let x = -WORLD_HALF_X + 8; x < WORLD_HALF_X; x += 14) for (const side of [1, -1]) lampPos.push([x, side * (ROAD_HALF + 0.7), side]);
+  // Also add lamps on side streets
+  for (const sx of SIDE_STREETS) for (let z = -50; z <= 50; z += 14) lampPos.push([sx, z, 0]);
+  // Lamps at every crossing
+  for (const cx of CROSSINGS) for (const side of [1, -1]) lampPos.push([cx, side * (ROAD_HALF + 0.7), side]);
+
   const poles = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.07, 0.1, 6.2, 6).translate(0, 3.1, 0), new THREE.MeshLambertMaterial({ color: 0x4a4f55 }), lampPos.length);
-  const heads = new THREE.InstancedMesh(new THREE.BoxGeometry(1.5, 0.18, 0.45).translate(-0.6, 0, 0), new THREE.MeshBasicMaterial({ color: 0x555555 }), lampPos.length);
+  // Lamp head — emissive warm yellow so it glows at night even without the point light
+  const headMat = new THREE.MeshStandardMaterial({ color: 0xfff0b0, emissive: 0xffd070, emissiveIntensity: 0.6 });
+  const heads = new THREE.InstancedMesh(new THREE.BoxGeometry(1.5, 0.18, 0.45).translate(-0.6, 0, 0), headMat, lampPos.length);
+  // Lamp bulb glow sphere — visible warm glow under each lamp
+  const bulbMat = new THREE.MeshBasicMaterial({ color: 0xfff0b0, transparent: true, opacity: 0.85 });
+  const bulbs = new THREE.InstancedMesh(new THREE.SphereGeometry(0.18, 8, 6).translate(-1.2, 0, 0), bulbMat, lampPos.length);
   lampPos.forEach(([x, z, side], i) => {
     m4.makeTranslation(x, 0, z); poles.setMatrixAt(i, m4);
     m4.compose(new THREE.Vector3(x, 6.2, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), side > 0 ? 0 : Math.PI), new THREE.Vector3(1, 1, 1));
     heads.setMatrixAt(i, m4);
+    bulbs.setMatrixAt(i, m4);
   });
-  world.add(poles, heads);
+  world.add(poles, heads, bulbs);
+
+  // Real PointLights — sample every 3rd lamp for performance (still ~30 lit lamps at night)
+  const lampLights = [];
+  for (let i = 0; i < lampPos.length; i += 3) {
+    const [x, z] = lampPos[i];
+    const pl = new THREE.PointLight(0xffd070, 0, 18, 2.0);
+    pl.position.set(x, 6.0, z);
+    world.add(pl);
+    lampLights.push(pl);
+  }
+  // Also one bright light at each landmark (Mosque, Market, Petrol, Keke Park)
+  const landmarkLights = [
+    { x: 48, z: 34, color: 0xfff0b0 },    // Central Mosque
+    { x: -30, z: -25, color: 0xff8030 },  // Market (warm orange)
+    { x: -110, z: 28, color: 0xffe070 },  // Petrol station
+    { x: 60, z: -28, color: 0xfff0b0 },   // Keke park
+  ];
+  for (const L of landmarkLights) {
+    const pl = new THREE.PointLight(L.color, 0, 25, 2.0);
+    pl.position.set(L.x, 8, L.z);
+    world.add(pl);
+    lampLights.push(pl);
+  }
+
+  // Window-glow texture for buildings at night — emissive map on a few random buildings
+  // (handled by adding emissive windows material)
+  const nightWindowMat = new THREE.MeshBasicMaterial({ color: 0xffe090, transparent: true, opacity: 0 });
+  const windowGlowGroup = new THREE.Group();
+  world.add(windowGlowGroup);
 
   // ---- bus stops + billboards ----
   const busStopTex = labelTexture("BUS STOP", 256, 64, "#f2b134", "#12261e", 36);
@@ -321,5 +362,5 @@ export function buildWorld(scene) {
     colliders.push({ minX: bx - 0.3, maxX: bx + 0.3, minZ: z - 0.3, maxZ: z + 0.3 });
   }
 
-  return { world, colliders, mapShapes, lamps: heads, ground, buildingsMesh: buildings };
+  return { world, colliders, mapShapes, lamps: heads, lampLights, ground, buildingsMesh: buildings };
 }

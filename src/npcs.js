@@ -1,48 +1,119 @@
-// src/npcs.js — AI pedestrians walking on sidewalks
+// src/npcs.js — AI pedestrians walking on sidewalks (real GLB human models)
 import * as THREE from "three";
-import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { ROAD_HALF, WORLD_HALF_X, CROSSINGS, rng } from "./config.js";
 
-const NPC_COLORS = [0x1f7a5a, 0x2b3a55, 0xc0392b, 0x1d5fa8, 0x7a3b8f, 0xd98e2b, 0x2e7d4f, 0x8a5a3c, 0x6b4a8a, 0x555a60];
+// Available character models (Kaduna-appropriate mix)
+const NPC_MODELS = [
+  "/models/male-polo.glb",
+  "/models/male-kaftan.glb",
+  "/models/male-hoodie.glb",
+  "/models/female-polo.glb",
+  "/models/female-kaftan.glb",
+  "/models/female-hoodie.glb",
+];
+
+const NPC_COUNT = 14; // keep modest for perf
 
 export function createNPCs(scene) {
   const R = rng(9988);
-  const count = 15;
   const npcs = [];
+  const loader = new GLTFLoader();
+  let loaded = 0;
 
-  // Build a simple pedestrian mesh (capsule body + sphere head) — one InstancedMesh
-  const bodyGeo = new THREE.CapsuleGeometry(0.25, 0.6, 4, 6).translate(0, 0.55, 0);
-  const headGeo = new THREE.SphereGeometry(0.22, 8, 6).translate(0, 1.15, 0);
-  const merged = mergeGeometries([bodyGeo, headGeo]);
-  const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
-  const mesh = new THREE.InstancedMesh(merged, mat, count);
-  mesh.castShadow = true;
-  mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(count * 3), 3);
-  scene.add(mesh);
+  // Bone-rotation utility (same approach as player.js)
+  const _ax = new THREE.Vector3(), _q = new THREE.Quaternion();
+  const base = (n) => n.replace(/^mixamorig[:_]?/i, "").replace(/_\d+$/, "");
+  const want = ["LeftArm","RightArm","LeftForeArm","RightForeArm","LeftUpLeg","RightUpLeg","LeftLeg","RightLeg"];
+  function findBones(model) {
+    const bones = {};
+    model.traverse((o) => {
+      if (!o.isBone) return;
+      const key = base(o.name);
+      if (!want.includes(key) || (o.parent && base(o.parent.name) === key)) return;
+      (bones[key] ||= []).push({ bone: o, rest: o.quaternion.clone() });
+    });
+    return bones;
+  }
+  function turn(bones, name, angle) {
+    _ax.set(1, 0, 0); _q.setFromAxisAngle(_ax, angle);
+    for (const b of bones[name] || []) b.bone.quaternion.copy(b.rest).multiply(_q);
+  }
 
-  // Initialize NPC positions — on sidewalks, walking along X
-  for (let i = 0; i < count; i++) {
+  function makeWalker(model) {
+    const bones = findBones(model);
+    let phase = R() * Math.PI * 2;
+    function animate(dt, speed) {
+      phase += dt * (5 + speed * 1.4);
+      const sw = Math.sin(phase), amp = Math.min(1, speed / 2.5);
+      if (speed > 0.15) {
+        model.position.y = Math.abs(sw) * 0.04 * amp;
+        turn(bones, "LeftUpLeg", sw * 0.6 * amp);
+        turn(bones, "RightUpLeg", -sw * 0.6 * amp);
+        turn(bones, "LeftLeg", Math.max(0, -sw) * 0.8 * amp);
+        turn(bones, "RightLeg", Math.max(0, sw) * 0.8 * amp);
+        // Arm swing
+        turn(bones, "LeftArm", -sw * 0.5 * amp);
+        turn(bones, "RightArm", sw * 0.5 * amp);
+      } else {
+        turn(bones, "LeftUpLeg", 0); turn(bones, "RightUpLeg", 0);
+        turn(bones, "LeftLeg", 0); turn(bones, "RightLeg", 0);
+        turn(bones, "LeftArm", 0.04); turn(bones, "RightArm", 0.04);
+      }
+    }
+    return { animate };
+  }
+
+  function normalizeModel(model, targetHeight = 1.75) {
+    const box = new THREE.Box3().setFromObject(model);
+    const size = box.getSize(new THREE.Vector3());
+    const k = targetHeight / size.y;
+    model.scale.setScalar(k);
+    model.position.set(-box.min.x * k - size.x * k / 2, -box.min.y * k, -box.min.z * k - size.z * k / 2);
+    model.traverse((o) => {
+      if (!o.isMesh) return;
+      o.castShadow = true; o.frustumCulled = false;
+      if (o.material) {
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        mats.forEach(m => { m.metalness = 0; m.roughness = 0.9; });
+      }
+    });
+  }
+
+  // Spawn NPC state first (positions, directions)
+  for (let i = 0; i < NPC_COUNT; i++) {
     const side = R() < 0.5 ? 1 : -1;
     npcs.push({
       x: -WORLD_HALF_X + R() * WORLD_HALF_X * 2,
       z: side * (ROAD_HALF + 3 + R() * 3),
       dir: R() < 0.5 ? 1 : -1,
-      speed: 0.8 + R() * 0.6,
+      speed: 0.7 + R() * 0.5,
       heading: 0,
-      color: new THREE.Color(NPC_COLORS[Math.floor(R() * NPC_COLORS.length)]),
       walkPhase: R() * Math.PI * 2,
+      group: null,
+      walker: null,
+      ready: false,
     });
   }
 
-  const m4 = new THREE.Matrix4();
-  const q = new THREE.Quaternion();
-  const pos = new THREE.Vector3();
-  const scl = new THREE.Vector3(1, 1, 1);
-  const up = new THREE.Vector3(0, 1, 0);
+  // Load each NPC with a random model
+  npcs.forEach((n, i) => {
+    const url = NPC_MODELS[i % NPC_MODELS.length];
+    loader.load(url, (gltf) => {
+      const model = gltf.scene;
+      normalizeModel(model, 1.7 + R() * 0.15);
+      const group = new THREE.Group();
+      group.add(model);
+      scene.add(group);
+      n.group = group;
+      n.model = model;
+      n.walker = makeWalker(model);
+      n.ready = true;
+    }, undefined, () => { n.ready = false; });
+  });
 
   function update(dt, now) {
-    for (let i = 0; i < npcs.length; i++) {
-      const n = npcs[i];
+    for (const n of npcs) {
       // Walk along X
       n.x += n.dir * n.speed * dt;
       n.walkPhase += dt * (4 + n.speed * 2);
@@ -53,26 +124,18 @@ export function createNPCs(scene) {
 
       // Occasionally cross the road at a zebra crossing
       if (Math.random() < 0.001) {
-        const nearest = CROSSINGS.reduce((prev, curr) => Math.abs(curr - n.x) < Math.abs(prev - n.x) ? curr : prev);
-        if (Math.abs(n.x - nearest) < 5) {
-          n.z = -n.z; // switch side
-        }
+        const nearest = CROSSINGS.reduce((p, c) => Math.abs(c - n.x) < Math.abs(p - n.x) ? c : p);
+        if (Math.abs(n.x - nearest) < 5) n.z = -n.z;
       }
 
-      // Set heading based on direction
       n.heading = n.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
 
-      // Bob up and down slightly (walking)
-      const bob = Math.abs(Math.sin(n.walkPhase)) * 0.04;
-
-      pos.set(n.x, bob, n.z);
-      q.setFromAxisAngle(up, n.heading);
-      m4.compose(pos, q, scl);
-      mesh.setMatrixAt(i, m4);
-      mesh.setColorAt(i, n.color);
+      if (n.ready && n.group) {
+        n.group.position.set(n.x, 0, n.z);
+        n.group.rotation.y = n.heading;
+        n.walker.animate(dt, n.speed);
+      }
     }
-    mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   }
 
   return { update, npcs };

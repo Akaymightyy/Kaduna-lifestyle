@@ -582,6 +582,8 @@ function loadAdminAnalytics() {
 
 function toast(msg) { const t=document.getElementById("toast"); if(t){t.textContent=msg;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2500);} }
 
-window.adminTab = adminTab;
-window.showAdminDashboard = showAdminDashboard;
-window.hideAdminDashboard = hideAdminDashboard;
+// Public wrappers — all gate on isAdmin() so non-admins can't trigger anything
+// even by calling these from the devtools console.
+window.adminTab = (tab) => { if (_isAdmin) adminTab(tab); else toast("Access denied"); };
+window.showAdminDashboard = () => { if (_isAdmin) showAdminDashboard(); else toast("Admin access required"); };
+window.hideAdminDashboard = () => { if (_isAdmin) hideAdminDashboard(); };
