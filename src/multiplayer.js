@@ -1,174 +1,59 @@
-// src/multiplayer.js — real-time player presence + chat using Firebase Realtime DB
-import { auth, db, ref, onValue, set, update, onDisconnect, remove, push, serverTimestamp, onAuthStateChanged } from "./firebase.js";
+// src/multiplayer.js — real-time presence + chat
+import { auth, db } from "./firebase.js";
+import { ref, onValue, set, update, onDisconnect, push, serverTimestamp } from "firebase/database";
+import { onAuthStateChanged } from "firebase/auth";
 
-// Player presence: each player writes their position/heading to
-//   /players/{uid} = { name, x, z, heading, lastSeen, color }
-// On disconnect, the entry is removed.
-// Other players' entries are listened to and rendered as simple avatar capsules.
+const AVATAR_COLORS = ["#e11d48","#1d5fa8","#2e7d4f","#f2b134","#7a3b8f","#c0392b","#1a1a2e","#0f4d3a"];
+let _uid=null, _name="Guest", _players={}, _meshes={}, _scene=null, _sendT=null, _onCount=null, _onChat=null;
 
-const AVATAR_COLORS = ["#e11d48", "#1d5fa8", "#2e7d4f", "#f2b134", "#7a3b8f", "#c0392b", "#1a1a2e", "#0f4d3a"];
-let _myUid = null;
-let _myName = "Guest";
-let _players = {};     // uid -> { name, x, z, heading, color }
-let _avatarMeshes = {}; // uid -> THREE.Group
-let _scene = null;
-let _sendInterval = null;
-let _onPlayerCount = null;
-let _onChatMsg = null;
-let _chatRef = null;
-
-export function initMultiplayer(scene, onPlayerCount, onChatMsg) {
-  _scene = scene;
-  _onPlayerCount = onPlayerCount;
-  _onChatMsg = onChatMsg;
-
+export function initMultiplayer(scene, onCount, onChat) {
+  _scene=scene; _onCount=onCount; _onChat=onChat;
   onAuthStateChanged(auth, (user) => {
     if (!user) return;
-    _myUid = user.uid;
-    _myName = user.displayName || user.email?.split("@")[0] || "Guest";
-    if (user.isAnonymous) _myName = "Guest" + Math.floor(Math.random() * 9999);
-
-    // Write initial presence
-    const playerRef = ref(db, "players/" + _myUid);
-    set(playerRef, {
-      name: _myName,
-      x: -9, z: 11, heading: Math.PI,
-      color: AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)],
-      lastSeen: serverTimestamp()
-    });
-
-    // Remove on disconnect
-    onDisconnect(playerRef).remove();
-
-    // Listen for all players
-    const allPlayersRef = ref(db, "players");
-    onValue(allPlayersRef, (snap) => {
-      _players = snap.val() || {};
-      // Remove self from the list
-      delete _players[_myUid];
-      // Update avatars
-      updateAvatars();
-      // Report player count
-      if (_onPlayerCount) _onPlayerCount(Object.keys(_players).length + 1);
-    });
-
-    // Listen for chat messages
-    _chatRef = ref(db, "chat");
-    onValue(_chatRef, (snap) => {
-      const msgs = snap.val() || {};
-      const arr = Object.values(msgs).sort((a, b) => (a.ts || 0) - (b.ts || 0));
-      // Only fire for new messages
-      if (arr.length > 0 && _onChatMsg) {
-        _onChatMsg(arr[arr.length - 1], arr.length);
-      }
-    });
+    _uid=user.uid;
+    _name=user.displayName||user.email?.split("@")[0]||("Guest"+Math.floor(Math.random()*9999));
+    const pRef=ref(db,"players/"+_uid);
+    set(pRef,{name:_name,x:-9,z:11,heading:Math.PI,color:AVATAR_COLORS[Math.floor(Math.random()*AVATAR_COLORS.length)],ts:serverTimestamp()});
+    onDisconnect(pRef).remove();
+    onValue(ref(db,"players"),(s)=>{ _players=s.val()||{}; delete _players[_uid]; updateAvatars(); _onCount?.(Object.keys(_players).length+1); });
+    onValue(ref(db,"chat"),(s)=>{ const m=s.val()||{}; const a=Object.values(m).sort((x,y)=>(x.ts||0)-(y.ts||0)); if(a.length&&_onChat) _onChat(a[a.length-1],a.length); });
   });
 }
 
-// Send player position to Firebase (throttled to ~5x/second)
-export function sendPosition(x, z, heading) {
-  if (!_myUid) return;
-  // Throttle: only send every 200ms
-  if (_sendInterval) return;
-  _sendInterval = setTimeout(() => { _sendInterval = null; }, 200);
-  update(ref(db, "players/" + _myUid), { x, z, heading, lastSeen: serverTimestamp() });
+export function sendPosition(x,z,heading) {
+  if(!_uid) return;
+  if(_sendT) return; _sendT=setTimeout(()=>{_sendT=null;},200);
+  update(ref(db,"players/"+_uid),{x,z,heading,ts:serverTimestamp()});
 }
 
-// Send a chat message
 export function sendChat(text) {
-  if (!_myUid || !text.trim()) return;
-  const chatRef = ref(db, "chat");
-  push(chatRef, {
-    uid: _myUid,
-    name: _myName,
-    text: text.trim().slice(0, 200),
-    ts: Date.now()
-  });
-  // Clean up old messages (keep last 50)
-  // This is a simple approach — in production you'd use a Cloud Function
+  if(!_uid||!text.trim()) return;
+  push(ref(db,"chat"),{uid:_uid,name:_name,text:text.trim().slice(0,200),ts:Date.now()});
 }
 
-// Update avatar meshes in the scene based on _players data
 function updateAvatars() {
-  if (!_scene) return;
-  const seen = new Set();
-
-  for (const [uid, data] of Object.entries(_players)) {
+  if(!_scene) return;
+  const seen=new Set();
+  for(const [uid,d] of Object.entries(_players)) {
     seen.add(uid);
-    if (!_avatarMeshes[uid]) {
-      // Create a simple avatar: a colored capsule + name tag
-      const group = new THREE.Group();
-      const body = new THREE.Mesh(
-        new THREE.CapsuleGeometry(0.3, 0.8, 4, 8),
-        new THREE.MeshLambertMaterial({ color: data.color || "#e11d48" })
-      );
-      body.position.y = 0.7;
-      body.castShadow = true;
-      group.add(body);
-
-      // Name tag (sprite)
-      const canvas = document.createElement("canvas");
-      canvas.width = 256; canvas.height = 64;
-      const ctx = canvas.getContext("2d");
-      ctx.fillStyle = "rgba(15,77,58,0.85)";
-      ctx.fillRect(0, 0, 256, 64);
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "bold 28px Poppins, Arial";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(data.name || "Player", 128, 34);
-      const tex = new THREE.CanvasTexture(canvas);
-      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
-      sprite.position.y = 1.8;
-      sprite.scale.set(1.5, 0.4, 1);
-      group.add(sprite);
-
-      _scene.add(group);
-      _avatarMeshes[uid] = group;
+    if(!_meshes[uid]) {
+      const g=new THREE.Group();
+      const body=new THREE.Mesh(new THREE.CapsuleGeometry(0.3,0.8,4,8),new THREE.MeshLambertMaterial({color:d.color||"#e11d48"}));
+      body.position.y=0.7; body.castShadow=true; g.add(body);
+      const c=document.createElement("canvas"); c.width=256; c.height=64;
+      const ctx=c.getContext("2d"); ctx.fillStyle="rgba(15,77,58,0.85)"; ctx.fillRect(0,0,256,64);
+      ctx.fillStyle="#fff"; ctx.font="bold 28px Poppins,Arial"; ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.fillText(d.name||"Player",128,34);
+      const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),depthTest:false}));
+      sp.position.y=1.8; sp.scale.set(1.5,0.4,1); g.add(sp);
+      _scene.add(g); _meshes[uid]=g;
     }
-    // Update position
-    const mesh = _avatarMeshes[uid];
-    mesh.position.set(data.x || 0, 0, data.z || 0);
-    mesh.rotation.y = data.heading || 0;
-    // Update name if changed
-    if (data.name && mesh.userData.name !== data.name) {
-      mesh.userData.name = data.name;
-      // Update the sprite texture
-      const sprite = mesh.children[1];
-      if (sprite) {
-        const canvas = document.createElement("canvas");
-        canvas.width = 256; canvas.height = 64;
-        const ctx = canvas.getContext("2d");
-        ctx.fillStyle = "rgba(15,77,58,0.85)";
-        ctx.fillRect(0, 0, 256, 64);
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "bold 28px Poppins, Arial";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(data.name, 128, 34);
-        sprite.material.map = new THREE.CanvasTexture(canvas);
-        sprite.material.needsUpdate = true;
-      }
-    }
+    _meshes[uid].position.set(d.x||0,0,d.z||0);
+    _meshes[uid].rotation.y=d.heading||0;
   }
-
-  // Remove avatars for players who left
-  for (const [uid, mesh] of Object.entries(_avatarMeshes)) {
-    if (!seen.has(uid)) {
-      _scene.remove(mesh);
-      mesh.traverse((o) => {
-        if (o.geometry) o.geometry.dispose();
-        if (o.material) {
-          if (o.material.map) o.material.map.dispose();
-          o.material.dispose();
-        }
-      });
-      delete _avatarMeshes[uid];
-    }
+  for(const [uid,m] of Object.entries(_meshes)) {
+    if(!seen.has(uid)) { _scene.remove(m); m.traverse(o=>{o.geometry?.dispose();o.material?.map?.dispose();o.material?.dispose();}); delete _meshes[uid]; }
   }
 }
 
-export function getMyUid() { return _myUid; }
-export function getMyName() { return _myName; }
-export function getPlayerCount() { return Object.keys(_players).length + 1; }
-export function getPlayers() { return _players; }
+export function getMyUid(){return _uid;}
+export function getMyName(){return _name;}

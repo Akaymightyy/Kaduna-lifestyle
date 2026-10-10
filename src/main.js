@@ -5,17 +5,18 @@ import { loadPlayer, collide } from "./player.js";
 import { createControls, updateCamera } from "./controls.js";
 import { createMinimap } from "./minimap.js";
 import { addCity } from "./city.js";
-import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS } from "./config.js";
+import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES } from "./config.js";
 import { createGameState } from "./needs.js";
-import { initAuth, showAuthModal, hideAuthModal, wireAuthUI } from "./auth.js";
-import { initMultiplayer, sendPosition, sendChat, getPlayerCount, getMyName, getMyUid } from "./multiplayer.js";
 import { auth } from "./firebase.js";
+import { initAuth, showAuthModal, wireAuthUI } from "./auth.js";
+import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName } from "./multiplayer.js";
+import { startRide, travelToZone, getZones, getRides } from "./travel.js";
+import { subscribeRichList, subscribeAllPlayers, suspendPlayer, unsuspendPlayer, getBalance } from "./economy.js";
 
 const $ = (id) => document.getElementById(id);
 const showError = (m) => { const e = $("err"); e.style.display = "flex"; e.textContent = m; };
 addEventListener("error", (e) => showError("Something broke: " + e.message));
 
-// ---- loading screen ----
 let tipI = 0;
 $("ltip").textContent = TIPS[0];
 setInterval(() => { tipI = (tipI + 1) % TIPS.length; $("ltip").textContent = TIPS[tipI]; }, 2600);
@@ -23,7 +24,6 @@ const manager = new THREE.LoadingManager();
 manager.onProgress = (_u, l, t) => setProgress(l / t);
 function setProgress(p) { const v = Math.round(Math.min(1, p) * 100); $("bar").firstElementChild.style.width = v + "%"; $("pct").textContent = v + "%"; }
 
-// ---- renderer / scene ----
 const canvas = $("game");
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -45,13 +45,10 @@ addEventListener("resize", resize); resize();
 
 const world = buildWorld(scene);
 const traffic = createTraffic(scene);
-let mmDraw = () => {};
+let mmDraw = createMinimap($("mm"), world.mapShapes);
 const ctl = createControls(canvas, camera, { joy: $("joy"), knob: $("knob") });
-
-// ---- game state (needs, money, etc.) ----
 const game = createGameState();
 
-// ---- day / night ----
 const SKY = [
   [0, 0x0b1230, 0.0, 0.25, 0x8899ff], [5, 0x1b2548, 0.0, 0.3, 0x8899ff], [6.5, 0xf3a56b, 0.9, 0.7, 0xffb070],
   [9, 0x9fd4f5, 1.8, 1.0, 0xfff2d6], [16, 0x9fd4f5, 1.8, 1.0, 0xfff2d6], [18, 0xf08a5d, 1.0, 0.75, 0xff9a5a],
@@ -84,20 +81,17 @@ function applyTime() {
   if (txt !== lastClock) { lastClock = txt; $("clock").textContent = txt; $("sun").textContent = night ? "🌙" : "☀️"; }
 }
 
-// ---- player ----
 const player = { pos: new THREE.Vector3(-9, 0, 11), heading: Math.PI, speed: 0 };
 let rig;
 let toastT = 0;
-function toast(m) { const t = $("toast"); t.textContent = m; t.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 1800); }
+function toast(m) { const t = $("toast"); t.textContent = m; t.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2000); }
 
-// ---- HUD: needs bar + money + rank ----
 function updateHUD() {
   const s = game.state;
   $("money-val").textContent = "₦" + s.money.toLocaleString();
   const rank = game.getRank();
   $("rank-val").textContent = rank.name;
   $("rank-val").style.color = rank.color;
-  // Needs bars
   for (const need of NEEDS) {
     const bar = $("need-" + need.key);
     if (bar) {
@@ -109,69 +103,99 @@ function updateHUD() {
 }
 
 // ---- Phone UI ----
-function openPhone() {
-  $("phone-modal").classList.add("show");
-  showPhoneApp("home");
-}
+function openPhone() { $("phone-modal").classList.add("show"); showPhoneApp("home"); }
 function closePhone() { $("phone-modal").classList.remove("show"); }
 window.closePhone = closePhone;
 
 function showPhoneApp(appId) {
   const content = $("phone-content");
   if (appId === "home") {
-    const apps = [
-      { id: "food", icon: "🍛", label: "Chop" },
-      { id: "jobs", icon: "💼", label: "Hustle" },
-      { id: "bank", icon: "🏦", label: "Bank" },
-      { id: "health", icon: "💊", label: "Health" },
-      { id: "ride", icon: "🛺", label: "Ride" },
-      { id: "messages", icon: "✉️", label: "Messages" },
-      { id: "boutique", icon: "👕", label: "Boutique" },
-      { id: "news", icon: "📰", label: "News" },
-      { id: "settings", icon: "⚙️", label: "Settings" },
-    ];
-    content.innerHTML = '<div style="font-size:13px;color:var(--ink);margin-bottom:10px;font-weight:600;">Kaduna Phone</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">' +
-      apps.map(a => `<button onclick="window.showApp('${a.id}')" style="background:var(--cream);border:2px solid var(--green);border-radius:12px;padding:12px 6px;cursor:pointer;font-family:inherit;"><div style="font-size:24px;">${a.icon}</div><div style="font-size:11px;color:var(--green);font-weight:600;">${a.label}</div></button>`).join("") +
-      '</div>';
+    const apps = [{id:"food",icon:"🍛",label:"Chop"},{id:"jobs",icon:"💼",label:"Hustle"},{id:"bank",icon:"🏦",label:"Bank"},{id:"ride",icon:"🛺",label:"Ride"},{id:"health",icon:"💊",label:"Health"},{id:"messages",icon:"✉️",label:"Messages"},{id:"boutique",icon:"👕",label:"Boutique"},{id:"news",icon:"📰",label:"News"},{id:"richlist",icon:"🏆",label:"Rich List"},{id:"settings",icon:"⚙️",label:"Settings"}];
+    content.innerHTML = '<div style="font-size:13px;margin-bottom:10px;font-weight:600;">Kaduna Phone</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">' + apps.map(a=>`<button onclick="window.showApp('${a.id}')" style="background:var(--cream);border:2px solid var(--green);border-radius:12px;padding:12px 6px;cursor:pointer;font-family:inherit;"><div style="font-size:24px;">${a.icon}</div><div style="font-size:11px;color:var(--green);font-weight:600;">${a.label}</div></button>`).join("") + '</div>';
   } else if (appId === "food") {
-    content.innerHTML = '<div style="font-size:13px;margin-bottom:10px;font-weight:600;">Buy Food</div>' +
-      FOOD_ITEMS.map(f => `<div style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid #ddd;"><span style="font-size:20px;">${f.emoji}</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;">${f.name}</div><div style="font-size:11px;color:#666;">Hunger +${f.hunger}${f.fun ? ` · Fun +${f.fun}` : ""}${f.energy ? ` · Energy +${f.energy}` : ""}</div></div><button onclick="window.buyFood('${f.id}')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;">₦${f.price}</button></div>`).join("") +
-      '<button onclick="window.showApp(\'home\')" style="margin-top:10px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;">← Back</button>';
+    content.innerHTML = '<div style="font-size:13px;margin-bottom:10px;font-weight:600;">Buy Food</div>' + FOOD_ITEMS.map(f=>`<div style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid #ddd;"><span style="font-size:20px;">${f.emoji}</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;">${f.name}</div><div style="font-size:11px;color:#666;">Hunger +${f.hunger}${f.fun?` · Fun +${f.fun}`:""}${f.energy?` · Energy +${f.energy}`:""}</div></div><button onclick="window.buyFood('${f.id}')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;">₦${f.price}</button></div>`).join("") + '<button onclick="window.showApp(\'home\')" style="margin-top:10px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;">← Back</button>';
   } else if (appId === "jobs") {
-    content.innerHTML = '<div style="font-size:13px;margin-bottom:10px;font-weight:600;">Find Work</div>' +
-      JOBS.map(j => `<div style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid #ddd;"><div style="flex:1;"><div style="font-size:13px;font-weight:600;">${j.name}</div><div style="font-size:11px;color:#666;">${j.desc} · Pays ₦${j.pay}</div></div><button onclick="window.doJob('${j.id}')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;">Work</button></div>`).join("") +
-      '<button onclick="window.showApp(\'home\')" style="margin-top:10px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;">← Back</button>';
+    content.innerHTML = '<div style="font-size:13px;margin-bottom:10px;font-weight:600;">Find Work</div>' + JOBS.map(j=>`<div style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid #ddd;"><div style="flex:1;"><div style="font-size:13px;font-weight:600;">${j.name}</div><div style="font-size:11px;color:#666;">${j.desc} · Pays ₦${j.pay}</div></div><button onclick="window.doJob('${j.id}')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;">Work</button></div>`).join("") + '<button onclick="window.showApp(\'home\')" style="margin-top:10px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;">← Back</button>';
   } else if (appId === "bank") {
     content.innerHTML = `<div style="text-align:center;padding:20px 0;"><div style="font-size:28px;font-weight:800;color:var(--green);">₦${game.state.money.toLocaleString()}</div><div style="font-size:12px;color:#666;margin-top:4px;">Your Balance</div><div style="margin-top:12px;font-size:13px;">Rank: <span style="color:${game.getRank().color};font-weight:600;">${game.getRank().name}</span></div></div><button onclick="window.showApp('home')" style="margin-top:10px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;">← Back</button>`;
-  } else if (appId === "health") {
-    content.innerHTML = '<div style="font-size:13px;margin-bottom:10px;font-weight:600;">Health & Boosters</div><div style="padding:12px;text-align:center;color:#666;font-size:12px;">Pharmacy coming soon! For now, eat well and rest.</div><button onclick="window.showApp(\'home\')" style="margin-top:10px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;">← Back</button>';
+  } else if (appId === "ride") {
+    content.innerHTML = '<div style="font-size:13px;margin-bottom:10px;font-weight:600;">Book a Ride</div>' + RIDES.map(r=>`<div style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid #ddd;"><span style="font-size:20px;">${r.icon}</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;">${r.name}</div><div style="font-size:11px;color:#666;">${r.time}s ride · ₦${r.price}</div></div><select id="ride-dest-${r.id}" style="padding:4px;border:1px solid #ddd;border-radius:6px;font-size:11px;">${ZONES.map(z=>`<option value="${z.id}">${z.name}</option>`).join("")}</select><button onclick="window.bookRide('${r.id}')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:12px;font-weight:600;">Go</button></div>`).join("") + '<button onclick="window.showApp(\'home\')" style="margin-top:10px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;">← Back</button>';
+  } else if (appId === "richlist") {
+    content.innerHTML = '<div style="font-size:13px;margin-bottom:10px;font-weight:600;">🏆 Rich List</div><div id="richlist-content" style="font-size:12px;color:#666;">Loading...</div><button onclick="window.showApp(\'home\')" style="margin-top:10px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;">← Back</button>';
+    subscribeRichList((list) => {
+      const el = document.getElementById("richlist-content");
+      if (el) el.innerHTML = list.length ? list.map((p,i)=>`<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eee;"><span>${i+1}. ${p.name}</span><span style="font-weight:600;color:var(--green);">₦${p.balance.toLocaleString()}</span></div>`).join("") : "No data yet.";
+    });
   } else {
-    content.innerHTML = `<div style="padding:20px;text-align:center;color:#666;font-size:13px;">${appId.charAt(0).toUpperCase() + appId.slice(1)} coming soon!</div><button onclick="window.showApp('home')" style="margin-top:10px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;">← Back</button>`;
+    content.innerHTML = `<div style="padding:20px;text-align:center;color:#666;font-size:13px;">${appId.charAt(0).toUpperCase()+appId.slice(1)} coming soon!</div><button onclick="window.showApp('home')" style="margin-top:10px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;">← Back</button>`;
   }
 }
 window.showApp = showPhoneApp;
-window.showPhoneApp = showPhoneApp;
-window.buyFood = (id) => { const r = game.eat(id); toast(r.msg || r.error); updateHUD(); if (r.ok) showPhoneApp("food"); };
-window.doJob = (id) => { const r = game.work(id); toast(r.msg || r.error); updateHUD(); if (r.ok) showPhoneApp("jobs"); };
+window.buyFood = (id) => { const r = game.eat(id); toast(r.msg||r.error); updateHUD(); if(r.ok) showPhoneApp("food"); };
+window.doJob = (id) => { const r = game.work(id); toast(r.msg||r.error); updateHUD(); if(r.ok) showPhoneApp("jobs"); };
+window.bookRide = (rideId) => {
+  const destSel = document.getElementById("ride-dest-" + rideId);
+  if (!destSel) return;
+  const zoneId = destSel.value;
+  const ride = RIDES.find(r => r.id === rideId);
+  if (game.state.money < ride.price) { toast("Not enough money for " + ride.name); return; }
+  game.state.money -= ride.price;
+  closePhone();
+  startRide(rideId, zoneId, game.state.money,
+    (progress) => {},
+    (result) => {
+      if (result.ok) {
+        toast("Welcome to " + result.zone.name + "!");
+        travelToZone(getMyUid(), result.zone.id);
+        updateHUD();
+        // Teleport player to new zone start position
+        player.pos.set(-9, 0, 11);
+        player.heading = Math.PI;
+      } else {
+        toast(result.error || "Travel failed");
+      }
+    }
+  );
+};
+
+// ---- Chat ----
+window.sendChatMsg = function() { const i=$("chat-input"); if(i&&i.value.trim()){sendChat(i.value);i.value="";} };
+window.toggleChat = function() {
+  const d=$("chat-dock"); if(!d)return; d.classList.toggle("open");
+  if(d.classList.contains("open")){const b=$("chat-badge");if(b){b.style.display="none";b.textContent="0";}$("chat-input")?.focus();}
+};
 
 // ---- UI buttons ----
-$("zin").onclick = () => ctl.zoom(-1.8);
-$("zout").onclick = () => ctl.zoom(1.8);
-$("fit").onclick = () => { ctl.yaw = player.heading + Math.PI; ctl.pitch = 0.38; ctl.dist = 6.5; };
-$("eye").onclick = () => $("ui").classList.add("hidden");
-$("eye-solo").onclick = () => $("ui").classList.remove("hidden");
-$("jog").onclick = () => { ctl.jog = !ctl.jog; $("jog").classList.toggle("on", ctl.jog); $("jog-t").textContent = ctl.jog ? "Jog" : "Walk"; };
-$("phone-btn").onclick = openPhone;
-$("phone-close").onclick = closePhone;
-setTimeout(() => { const t = $("tip"); if (t) t.style.display = "none"; }, 15000);
+$("zin").onclick=()=>ctl.zoom(-1.8); $("zout").onclick=()=>ctl.zoom(1.8);
+$("fit").onclick=()=>{ctl.yaw=player.heading+Math.PI;ctl.pitch=0.38;ctl.dist=6.5;};
+$("eye").onclick=()=>$("ui").classList.add("hidden");
+$("eye-solo").onclick=()=>$("ui").classList.remove("hidden");
+$("jog").onclick=()=>{ctl.jog=!ctl.jog;$("jog").classList.toggle("on",ctl.jog);$("jog-t").textContent=ctl.jog?"Jog":"Walk";};
+$("phone-btn").onclick=openPhone; $("phone-close").onclick=closePhone;
+setTimeout(()=>{const t=$("tip");if(t)t.style.display="none";},15000);
 
-// ---- main loop ----
+// ---- Auth + Multiplayer ----
+wireAuthUI();
+initAuth((user) => {
+  initMultiplayer(scene, (count) => { const el=$("online-count"); if(el) el.textContent=count+" here"; },
+    (msg) => {
+      const log=$("chat-log"); if(!log)return;
+      const div=document.createElement("div");
+      div.style.cssText="padding:4px 8px;font-size:12px;border-bottom:1px solid #eee;";
+      div.innerHTML=`<b style="color:${msg.uid===getMyUid()?"var(--green)":"#1d5fa8"};">${msg.name}:</b> ${msg.text}`;
+      log.appendChild(div); log.scrollTop=log.scrollHeight;
+      while(log.children.length>30) log.removeChild(log.firstChild);
+      const badge=$("chat-badge"); const dock=$("chat-dock");
+      if(badge&&dock&&!dock.classList.contains("open")){badge.textContent=(parseInt(badge.textContent)||0)+1;badge.style.display="block";}
+    });
+});
+
+// ---- Main loop ----
 const clock = new THREE.Clock();
-let mmT = 0, hitCool = 0, hudT = 0;
+let mmT=0, hitCool=0, hudT=0;
 function frame() {
   const dt = Math.min(clock.getDelta(), 0.05);
   const now = Date.now() / 1000;
-  // move
   const it = ctl.intent();
   const maxSpd = ctl.jog ? 4.8 : 2.1;
   const target = it.mag * maxSpd;
@@ -194,70 +218,13 @@ function frame() {
   if (rig) { rig.group.position.copy(player.pos); rig.group.rotation.y = player.heading; rig.animate(dt, player.speed); }
   updateCamera(camera, ctl, player.pos, world.colliders, dt);
   applyTime();
-  // Update needs every frame, HUD every 0.5s
   game.updateNeeds(dt);
   hudT += dt; if (hudT > 0.5) { hudT = 0; updateHUD(); }
-  // Send position to multiplayer (throttled inside sendPosition)
   sendPosition(player.pos.x, player.pos.z, player.heading);
   mmT += dt; if (mmT > 0.1) { mmT = 0; mmDraw(player.pos.x, player.pos.z, ctl.yaw, player.heading, traffic.positions); }
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
-
-// ---- Auth + Multiplayer init ----
-wireAuthUI();
-initAuth((user) => {
-  // User is logged in — init multiplayer
-  initMultiplayer(scene, (count) => {
-    // Update online count display
-    const el = $("online-count");
-    if (el) el.textContent = count + " here";
-  }, (msg, total) => {
-    // New chat message
-    const chatLog = $("chat-log");
-    if (chatLog) {
-      const div = document.createElement("div");
-      div.style.cssText = "padding:4px 8px;font-size:12px;border-bottom:1px solid #eee;";
-      div.innerHTML = `<b style="color:${msg.uid === getMyUid() ? "var(--green)" : "#1d5fa8"};">${msg.name}:</b> ${msg.text}`;
-      chatLog.appendChild(div);
-      chatLog.scrollTop = chatLog.scrollHeight;
-      // Keep last 30 messages
-      while (chatLog.children.length > 30) chatLog.removeChild(chatLog.firstChild);
-    }
-    // Unread badge
-    const badge = $("chat-badge");
-    const chatDock = $("chat-dock");
-    if (badge && chatDock && !chatDock.classList.contains("open")) {
-      const n = (parseInt(badge.textContent) || 0) + 1;
-      badge.textContent = n;
-      badge.style.display = "block";
-    }
-  });
-});
-
-window.getMyUid = getMyUid;
-
-// Chat send
-window.sendChatMsg = function() {
-  const input = $("chat-input");
-  if (input && input.value.trim()) {
-    sendChat(input.value);
-    input.value = "";
-  }
-};
-
-// Chat dock toggle
-window.toggleChat = function() {
-  const dock = $("chat-dock");
-  if (!dock) return;
-  dock.classList.toggle("open");
-  if (dock.classList.contains("open")) {
-    const badge = $("chat-badge");
-    if (badge) { badge.style.display = "none"; badge.textContent = "0"; }
-    const input = $("chat-input");
-    if (input) input.focus();
-  }
-};
 
 Promise.all([loadPlayer(manager, scene), addCity(scene, world, manager)]).then(([r]) => {
   mmDraw = createMinimap($("mm"), world.mapShapes);
@@ -265,12 +232,8 @@ Promise.all([loadPlayer(manager, scene), addCity(scene, world, manager)]).then((
   setProgress(1);
   ctl.yaw = player.heading + Math.PI;
   updateHUD();
-  // Show auth modal on load if not logged in
-  setTimeout(() => {
-    if (!auth.currentUser) showAuthModal();
-  }, 500);
+  setTimeout(() => { if (!auth.currentUser) showAuthModal(); }, 500);
   frame();
   $("loading").classList.add("done");
   window.__ready = true;
-  window.__dbg = { player, ctl, camera, game };
 }).catch((e) => showError("Could not load the game: " + e.message));

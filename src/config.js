@@ -87,3 +87,25 @@ export function rng(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+// Travel zones (Phase 5)
+export const ZONES = [
+  { id: "ahmadu_bello", name: "Ahmadu Bello Way", desc: "The main road — where it all starts" },
+  { id: "kawo", name: "Kawo", desc: "Bustling market district" },
+  { id: "sabon_tasha", name: "Sabon Tasha", desc: "Residential area with shops" },
+  { id: "barnawa", name: "Barnawa", desc: "Riverside leisure zone" },
+];
+
+// Ride options (Phase 5)
+export const RIDES = [
+  { id: "keke", name: "Keke Napep", price: 300, time: 3, icon: "🛺" },
+  { id: "bus", name: "Bus", price: 200, time: 5, icon: "🚌" },
+  { id: "taxi", name: "Taxi", price: 1500, time: 2, icon: "🚕" },
+];
+
+// Economy config (Phase 7)
+export const ECONOMY = {
+  startingMoney: 5000,
+  maxTransactionLog: 50,
+  richListSize: 10,
+};
