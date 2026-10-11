@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { buildWorld } from "./world.js";
+import { fetchKadunaData, buildRealMap } from "./realmap.js";
 import { createTraffic } from "./traffic.js";
 import { loadPlayer, collide } from "./player.js";
 import { createControls, updateCamera } from "./controls.js";
@@ -72,6 +73,25 @@ let mmDraw = createMinimap($("mm"), world.mapShapes);
 const ctl = createControls(canvas, camera, { joy: $("joy"), knob: $("knob") });
 const game = createGameState();
 const npcs = createNPCs(scene);
+
+// ---- Real Kaduna map (async, with fallback) ----
+// Fetch kaduna.json and add the real river + landmark positions.
+// Falls back silently to the procedural world if the data fails to load.
+let _realMap = null;
+fetchKadunaData().then((data) => {
+  if (!data) return;
+  _realMap = buildRealMap(scene, data);
+  if (_realMap) {
+    // Merge real map colliders + mapShapes into the world
+    world.colliders.push(..._realMap.colliders);
+    if (_realMap.mapShapes.roads) {
+      world.mapShapes.roads = _realMap.mapShapes.roads;
+    }
+    // Rebuild minimap with real road data
+    mmDraw = createMinimap($("mm"), world.mapShapes);
+    console.log("[realmap] Real Kaduna map loaded — river + landmarks added");
+  }
+});
 
 // ---- day/night ----
 const SKY = [[0,0x0b1230,0.0,0.25,0x8899ff],[5,0x1b2548,0.0,0.3,0x8899ff],[6.5,0xf3a56b,0.9,0.7,0xffb070],[9,0x9fd4f5,1.8,1.0,0xfff2d6],[16,0x9fd4f5,1.8,1.0,0xfff2d6],[18,0xf08a5d,1.0,0.75,0xff9a5a],[19.5,0x2a2f55,0.1,0.35,0x8899ff],[24,0x0b1230,0.0,0.25,0x8899ff]];

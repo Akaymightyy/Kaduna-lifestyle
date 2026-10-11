@@ -361,19 +361,19 @@ export function buildWorld(scene) {
     // Lazy-read the registry without creating a circular import:
     // (world.js -> registry.js is fine; registry.js does not import world.js)
     const _placeMarkers = [
-      { id: "central_market", x: -28, z: -22, name: "MARKET", icon: "🛒", color: 0xc0392b },
-      { id: "suya_spot", x: -53, z: 20, name: "SUYA", icon: "🍢", color: 0xd98e2b },
-      { id: "central_mosque", x: 48, z: 20.5, name: "MOSQUE", icon: "🕌", color: 0x1f7a5a },
-      { id: "kawo_park", x: -88, z: -32, name: "KAWO PARK", icon: "🚌", color: 0xf2b134 },
-      { id: "university", x: 98, z: -34, name: "POLYTECHNIC", icon: "🎓", color: 0x1d5fa8 },
-      { id: "mall_cinema", x: 130, z: 24, name: "MALL", icon: "🏬", color: 0x7a3b8f },
-      { id: "hospital", x: -128, z: -27, name: "HOSPITAL", icon: "🏥", color: 0xe11d48 },
-      { id: "bank", x: 70, z: 26, name: "BANK", icon: "🏦", color: 0x1a5a3a },
-      { id: "stadium", x: -100, z: 28, name: "STADIUM", icon: "⚽", color: 0x2e7d4f },
-      { id: "river_park", x: 118, z: -34, name: "RIVER", icon: "🌊", color: 0x0ea5e9 },
-      { id: "church", x: -70, z: 26, name: "CHURCH", icon: "⛪", color: 0xc8b890 },
-      { id: "barber", x: 30, z: -30, name: "BARBER", icon: "💈", color: 0x1a1a2e },
-      { id: "nightclub", x: 0, z: -30, name: "NIGHTCLUB", icon: "🪩", color: 0x6b21a8 },
+      { id: "central_market", x: -30, z: -27, name: "MARKET", icon: "🛒", color: 0xc0392b },
+      { id: "suya_spot", x: -60, z: 18, name: "SUYA", icon: "🍢", color: 0xd98e2b },
+      { id: "central_mosque", x: 0, z: -18, name: "MOSQUE", icon: "🕌", color: 0x1f7a5a },
+      { id: "kawo_park", x: -40, z: -97, name: "KAWO PARK", icon: "🚌", color: 0xf2b134 },
+      { id: "university", x: 100, z: -57, name: "POLYTECHNIC", icon: "🎓", color: 0x1d5fa8 },
+      { id: "mall_cinema", x: 180, z: 37, name: "MALL", icon: "🏬", color: 0x7a3b8f },
+      { id: "hospital", x: -180, z: 57, name: "HOSPITAL", icon: "🏥", color: 0xe11d48 },
+      { id: "bank", x: 50, z: 37, name: "BANK", icon: "🏦", color: 0x1a5a3a },
+      { id: "stadium", x: -100, z: 57, name: "STADIUM", icon: "⚽", color: 0x2e7d4f },
+      { id: "river_park", x: -197, z: 0, name: "RIVER", icon: "🌊", color: 0x0ea5e9 },
+      { id: "church", x: -70, z: 37, name: "CHURCH", icon: "⛪", color: 0xc8b890 },
+      { id: "barber", x: 30, z: -37, name: "BARBER", icon: "💈", color: 0x1a1a2e },
+      { id: "nightclub", x: 0, z: -37, name: "NIGHTCLUB", icon: "🪩", color: 0x6b21a8 },
     ];
     for (const m of _placeMarkers) {
       // Entrance pad (glowing circle on the ground)

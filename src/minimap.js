@@ -7,16 +7,45 @@ export function createMinimap(canvas, shapes) {
   const g = base.getContext("2d");
   const X = (x) => (x + WORLD_HALF_X + 40) * S, Z = (z) => (z + 75) * S;
   g.fillStyle = "#b9cf8a"; g.fillRect(0, 0, W, H);
-  g.fillStyle = "#cdbb98"; g.fillRect(0, Z(-ROAD_HALF - 6), W, 12 * S + 16 * S);
-  g.fillStyle = "#555a62"; g.fillRect(0, Z(-ROAD_HALF), W, ROAD_HALF * 2 * S);
-  for (const sx of SIDE_STREETS) g.fillRect(X(sx - 6), 0, 12 * S, H);
-  g.fillStyle = "#6fae52"; g.fillRect(0, Z(-1), W, 2 * S);
-  g.strokeStyle = "#fff"; g.lineWidth = 1; g.setLineDash([6, 8]);
-  for (const z of [4.5, -4.5]) { g.beginPath(); g.moveTo(0, Z(z)); g.lineTo(W, Z(z)); g.stroke(); }
-  g.setLineDash([]);
+
+  // Draw real roads from kaduna.json if available
+  if (shapes.roads && shapes.roads.length) {
+    for (const road of shapes.roads) {
+      const width = (road.width || 8) * S;
+      const color = road.type === "primary" ? "#555a62" : road.type === "secondary" ? "#5a5f66" : road.type === "tertiary" ? "#6a6a6a" : "#7a7a7a";
+      g.strokeStyle = color; g.lineWidth = width; g.lineCap = "round"; g.lineJoin = "round";
+      g.beginPath();
+      for (let i = 0; i < road.points.length; i++) {
+        const [x, z] = road.points[i];
+        if (i === 0) g.moveTo(X(x), Z(z)); else g.lineTo(X(x), Z(z));
+      }
+      g.stroke();
+    }
+    // Dashed center line on primary roads
+    g.strokeStyle = "#fff"; g.lineWidth = 1; g.setLineDash([4, 4]);
+    for (const road of shapes.roads) {
+      if (road.type !== "primary") continue;
+      g.beginPath();
+      for (let i = 0; i < road.points.length; i++) {
+        const [x, z] = road.points[i];
+        if (i === 0) g.moveTo(X(x), Z(z)); else g.lineTo(X(x), Z(z));
+      }
+      g.stroke();
+    }
+    g.setLineDash([]);
+  } else {
+    // Fallback: procedural road
+    g.fillStyle = "#cdbb98"; g.fillRect(0, Z(-ROAD_HALF - 6), W, 12 * S + 16 * S);
+    g.fillStyle = "#555a62"; g.fillRect(0, Z(-ROAD_HALF), W, ROAD_HALF * 2 * S);
+    for (const sx of SIDE_STREETS) g.fillRect(X(sx - 6), 0, 12 * S, H);
+    g.fillStyle = "#6fae52"; g.fillRect(0, Z(-1), W, 2 * S);
+    g.strokeStyle = "#fff"; g.lineWidth = 1; g.setLineDash([6, 8]);
+    for (const z of [4.5, -4.5]) { g.beginPath(); g.moveTo(0, Z(z)); g.lineTo(W, Z(z)); g.stroke(); }
+    g.setLineDash([]);
+  }
+
   for (const b of shapes.buildings) {
     if (b.place) {
-      // Place entrance marker — circle with distinct color
       g.fillStyle = "#" + (b.placeColor || 0xc0392b).toString(16).padStart(6, "0");
       g.beginPath();
       g.arc(X(b.x), Z(b.z), 4.5 * S, 0, Math.PI * 2);
@@ -31,13 +60,13 @@ export function createMinimap(canvas, shapes) {
   }
   g.fillStyle = "#3f8f3a"; for (const t of shapes.trees) { g.beginPath(); g.arc(X(t.x), Z(t.z), 2.2 * S, 0, 7); g.fill(); }
   const ctx = canvas.getContext("2d");
-  const size = canvas.width, range = 52; // metres visible from centre to edge
+  const size = canvas.width, range = 52;
   return function draw(px, pz, yaw, heading, cars) {
     ctx.clearRect(0, 0, size, size);
     ctx.save();
     ctx.translate(size / 2, size / 2);
-    ctx.rotate(yaw + Math.PI);                       // camera forward = up on the map
-    const sc = size / (range * 2) ;
+    ctx.rotate(yaw + Math.PI);
+    const sc = size / (range * 2);
     ctx.scale(sc / S, sc / S);
     ctx.translate(-X(px), -Z(pz));
     ctx.drawImage(base, 0, 0);
