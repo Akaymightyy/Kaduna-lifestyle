@@ -2,6 +2,7 @@
 import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { rng } from "../config.js";
+import { spawnPeople, getNamedDialogue, getDialogue } from "./people.js";
 
 let _built = false, _cache = null;
 const _state = { escalator: null };
@@ -51,6 +52,20 @@ export async function build(scene, ctx) {
   colliders.push({ minX: -14, maxX: -10, minZ: -3, maxZ: 3 }, { minX: 16, maxX: 20, minZ: -13, maxZ: -7 }, { minX: -1.8, maxX: 1.8, minZ: -1.8, maxZ: 1.8 }, { minX: 11, maxX: 19, minZ: 5, maxZ: 7 });
   scene.add(group);
 
+    let _people = null;
+  spawnPeople(group, [
+    { id: "cashier1", name: "Glory", role: "boutique cashier", outfit: "casual", pose: "stand", x: -20, z: -20, ry: Math.PI, top: "#c0392b" },
+    { id: "usher1", name: "Emeka", role: "cinema usher", outfit: "casual", pose: "stand", x: 18, z: -8, ry: 0, top: "#1d5fa8" },
+    { id: "shopper1", name: "Shopper", role: "shopper", outfit: "casual", pose: "stand", x: -10, z: 0, ry: 0, route: [{ x: -10, z: 0 }, { x: 10, z: 0 }, { x: 10, z: 10 }, { x: -10, z: 10 }], speed: 0.7 },
+    { id: "shopper2", name: "Shopper", role: "shopper", outfit: "casual", pose: "stand", x: 10, z: 5, ry: Math.PI, route: [{ x: 10, z: 5 }, { x: -10, z: 5 }, { x: -10, z: -5 }, { x: 10, z: -5 }], speed: 0.6 },
+    { id: "shopper3", name: "Shopper", role: "shopper", outfit: "kaftan", pose: "stand", x: 0, z: 10, ry: 0, route: [{ x: 0, z: 10 }, { x: -15, z: 0 }], speed: 0.5 },
+    { id: "foodcourt1", name: "Mr. Tunde", role: "food court vendor", outfit: "casual", pose: "stand", x: 15, z: 10, ry: Math.PI, top: "#d98e2b" },
+    { id: "queue1", name: "Moviegoer", role: "shopper", outfit: "casual", pose: "stand", x: 16, z: -6, ry: 0 },
+    { id: "queue2", name: "Moviegoer", role: "shopper", outfit: "kaftan", pose: "stand", x: 16, z: -5.3, ry: 0 },
+    { id: "queue3", name: "Moviegoer", role: "shopper", outfit: "casual", pose: "stand", x: 16, z: -4.6, ry: 0 },
+    { id: "walker1", name: "Shopper", role: "shopper", outfit: "casual", pose: "stand", x: -15, z: 15, ry: 0, route: [{ x: -15, z: 15 }, { x: 5, z: 15 }], speed: 0.4 },
+  ]).then((p) => { _people = p; });
+
   const handle = {
     group, colliders,
     enter(ps) { ps.pos.set(0, 0, 22); ps.heading = Math.PI; },
@@ -65,8 +80,10 @@ export async function build(scene, ctx) {
         }
       }
     },
-    dispose() { scene.remove(group); disposeGroup(group); _built = false; _cache = null; _state.escalator = null; },
+    dispose() { if (_people) _people.dispose(); scene.remove(group); disposeGroup(group); _built = false; _cache = null; _state.escalator = null; },
+    people: () => _people,
     onUIEvent(eid) {
+      if (eid === "talk" && arguments[1]?.personId) _talk(ctx, arguments[1].personId);
       if (eid === "shop_clothes") { const cost = 3000 + Math.floor(Math.random() * 5000); _act(ctx, cost, "👗 Bought designer outfit! ₦" + cost.toLocaleString(), { fun: 20, social: 10 }); }
       else if (eid === "watch_movie") _act(ctx, 1500, "🎬 Watched a Nollywood premiere! Fun +20", { fun: 20, social: 10, energy: -5 });
       else if (eid === "eat_foodcourt") _act(ctx, 1000, "🍽️ Continental dish! Hunger +60", { hunger: 60, fun: 8 });
@@ -126,4 +143,21 @@ function _buildCinema(R) {
     for (let i = 0; i < 8; i++) { g.add(mergedMesh([box(0.7, 0.5, 0.6, -3 + i * 0.85, y + 0.25, z, 0xc0392b), box(0.7, 0.6, 0.15, -3 + i * 0.85, y + 0.7, z - 0.25, 0x8a2030)])); }
   }
   return g;
+}
+
+// ---- Talk to a person ----
+function _talk(ctx, personId) {
+  const handle = _cache;
+  if (!handle?.people) return;
+  const people = handle.people();
+  if (!people) return;
+  const person = people.getPersonById?.(personId);
+  if (!person) return;
+  const line = getNamedDialogue(person.name) || getDialogue(person.role, person.name);
+  ctx.toast("💬 " + person.name + ': "' + line + '"');
+  if (ctx.game) {
+    ctx.game.state.needs.social = Math.min(100, (ctx.game.state.needs.social || 0) + 1);
+    ctx.game.save?.();
+    ctx.updateHUD?.();
+  }
 }

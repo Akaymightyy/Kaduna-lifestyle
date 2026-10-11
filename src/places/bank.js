@@ -2,6 +2,7 @@
 import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { rng } from "../config.js";
+import { spawnPeople, getNamedDialogue, getDialogue } from "./people.js";
 
 let _built = false, _cache = null;
 
@@ -57,12 +58,26 @@ export async function build(scene, ctx) {
   ];
   scene.add(group);
 
+    let _people = null;
+  spawnPeople(group, [
+    { id: "teller1", name: "Mr. Bello", role: "teller", outfit: "casual", pose: "stand", x: -12, z: -14, ry: Math.PI, top: "#1a5a3a" },
+    { id: "teller2", name: "Teller", role: "teller", outfit: "casual", pose: "stand", x: -4, z: -14, ry: Math.PI, top: "#1a5a3a" },
+    { id: "teller3", name: "Teller", role: "teller", outfit: "casual", pose: "stand", x: 4, z: -14, ry: Math.PI, top: "#1a5a3a" },
+    { id: "teller4", name: "Teller", role: "teller", outfit: "casual", pose: "stand", x: 12, z: -14, ry: Math.PI, top: "#1a5a3a" },
+    { id: "manager1", name: "Mrs. Okon", role: "branch manager", outfit: "casual", pose: "stand", x: 0, z: 0, ry: Math.PI, top: "#7a3b8f" },
+    { id: "queue1", name: "Customer", role: "customer", outfit: "casual", pose: "stand", x: -6, z: 5, ry: 0 },
+    { id: "queue2", name: "Customer", role: "customer", outfit: "kaftan", pose: "stand", x: -6, z: 5.7, ry: 0 },
+    { id: "queue3", name: "Customer", role: "customer", outfit: "casual", pose: "stand", x: -6, z: 6.4, ry: 0 },
+  ]).then((p) => { _people = p; });
+
   const handle = {
     group, colliders,
     enter(ps) { ps.pos.set(0, 0, 15); ps.heading = Math.PI; },
-    exit() {}, update() {},
-    dispose() { scene.remove(group); disposeGroup(group); _built = false; _cache = null; },
+    exit() {}, update(dt, now, px, pz) { if (_people) _people.update(dt, now, px, pz); },
+    dispose() { if (_people) _people.dispose(); scene.remove(group); disposeGroup(group); _built = false; _cache = null; },
+    people: () => _people,
     onUIEvent(eid) {
+      if (eid === "talk" && arguments[1]?.personId) _talk(ctx, arguments[1].personId);
       if (eid === "deposit") _act(ctx, 0, "🏦 Money deposited safely.", { _msg: "deposit" });
       else if (eid === "withdraw") _act(ctx, 0, "💸 Money withdrawn.", { _msg: "withdraw" });
       else if (eid === "loan") _act(ctx, 0, "📋 Loan application submitted. ₦50,000 approved!", { _msg: "loan" });
@@ -77,4 +92,21 @@ function _act(ctx, cost, msg, effects) {
   if (effects._msg === "loan") { ctx.game.state.money += 50000; ctx.toast(msg); ctx.updateHUD?.(); return; }
   if (effects._msg === "deposit" || effects._msg === "withdraw" || effects._msg === "transfer") { ctx.toast(msg); return; }
   ctx.toast(msg);
+}
+
+// ---- Talk to a person ----
+function _talk(ctx, personId) {
+  const handle = _cache;
+  if (!handle?.people) return;
+  const people = handle.people();
+  if (!people) return;
+  const person = people.getPersonById?.(personId);
+  if (!person) return;
+  const line = getNamedDialogue(person.name) || getDialogue(person.role, person.name);
+  ctx.toast("💬 " + person.name + ': "' + line + '"');
+  if (ctx.game) {
+    ctx.game.state.needs.social = Math.min(100, (ctx.game.state.needs.social || 0) + 1);
+    ctx.game.save?.();
+    ctx.updateHUD?.();
+  }
 }

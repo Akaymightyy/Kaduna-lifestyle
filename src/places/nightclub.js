@@ -2,6 +2,7 @@
 import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { rng } from "../config.js";
+import { spawnPeople, getNamedDialogue, getDialogue } from "./people.js";
 
 let _built = false, _cache = null;
 const _state = { lights: [], t: 0 };
@@ -109,6 +110,22 @@ export async function build(scene, ctx) {
   ];
   scene.add(group);
 
+    let _people = null;
+  spawnPeople(group, [
+    { id: "dj1", name: "DJ Zee", role: "DJ", outfit: "casual", pose: "stand", x: 0, z: -10, ry: Math.PI, top: "#6b21a8" },
+    { id: "bouncer1", name: "Big Mike", role: "bouncer", outfit: "casual", pose: "stand", x: 0, z: 13, ry: Math.PI, top: "#222222" },
+    { id: "bartender1", name: "Bartender", role: "bartender", outfit: "casual", pose: "stand", x: -4, z: 12, ry: Math.PI, top: "#1d5fa8" },
+    { id: "dancer1", name: "Dancer", role: "DJ", outfit: "casual", pose: "stand", x: -3, z: 0, ry: 0, top: "#c0392b", route: [{ x: -3, z: 0 }, { x: -3, z: 2 }, { x: -3, z: -2 }], speed: 0.5 },
+    { id: "dancer2", name: "Dancer", role: "DJ", outfit: "casual", pose: "stand", x: 3, z: 0, ry: Math.PI, top: "#f2b134", route: [{ x: 3, z: 0 }, { x: 3, z: -2 }, { x: 3, z: 2 }], speed: 0.5 },
+    { id: "dancer3", name: "Dancer", role: "DJ", outfit: "casual", pose: "stand", x: 0, z: 3, ry: 0, top: "#2e7d4f" },
+    { id: "dancer4", name: "Dancer", role: "DJ", outfit: "casual", pose: "stand", x: -5, z: 3, ry: Math.PI, top: "#7a3b8f" },
+    { id: "dancer5", name: "Dancer", role: "DJ", outfit: "casual", pose: "stand", x: 5, z: 3, ry: 0, top: "#e67e22" },
+    { id: "bar1", name: "Patron", role: "bartender", outfit: "casual", pose: "sit", x: -5, z: 10.8, ry: 0 },
+    { id: "bar2", name: "Patron", role: "bartender", outfit: "casual", pose: "sit", x: -2.5, z: 10.8, ry: 0 },
+    { id: "bar3", name: "Patron", role: "bartender", outfit: "casual", pose: "sit", x: 2.5, z: 10.8, ry: 0 },
+    { id: "vip1", name: "VIP", role: "bartender", outfit: "casual", pose: "sit", x: 15, z: -7, ry: 0, top: "#6b21a8" },
+  ]).then((p) => { _people = p; });
+
   const handle = {
     group, colliders,
     enter(ps) { ps.pos.set(0, 0, 13); ps.heading = Math.PI; },
@@ -133,8 +150,10 @@ export async function build(scene, ctx) {
         }
       }
     },
-    dispose() { scene.remove(group); disposeGroup(group); _built = false; _cache = null; _state.lights = []; _state.ledTiles = null; _state.discoBall = null; },
+    dispose() { if (_people) _people.dispose(); scene.remove(group); disposeGroup(group); _built = false; _cache = null; _state.lights = []; _state.ledTiles = null; _state.discoBall = null; },
+    people: () => _people,
     onUIEvent(eid) {
+      if (eid === "talk" && arguments[1]?.personId) _talk(ctx, arguments[1].personId);
       if (eid === "dance") _act(ctx, 1000, "🪩 Danced all night! Fun +30", { fun: 30, energy: -10, social: 10 });
       else if (eid === "buy_drink") _act(ctx, 500, "🍹 Bought a drink. Social +10", { social: 10, fun: 5 });
       else if (eid === "socialize") _act(ctx, 0, "💬 Socialized. Social +20", { social: 20 });
@@ -152,4 +171,21 @@ function _act(ctx, cost, msg, effects) {
     if (effects[k]) ctx.game.state.needs[k] = Math.min(100, Math.max(0, (ctx.game.state.needs[k] || 0) + effects[k]));
   }
   ctx.game.save?.(); ctx.updateHUD?.(); ctx.toast(msg);
+}
+
+// ---- Talk to a person ----
+function _talk(ctx, personId) {
+  const handle = _cache;
+  if (!handle?.people) return;
+  const people = handle.people();
+  if (!people) return;
+  const person = people.getPersonById?.(personId);
+  if (!person) return;
+  const line = getNamedDialogue(person.name) || getDialogue(person.role, person.name);
+  ctx.toast("💬 " + person.name + ': "' + line + '"');
+  if (ctx.game) {
+    ctx.game.state.needs.social = Math.min(100, (ctx.game.state.needs.social || 0) + 1);
+    ctx.game.save?.();
+    ctx.updateHUD?.();
+  }
 }

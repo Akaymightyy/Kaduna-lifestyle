@@ -2,6 +2,7 @@
 import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { rng } from "../config.js";
+import { spawnPeople, getNamedDialogue, getDialogue } from "./people.js";
 
 let _built = false, _cache = null;
 
@@ -85,12 +86,30 @@ export async function build(scene, ctx) {
   ];
   scene.add(group);
 
+    let _people = null;
+  const _players = [];
+  for (let i = 0; i < 5; i++) {
+    _players.push({ id: "p_red_" + i, name: "Player", role: "footballer", outfit: "casual", pose: "stand", x: -10 + i * 5, z: 0 + (i % 2 ? 3 : -3), ry: 0, top: "#c0392b", route: [{ x: -10 + i * 5, z: i % 2 ? 3 : -3 }, { x: -10 + i * 5, z: i % 2 ? -3 : 3 }], speed: 1.0 + i * 0.2 });
+  }
+  for (let i = 0; i < 5; i++) {
+    _players.push({ id: "p_blue_" + i, name: "Player", role: "footballer", outfit: "casual", pose: "stand", x: 10 - i * 5, z: 0 + (i % 2 ? -3 : 3), ry: Math.PI, top: "#1d5fa8", route: [{ x: 10 - i * 5, z: i % 2 ? -3 : 3 }, { x: 10 - i * 5, z: i % 2 ? 3 : -3 }], speed: 1.0 + i * 0.2 });
+  }
+  spawnPeople(group, [
+    { id: "coach1", name: "Coach Daniel", role: "coach", outfit: "casual", pose: "stand", x: -25, z: 0, ry: Math.PI / 2, top: "#2e7d4f" },
+    ..._players,
+    { id: "spec1", name: "Spectator", role: "footballer", outfit: "casual", pose: "sit", x: -15, z: 22, ry: 0, top: "#f2b134" },
+    { id: "spec2", name: "Spectator", role: "footballer", outfit: "kaftan", pose: "sit", x: 0, z: 22, ry: 0 },
+    { id: "spec3", name: "Spectator", role: "footballer", outfit: "casual", pose: "sit", x: 15, z: 22, ry: 0, top: "#c0392b" },
+  ]).then((p) => { _people = p; });
+
   const handle = {
     group, colliders,
     enter(ps) { ps.pos.set(0, 0, 25); ps.heading = Math.PI; },
-    exit() {}, update() {},
-    dispose() { scene.remove(group); disposeGroup(group); _built = false; _cache = null; },
+    exit() {}, update(dt, now, px, pz) { if (_people) _people.update(dt, now, px, pz); },
+    dispose() { if (_people) _people.dispose(); scene.remove(group); disposeGroup(group); _built = false; _cache = null; },
+    people: () => _people,
     onUIEvent(eid) {
+      if (eid === "talk" && arguments[1]?.personId) _talk(ctx, arguments[1].personId);
       if (eid === "watch_match") _act(ctx, 500, "⚽ Watched the match! Fun +30", { fun: 30, social: 5 });
       else if (eid === "play_match") _act(ctx, 0, "⚽ You scored! Earned ₦1000", { fun: 20, energy: -20, _earn: 1000 });
       else if (eid === "buy_ticket") _act(ctx, 5000, "🎟️ Season ticket bought! Discounts unlocked.", { fun: 10 });
@@ -108,4 +127,21 @@ function _act(ctx, cost, msg, effects) {
     if (effects[k]) ctx.game.state.needs[k] = Math.min(100, Math.max(0, (ctx.game.state.needs[k] || 0) + effects[k]));
   }
   ctx.game.save?.(); ctx.updateHUD?.(); ctx.toast(msg);
+}
+
+// ---- Talk to a person ----
+function _talk(ctx, personId) {
+  const handle = _cache;
+  if (!handle?.people) return;
+  const people = handle.people();
+  if (!people) return;
+  const person = people.getPersonById?.(personId);
+  if (!person) return;
+  const line = getNamedDialogue(person.name) || getDialogue(person.role, person.name);
+  ctx.toast("💬 " + person.name + ': "' + line + '"');
+  if (ctx.game) {
+    ctx.game.state.needs.social = Math.min(100, (ctx.game.state.needs.social || 0) + 1);
+    ctx.game.save?.();
+    ctx.updateHUD?.();
+  }
 }

@@ -2,6 +2,7 @@
 import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { rng } from "../config.js";
+import { spawnPeople, getNamedDialogue, getDialogue } from "./people.js";
 
 let _built = false, _cache = null;
 
@@ -65,12 +66,22 @@ export async function build(scene, ctx) {
   ];
   scene.add(group);
 
+    let _people = null;
+  spawnPeople(group, [
+    { id: "barber1", name: "Musa", role: "barber", outfit: "casual", pose: "stand", x: -7, z: -6, ry: Math.PI, top: "#1a1a2e" },
+    { id: "customer1", name: "Sani", role: "customer", outfit: "kaftan", pose: "sit", x: 0, z: -6, ry: 0, top: "#c9b38a" },
+    { id: "wait1", name: "Customer", role: "customer", outfit: "casual", pose: "sit", x: -1, z: 7, ry: 0 },
+    { id: "wait2", name: "Customer", role: "customer", outfit: "kaftan", pose: "sit", x: 1, z: 7, ry: 0 },
+  ]).then((p) => { _people = p; });
+
   const handle = {
     group, colliders,
     enter(ps) { ps.pos.set(0, 0, 8); ps.heading = Math.PI; },
-    exit() {}, update() {},
-    dispose() { scene.remove(group); disposeGroup(group); _built = false; _cache = null; },
+    exit() {}, update(dt, now, px, pz) { if (_people) _people.update(dt, now, px, pz); },
+    dispose() { if (_people) _people.dispose(); scene.remove(group); disposeGroup(group); _built = false; _cache = null; },
+    people: () => _people,
     onUIEvent(eid) {
+      if (eid === "talk" && arguments[1]?.personId) _talk(ctx, arguments[1].personId);
       if (eid === "haircut") _act(ctx, 500, "✂️ Fresh haircut! Hygiene +20, Fun +10", { hygiene: 20, fun: 10 });
       else if (eid === "beard_trim") _act(ctx, 300, "🧔 Beard trimmed. Hygiene +10", { hygiene: 10 });
       else if (eid === "shave") _act(ctx, 400, "🪒 Clean shave! Hygiene +25", { hygiene: 25 });
@@ -117,4 +128,21 @@ function _buildBarberStation(R) {
   const clippers = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.15, 0.3), new THREE.MeshLambertMaterial({ color: 0x222222 }));
   clippers.position.set(-0.5, 1.05, -2.5); g.add(clippers);
   return g;
+}
+
+// ---- Talk to a person ----
+function _talk(ctx, personId) {
+  const handle = _cache;
+  if (!handle?.people) return;
+  const people = handle.people();
+  if (!people) return;
+  const person = people.getPersonById?.(personId);
+  if (!person) return;
+  const line = getNamedDialogue(person.name) || getDialogue(person.role, person.name);
+  ctx.toast("💬 " + person.name + ': "' + line + '"');
+  if (ctx.game) {
+    ctx.game.state.needs.social = Math.min(100, (ctx.game.state.needs.social || 0) + 1);
+    ctx.game.save?.();
+    ctx.updateHUD?.();
+  }
 }

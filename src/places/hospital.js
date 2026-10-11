@@ -2,6 +2,7 @@
 import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { rng } from "../config.js";
+import { spawnPeople, getNamedDialogue, getDialogue } from "./people.js";
 
 let _built = false, _cache = null;
 
@@ -61,12 +62,26 @@ export async function build(scene, ctx) {
   ];
   scene.add(group);
 
+    let _people = null;
+  spawnPeople(group, [
+    { id: "doctor1", name: "Dr. Okafor", role: "doctor", outfit: "casual", pose: "stand", x: 12, z: 5, ry: Math.PI, top: "#ffffff" },
+    { id: "nurse1", name: "Nurse Aisha", role: "nurse", outfit: "casual", pose: "stand", x: 0, z: -16, ry: 0, top: "#e11d48", route: [{ x: 0, z: -16 }, { x: -12, z: -8 }, { x: 12, z: -8 }, { x: 0, z: 5 }], speed: 0.6 },
+    { id: "patient1", name: "Patient", role: "patient", outfit: "casual", pose: "sit", x: -8, z: 10, ry: 0 },
+    { id: "patient2", name: "Patient", role: "patient", outfit: "kaftan", pose: "sit", x: 8, z: 10, ry: 0 },
+    { id: "patient3", name: "Patient", role: "patient", outfit: "casual", pose: "sit", x: -8, z: 14, ry: Math.PI },
+    { id: "patient4", name: "Patient", role: "patient", outfit: "casual", pose: "sit", x: 8, z: 14, ry: Math.PI },
+    { id: "visitor1", name: "Visitor", role: "patient", outfit: "kaftan", pose: "stand", x: 0, z: 5, ry: Math.PI, route: [{ x: 0, z: 5 }, { x: -12, z: -8 }], speed: 0.5 },
+    { id: "visitor2", name: "Visitor", role: "patient", outfit: "casual", pose: "stand", x: -15, z: 0, ry: 0, route: [{ x: -15, z: 0 }, { x: 15, z: 0 }], speed: 0.4 },
+  ]).then((p) => { _people = p; });
+
   const handle = {
     group, colliders,
     enter(ps) { ps.pos.set(0, 0, 18); ps.heading = Math.PI; },
-    exit() {}, update() {},
-    dispose() { scene.remove(group); disposeGroup(group); _built = false; _cache = null; },
+    exit() {}, update(dt, now, px, pz) { if (_people) _people.update(dt, now, px, pz); },
+    dispose() { if (_people) _people.dispose(); scene.remove(group); disposeGroup(group); _built = false; _cache = null; },
+    people: () => _people,
     onUIEvent(eid) {
+      if (eid === "talk" && arguments[1]?.personId) _talk(ctx, arguments[1].personId);
       if (eid === "treat") _act(ctx, 2000, "💊 Full treatment! Health restored.", { hunger: 0, fun: 0, energy: 50, social: 0, hygiene: 30, bladder: 0, _all: 100 });
       else if (eid === "checkup") _act(ctx, 500, "🩺 Checkup done. You're healthy!", {});
       else if (eid === "buy_drugs") _act(ctx, 200, "💊 Drugs bought. Hygiene +20", { hygiene: 20 });
@@ -115,4 +130,21 @@ function _buildIVStand() {
   const base = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.35, 0.1, 8), new THREE.MeshLambertMaterial({ color: 0x4a4f55 }));
   base.position.y = 0.05; g.add(base);
   return g;
+}
+
+// ---- Talk to a person ----
+function _talk(ctx, personId) {
+  const handle = _cache;
+  if (!handle?.people) return;
+  const people = handle.people();
+  if (!people) return;
+  const person = people.getPersonById?.(personId);
+  if (!person) return;
+  const line = getNamedDialogue(person.name) || getDialogue(person.role, person.name);
+  ctx.toast("💬 " + person.name + ': "' + line + '"');
+  if (ctx.game) {
+    ctx.game.state.needs.social = Math.min(100, (ctx.game.state.needs.social || 0) + 1);
+    ctx.game.save?.();
+    ctx.updateHUD?.();
+  }
 }

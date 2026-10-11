@@ -2,6 +2,7 @@
 import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { rng } from "../config.js";
+import { spawnPeople, getNamedDialogue, getDialogue } from "./people.js";
 
 let _built = false, _cache = null;
 
@@ -94,12 +95,29 @@ export async function build(scene, ctx) {
   ];
   scene.add(group);
 
+    let _people = null;
+  spawnPeople(group, [
+    { id: "conductor1", name: "Musa", role: "bus conductor", outfit: "casual", pose: "stand", x: -25, z: -15, ry: Math.PI, top: "#f2b134" },
+    { id: "driver1", name: "Alhaji Tanko", role: "bus driver", outfit: "kaftan", pose: "stand", x: 0, z: -15, ry: Math.PI, top: "#c9b38a" },
+    { id: "loader1", name: "Abdul", role: "load carrier", outfit: "casual", pose: "stand", x: -30, z: 10, ry: 0, top: "#2b3a55", route: [{ x: -30, z: 10 }, { x: 30, z: 10 }, { x: 30, z: -5 }, { x: -30, z: -5 }], speed: 0.7 },
+    { id: "vendor1", name: "Mama Chinedu", role: "food vendor", outfit: "casual", pose: "stand", x: 15, z: -12, ry: Math.PI, top: "#c0392b" },
+    { id: "tout1", name: "Bala", role: "park tout", outfit: "casual", pose: "stand", x: 10, z: 5, ry: 0, top: "#1d5fa8", route: [{ x: 10, z: 5 }, { x: -10, z: 5 }, { x: -10, z: -5 }, { x: 10, z: -5 }], speed: 0.9 },
+    { id: "pass1", name: "Passenger", role: "passenger", outfit: "casual", pose: "sit", x: -4, z: -4, ry: 0 },
+    { id: "pass2", name: "Passenger", role: "passenger", outfit: "kaftan", pose: "sit", x: 4, z: -4, ry: 0 },
+    { id: "pass3", name: "Passenger", role: "passenger", outfit: "casual", pose: "sit", x: -4, z: 4, ry: Math.PI },
+    { id: "pass4", name: "Passenger", role: "passenger", outfit: "kaftan", pose: "sit", x: 4, z: 4, ry: Math.PI },
+    { id: "hawker1", name: "Hawker", role: "load carrier", outfit: "casual", pose: "stand", x: -20, z: 0, ry: 0, top: "#2e7d4f", route: [{ x: -20, z: 0 }, { x: 20, z: 0 }], speed: 0.6 },
+    { id: "hawker2", name: "Hawker", role: "load carrier", outfit: "kaftan", pose: "stand", x: 20, z: 8, ry: Math.PI, top: "#d98e2b", route: [{ x: 20, z: 8 }, { x: -20, z: 8 }], speed: 0.5 },
+  ]).then((p) => { _people = p; });
+
   const handle = {
     group, colliders,
     enter(ps) { ps.pos.set(0, 0, 22); ps.heading = Math.PI; },
-    exit() {}, update() {},
-    dispose() { scene.remove(group); disposeGroup(group); _built = false; _cache = null; },
+    exit() {}, update(dt, now, px, pz) { if (_people) _people.update(dt, now, px, pz); },
+    dispose() { if (_people) _people.dispose(); scene.remove(group); disposeGroup(group); _built = false; _cache = null; },
+    people: () => _people,
     onUIEvent(eid) {
+      if (eid === "talk" && arguments[1]?.personId) _talk(ctx, arguments[1].personId);
       if (eid === "board_bus") _act(ctx, 800, "🚌 Bus to Zaria boarded!", { energy: -10 });
       else if (eid === "hire_keke") _act(ctx, 200, "🛺 Keke hired!", {});
       else if (eid === "hire_okada") _act(ctx, 400, "🏍️ Okada hired!", {});
@@ -163,4 +181,21 @@ function _buildKiosk(label, color, R) {
   const sign = signMesh(label, 3, 0.7, { width: 200, height: 48, bg: "#" + color.toString(16).padStart(6, "0"), fg: "#fff", size: 24 });
   sign.position.set(0, 2.7, 0); g.add(sign);
   return g;
+}
+
+// ---- Talk to a person ----
+function _talk(ctx, personId) {
+  const handle = _cache;
+  if (!handle?.people) return;
+  const people = handle.people();
+  if (!people) return;
+  const person = people.getPersonById?.(personId);
+  if (!person) return;
+  const line = getNamedDialogue(person.name) || getDialogue(person.role, person.name);
+  ctx.toast("💬 " + person.name + ': "' + line + '"');
+  if (ctx.game) {
+    ctx.game.state.needs.social = Math.min(100, (ctx.game.state.needs.social || 0) + 1);
+    ctx.game.save?.();
+    ctx.updateHUD?.();
+  }
 }

@@ -2,6 +2,7 @@
 import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { rng } from "../config.js";
+import { spawnPeople, getNamedDialogue, getDialogue } from "./people.js";
 
 let _built = false, _cache = null;
 
@@ -54,12 +55,29 @@ export async function build(scene, ctx) {
     { minX: -16, maxX: -14, minZ: 1, maxZ: 9 }, { minX: 14, maxX: 16, minZ: 1, maxZ: 9 },
   ];
   scene.add(group);
+    let _people = null;
+  spawnPeople(group, [
+    { id: "lecturer1", name: "Dr. Aminu", role: "lecturer", outfit: "kaftan", pose: "stand", x: 0, z: -30, ry: 0, top: "#1d5fa8" },
+    { id: "student1", name: "Fatima", role: "student", outfit: "casual", pose: "sit", x: -3, z: -27, ry: 0, top: "#c0392b" },
+    { id: "student2", name: "Chidi", role: "student", outfit: "casual", pose: "sit", x: 0, z: -27, ry: 0, top: "#2e7d4f" },
+    { id: "student3", name: "Aisha", role: "student", outfit: "casual", pose: "sit", x: 3, z: -27, ry: 0, top: "#f2b134" },
+    { id: "student4", name: "Student", role: "student", outfit: "casual", pose: "sit", x: -3, z: -25, ry: 0 },
+    { id: "student5", name: "Student", role: "student", outfit: "kaftan", pose: "sit", x: 0, z: -25, ry: 0 },
+    { id: "student6", name: "Student", role: "student", outfit: "casual", pose: "sit", x: 3, z: -25, ry: 0 },
+    { id: "walker1", name: "Student", role: "student", outfit: "casual", pose: "stand", x: -20, z: 0, ry: 0, route: [{ x: -20, z: 0 }, { x: 20, z: 0 }], speed: 0.8 },
+    { id: "walker2", name: "Student", role: "student", outfit: "kaftan", pose: "stand", x: 20, z: 10, ry: Math.PI, route: [{ x: 20, z: 10 }, { x: -20, z: 10 }], speed: 0.7 },
+    { id: "cafeteria1", name: "Aunty Rabi", role: "cafeteria cook", outfit: "casual", pose: "stand", x: -35, z: -3, ry: 0, top: "#d98e2b" },
+    { id: "player1", name: "Ahmed", role: "footballer", outfit: "casual", pose: "stand", x: -5, z: 5, ry: 0, top: "#c0392b", route: [{ x: -5, z: 5 }, { x: 5, z: 5 }], speed: 1.5 },
+  ]).then((p) => { _people = p; });
+
   const handle = {
     group, colliders,
     enter(ps) { ps.pos.set(0, 0, 28); ps.heading = Math.PI; },
-    exit() {}, update() {},
-    dispose() { scene.remove(group); disposeGroup(group); _built = false; _cache = null; },
+    exit() {}, update(dt, now, px, pz) { if (_people) _people.update(dt, now, px, pz); },
+    dispose() { if (_people) _people.dispose(); scene.remove(group); disposeGroup(group); _built = false; _cache = null; },
+    people: () => _people,
     onUIEvent(eid) {
+      if (eid === "talk" && arguments[1]?.personId) _talk(ctx, arguments[1].personId);
       if (eid === "attend_lecture") _act(ctx, -500, "🎓 Attended lecture! ₦500 stipend. Energy -20", { energy: -20, fun: -5 }, true);
       else if (eid === "eat_cafeteria") _act(ctx, 400, "🍝 Student meal! Hunger +50", { hunger: 50, fun: 5 });
       else if (eid === "play_football") _act(ctx, 0, "⚽ Football! Fun +25, Social +15", { fun: 25, social: 15, energy: -15 });
@@ -125,4 +143,21 @@ function _buildTree(R) {
   const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(1.4 + R() * 0.5, 0), new THREE.MeshLambertMaterial({ color: R() < 0.5 ? 0x3d8c3a : 0x4f9c43 }));
   crown.position.y = 3.5; crown.scale.y = 0.8; g.add(crown);
   return g;
+}
+
+// ---- Talk to a person ----
+function _talk(ctx, personId) {
+  const handle = _cache;
+  if (!handle?.people) return;
+  const people = handle.people();
+  if (!people) return;
+  const person = people.getPersonById?.(personId);
+  if (!person) return;
+  const line = getNamedDialogue(person.name) || getDialogue(person.role, person.name);
+  ctx.toast("💬 " + person.name + ': "' + line + '"');
+  if (ctx.game) {
+    ctx.game.state.needs.social = Math.min(100, (ctx.game.state.needs.social || 0) + 1);
+    ctx.game.save?.();
+    ctx.updateHUD?.();
+  }
 }

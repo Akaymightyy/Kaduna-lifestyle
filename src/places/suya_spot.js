@@ -8,6 +8,7 @@
 import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, smokeSystem, stripLight, disposeGroup } from "./_helpers.js";
 import { rng } from "../config.js";
+import { spawnPeople, getNamedDialogue, getDialogue } from "./people.js";
 
 let _built = false;
 let _cache = null;
@@ -222,20 +223,34 @@ export async function build(scene, ctx) {
 
   scene.add(group);
 
+  // ---- People: Mallam Audu at grill + 4 sitting on benches + 2 standing + Yaro running ----
+  let _people = null;
+  spawnPeople(group, [
+    { id: "suya1", name: "Mallam Audu", role: "suya seller", outfit: "kaftan", pose: "stand", x: 0, z: -5, ry: Math.PI, top: "#c9b38a" },
+    { id: "boy1", name: "Yaro", role: "errand boy", outfit: "casual", pose: "stand", x: -6, z: -6, ry: 0, top: "#1d5fa8", route: [{ x: -6, z: -6 }, { x: 6, z: -6 }, { x: 6, z: 6 }, { x: -6, z: 6 }], speed: 1.2 },
+    { id: "cust1", name: "Customer", role: "customer", outfit: "casual", pose: "sit", x: -8, z: -3, ry: Math.PI / 2 },
+    { id: "cust2", name: "Customer", role: "customer", outfit: "kaftan", pose: "sit", x: 8, z: -3, ry: -Math.PI / 2 },
+    { id: "cust3", name: "Customer", role: "customer", outfit: "casual", pose: "sit", x: -8, z: 3, ry: Math.PI / 2 },
+    { id: "cust4", name: "Customer", role: "customer", outfit: "kaftan", pose: "sit", x: 8, z: 3, ry: -Math.PI / 2 },
+    { id: "stand1", name: "Chidi", role: "customer", outfit: "casual", pose: "stand", x: -4, z: 0, ry: Math.PI / 2, top: "#2e7d4f" },
+    { id: "stand2", name: "Bala", role: "customer", outfit: "casual", pose: "stand", x: 4, z: 0, ry: -Math.PI / 2, top: "#c0392b" },
+  ]).then((p) => { _people = p; });
+
   let _smokeAcc = 0;
   const handle = {
     group,
     enter(playerState) {
-      // Player enters near the south fence
       playerState.pos.set(0, 0, 12);
       playerState.heading = Math.PI;
     },
     exit() {},
-    update(dt, now) {
+    update(dt, now, px, pz) {
       _smokeAcc += dt;
       if (_smokeAcc > 0.05) { _smokeAcc = 0; smoke.update(0.05); }
+      if (_people) _people.update(dt, now, px, pz);
     },
     dispose() {
+      if (_people) _people.dispose();
       scene.remove(group);
       disposeGroup(group);
       _built = false;
@@ -243,7 +258,9 @@ export async function build(scene, ctx) {
     },
     onUIEvent(eventId, payload) {
       if (eventId === "order") _orderSuya(payload?.item, ctx);
+      else if (eventId === "talk" && payload?.personId) _talk(ctx, payload.personId);
     },
+    people: () => _people,
     colliders,
   };
 
@@ -318,4 +335,21 @@ function _orderSuya(item, ctx) {
   ctx.game.save?.();
   ctx.updateHUD?.();
   ctx.toast("🍢 " + m.name + "! Yaji pepper scatter. Hunger +" + m.hunger);
+}
+
+// ---- Talk to a person ----
+function _talk(ctx, personId) {
+  const handle = _cache;
+  if (!handle?.people) return;
+  const people = handle.people();
+  if (!people) return;
+  const person = people.getPersonById?.(personId);
+  if (!person) return;
+  const line = getNamedDialogue(person.name) || getDialogue(person.role, person.name);
+  ctx.toast("💬 " + person.name + ': "' + line + '"');
+  if (ctx.game) {
+    ctx.game.state.needs.social = Math.min(100, (ctx.game.state.needs.social || 0) + 1);
+    ctx.game.save?.();
+    ctx.updateHUD?.();
+  }
 }

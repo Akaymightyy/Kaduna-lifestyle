@@ -2,6 +2,7 @@
 import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { rng } from "../config.js";
+import { spawnPeople, getNamedDialogue, getDialogue } from "./people.js";
 
 let _built = false, _cache = null;
 
@@ -74,12 +75,28 @@ export async function build(scene, ctx) {
   ];
   scene.add(group);
 
+    let _people = null;
+  spawnPeople(group, [
+    { id: "pastor1", name: "Pastor John", role: "pastor", outfit: "casual", pose: "stand", x: 0, z: -12, ry: 0, top: "#1a1a2e" },
+    { id: "usher2", name: "Sister Mary", role: "usher", outfit: "casual", pose: "stand", x: 0, z: 13, ry: Math.PI, top: "#c0392b" },
+    { id: "pew1", name: "Member", role: "usher", outfit: "casual", pose: "sit", x: -7.5, z: -5, ry: 0 },
+    { id: "pew2", name: "Member", role: "usher", outfit: "casual", pose: "sit", x: -4.5, z: -5, ry: 0 },
+    { id: "pew3", name: "Member", role: "usher", outfit: "casual", pose: "sit", x: -1.5, z: -5, ry: 0 },
+    { id: "pew4", name: "Member", role: "usher", outfit: "casual", pose: "sit", x: 1.5, z: -5, ry: 0 },
+    { id: "pew5", name: "Member", role: "usher", outfit: "casual", pose: "sit", x: 4.5, z: -5, ry: 0 },
+    { id: "pew6", name: "Member", role: "usher", outfit: "casual", pose: "sit", x: 7.5, z: -5, ry: 0 },
+    { id: "pew7", name: "Member", role: "usher", outfit: "casual", pose: "sit", x: -7.5, z: -3, ry: 0 },
+    { id: "pew8", name: "Member", role: "usher", outfit: "casual", pose: "sit", x: 7.5, z: -3, ry: 0 },
+  ]).then((p) => { _people = p; });
+
   const handle = {
     group, colliders,
     enter(ps) { ps.pos.set(0, 0, 13); ps.heading = Math.PI; },
-    exit() {}, update() {},
-    dispose() { scene.remove(group); disposeGroup(group); _built = false; _cache = null; },
+    exit() {}, update(dt, now, px, pz) { if (_people) _people.update(dt, now, px, pz); },
+    dispose() { if (_people) _people.dispose(); scene.remove(group); disposeGroup(group); _built = false; _cache = null; },
+    people: () => _people,
     onUIEvent(eid) {
+      if (eid === "talk" && arguments[1]?.personId) _talk(ctx, arguments[1].personId);
       if (eid === "pray_church") _act(ctx, 0, "🙏 Prayed. Mood +25, Social +10", { fun: 25, social: 10 });
       else if (eid === "attend_service") _act(ctx, 0, "⛪ Attended service. Mood +30", { fun: 30, social: 15 });
       else if (eid === "choir") _act(ctx, 0, "🎵 Choir practice! Fun +15, Social +15", { fun: 15, social: 15 });
@@ -97,4 +114,21 @@ function _act(ctx, cost, msg, effects) {
     if (effects[k]) ctx.game.state.needs[k] = Math.min(100, Math.max(0, (ctx.game.state.needs[k] || 0) + effects[k]));
   }
   ctx.game.save?.(); ctx.updateHUD?.(); ctx.toast(msg);
+}
+
+// ---- Talk to a person ----
+function _talk(ctx, personId) {
+  const handle = _cache;
+  if (!handle?.people) return;
+  const people = handle.people();
+  if (!people) return;
+  const person = people.getPersonById?.(personId);
+  if (!person) return;
+  const line = getNamedDialogue(person.name) || getDialogue(person.role, person.name);
+  ctx.toast("💬 " + person.name + ': "' + line + '"');
+  if (ctx.game) {
+    ctx.game.state.needs.social = Math.min(100, (ctx.game.state.needs.social || 0) + 1);
+    ctx.game.save?.();
+    ctx.updateHUD?.();
+  }
 }

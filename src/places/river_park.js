@@ -2,6 +2,7 @@
 import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { rng } from "../config.js";
+import { spawnPeople, getNamedDialogue, getDialogue } from "./people.js";
 
 let _built = false, _cache = null;
 
@@ -82,12 +83,26 @@ export async function build(scene, ctx) {
   ];
   scene.add(group);
 
+    let _people = null;
+  spawnPeople(group, [
+    { id: "fisher1", name: "Pa Audu", role: "fisherman", outfit: "kaftan", pose: "stand", x: 0, z: -14, ry: 0, top: "#c9b38a" },
+    { id: "guard2", name: "Sergeant Idris", role: "park ranger", outfit: "casual", pose: "stand", x: 0, z: 25, ry: Math.PI, top: "#2e7d4f" },
+    { id: "jogger1", name: "Jogger", role: "park ranger", outfit: "casual", pose: "stand", x: -20, z: 0, ry: 0, top: "#1d5fa8", route: [{ x: -20, z: 0 }, { x: 20, z: 0 }, { x: 20, z: 20 }, { x: -20, z: 20 }], speed: 2.0 },
+    { id: "jogger2", name: "Jogger", role: "park ranger", outfit: "casual", pose: "stand", x: 20, z: 5, ry: Math.PI, top: "#c0392b", route: [{ x: 20, z: 5 }, { x: -20, z: 5 }, { x: -20, z: 15 }, { x: 20, z: 15 }], speed: 1.8 },
+    { id: "couple1", name: "Couple", role: "park ranger", outfit: "casual", pose: "sit", x: -15, z: 5, ry: 0 },
+    { id: "couple2", name: "Couple", role: "park ranger", outfit: "kaftan", pose: "sit", x: 15, z: 15, ry: Math.PI },
+    { id: "relax1", name: "Visitor", role: "park ranger", outfit: "casual", pose: "sit", x: -15, z: 15, ry: 0 },
+    { id: "relax2", name: "Visitor", role: "park ranger", outfit: "kaftan", pose: "sit", x: 15, z: 5, ry: Math.PI },
+  ]).then((p) => { _people = p; });
+
   const handle = {
     group, colliders,
     enter(ps) { ps.pos.set(0, 0, 25); ps.heading = Math.PI; },
-    exit() {}, update() {},
-    dispose() { scene.remove(group); disposeGroup(group); _built = false; _cache = null; },
+    exit() {}, update(dt, now, px, pz) { if (_people) _people.update(dt, now, px, pz); },
+    dispose() { if (_people) _people.dispose(); scene.remove(group); disposeGroup(group); _built = false; _cache = null; },
+    people: () => _people,
     onUIEvent(eid) {
+      if (eid === "talk" && arguments[1]?.personId) _talk(ctx, arguments[1].personId);
       if (eid === "fish") _act(ctx, 0, "🎣 You caught a fish!", { _earn: 200 + Math.floor(Math.random() * 600), fun: 10, energy: -10 });
       else if (eid === "picnic") _act(ctx, 0, "🧺 Lovely picnic! Mood +25, Fun +15", { fun: 15, social: 25 });
       else if (eid === "boat_ride") _act(ctx, 1000, "🚣 Romantic boat ride! Mood +30", { fun: 30, social: 15 });
@@ -129,4 +144,21 @@ function _buildWillow(R) {
   const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(2 + R() * 0.5, 0), new THREE.MeshLambertMaterial({ color: 0x4a8a3a }));
   crown.position.y = 3.5; crown.scale.y = 0.6; g.add(crown);
   return g;
+}
+
+// ---- Talk to a person ----
+function _talk(ctx, personId) {
+  const handle = _cache;
+  if (!handle?.people) return;
+  const people = handle.people();
+  if (!people) return;
+  const person = people.getPersonById?.(personId);
+  if (!person) return;
+  const line = getNamedDialogue(person.name) || getDialogue(person.role, person.name);
+  ctx.toast("💬 " + person.name + ': "' + line + '"');
+  if (ctx.game) {
+    ctx.game.state.needs.social = Math.min(100, (ctx.game.state.needs.social || 0) + 1);
+    ctx.game.save?.();
+    ctx.updateHUD?.();
+  }
 }

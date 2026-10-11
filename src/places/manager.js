@@ -171,9 +171,9 @@ export async function exitPlace(playerState) {
   if (_state.ctx.onPlaceChange) _state.ctx.onPlaceChange(null);
 }
 
-export function updateActive(dt, now) {
+export function updateActive(dt, now, px, pz) {
   if (_state.placeHandle?.update) {
-    try { _state.placeHandle.update(dt, now); } catch (e) { console.warn(e); }
+    try { _state.placeHandle.update(dt, now, px, pz); } catch (e) { console.warn(e); }
   }
 }
 
