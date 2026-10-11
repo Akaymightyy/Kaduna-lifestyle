@@ -15,65 +15,10 @@ const HAIRS = ["#111111", "#1b1b1b", "#2a1e14"];
 let basePromise = null, baseInfo = null;
 const PART = { clothing: 0, skin: 2, hair: 3, shoes: 4 };
 
-// male.glb is split into ~240 tiny skinned meshes. Drawing 9 people = 2000+ draw calls (the lag).
-// Here they are merged ONCE into a handful of meshes: one "paintable" mesh (clothes/skin/hair/shoes
-// coloured per vertex) + one mesh per remaining material (eyes, brows...).
-function mergeSkinned(model) {
-  const skinned = [];
-  model.traverse((o) => { if (o.isSkinnedMesh) skinned.push(o); });
-  if (skinned.length < 2) return;
-  // the main body mesh owns the OUTERMOST copy of the skeleton (the one the posing code moves)
-  const ref = skinned.reduce((a, m) => (m.geometry.attributes.position.count > a.geometry.attributes.position.count ? m : a), skinned[0]), refBones = ref.skeleton.bones;
-  const idx = new Map(refBones.map((b, i) => [b.name, i]));
-  const paint = [], others = new Map();
-  for (const m of skinned) {
-    const g = m.geometry.clone();
-    g.morphAttributes = {}; g.morphTargetsRelative = false;
-    if (!g.index) { const c = g.attributes.position.count, ix = new (c > 65535 ? Uint32Array : Uint16Array)(c); for (let i = 0; i < c; i++) ix[i] = i; g.setIndex(new THREE.BufferAttribute(ix, 1)); }
-    // remap bone indices into the reference skeleton (matched by bone name)
-    if (m.skeleton !== ref.skeleton) {
-      const map = m.skeleton.bones.map((b) => idx.get(b.name) ?? 0);
-      const si = g.attributes.skinIndex;
-      for (let i = 0; i < si.array.length; i++) si.array[i] = map[si.array[i]];
-    }
-    const mats = Array.isArray(m.material) ? m.material : [m.material];
-    const n = (mats[0].name || "").toLowerCase();
-    const part = Object.keys(PART).find((k) => n.includes(k));
-    if (part && mats.length === 1) {
-      g.computeBoundingBox();
-      const y0 = g.boundingBox.min.y, y1 = g.boundingBox.max.y, pos = g.attributes.position;
-      const hy = new Float32Array(pos.count), pt = new Float32Array(pos.count);
-      for (let i = 0; i < pos.count; i++) { hy[i] = (pos.getY(i) - y0) / Math.max(1e-6, y1 - y0); pt[i] = PART[part]; }
-      g.setAttribute("hy", new THREE.BufferAttribute(hy, 1)); g.setAttribute("part", new THREE.BufferAttribute(pt, 1));
-      for (const k of Object.keys(g.attributes)) if (!["position", "normal", "skinIndex", "skinWeight", "hy", "part"].includes(k)) g.deleteAttribute(k);
-      paint.push(g);
-    } else {
-      const key = mats[0].uuid;
-      if (!others.has(key)) others.set(key, { mat: mats[0], geos: [] });
-      others.get(key).geos.push(g);
-    }
-  }
-  const parent = ref.parent || model;
-  const add = (geos, mat, name) => {
-    // keep only attributes every geometry has, so they merge
-    const keep = Object.keys(geos[0].attributes).filter((k) => geos.every((g) => g.attributes[k]));
-    for (const g of geos) for (const k of Object.keys(g.attributes)) if (!keep.includes(k)) g.deleteAttribute(k);
-    const mesh = new THREE.SkinnedMesh(mergeGeometries(geos), mat);
-    mesh.name = name; mesh.frustumCulled = false;
-    mesh.bind(ref.skeleton, ref.bindMatrix);
-    parent.add(mesh); parent.updateMatrixWorld(true);
-    mesh.computeBoundingSphere();            // once, here: clones copy it (computing it per character = CPU skinning of every vertex)
-    if (mesh.boundingSphere) mesh.boundingSphere.radius *= 1.5;
-    parent.remove(mesh);
-    made.push(mesh);
-  };
-  const made = [];
-  if (paint.length) add(paint, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 }), "__paint");
-  for (const { mat, geos } of others.values()) add(geos, mat, "__other");
-  // only now (everything merged fine) swap the old meshes for the new ones
-  for (const m of skinned) m.parent && m.parent.remove(m);
-  for (const m of made) parent.add(m);
-}
+// NOTE: mergeSkinned was removed — it broke bone animation (caused T-pose/floating).
+// The function merged ~240 skinned meshes into ~5, but bound them to a skeleton
+// that lived on the original meshes which were then deleted → orphaned skeleton.
+// Characters now use original meshes with frustum culling + distance culling.
 
 export function loadCharacterBase(manager) {
   if (!basePromise) {
@@ -82,7 +27,8 @@ export function loadCharacterBase(manager) {
       const box = new THREE.Box3().setFromObject(model);
       const size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
       baseInfo = { box, size, center };
-      try { mergeSkinned(model); } catch (e) { console.warn("character merge failed", e); }
+      // NOTE: mergeSkinned is NOT called here — it breaks cloneSkinned's bone
+      // rebinding, causing T-pose. Instead, each character merges its own clone.
       return model;
     });
   }
@@ -154,7 +100,7 @@ function makeRig(group, model, baseY, pose = "stand") {
   return animate;
 }
 
-/** Make one character. opts: { seed, height, outfit: 'casual'|'kaftan' } */
+/** Make one character. opts: { seed, height, outfit, pose, top, bottom, skin, hair, shoes } */
 export async function createCharacter(opts = {}) {
   const src = await loadCharacterBase();
   const R = rng((opts.seed ?? 1) * 7919 + 13);
@@ -172,13 +118,17 @@ export async function createCharacter(opts = {}) {
   const baseY = -baseInfo.box.min.y * k;
   model.position.set(-baseInfo.center.x * k, baseY, -baseInfo.center.z * k);
 
+  // NOTE: mergeSkinned is NOT called — it breaks bone animation (causes T-pose/floating).
+  // Characters use original ~240 skinned meshes. Frustum culling + distance culling
+  // (in npcs.js / people.js) keep draw calls manageable.
+
   const hipFrac = outfit === "kaftan" ? 0.32 : 0.5;
   model.traverse((o) => {
     if (!o.isMesh) return;
-    o.castShadow = true; o.frustumCulled = false;
+    o.castShadow = false; o.frustumCulled = true; // PERFORMANCE: no shadows + frustum culling on characters
     if (o.name !== "__paint") return;
     // shared geometry, own colour attribute so every character wears different clothes
-    const src = o.geometry, n = src.attributes.position.count, hy = src.attributes.hy.array, pt = src.attributes.part.array;
+    const g0 = o.geometry, n = g0.attributes.position.count, hy = g0.attributes.hy.array, pt = g0.attributes.part.array;
     const col = new Float32Array(n * 3), cols = [top, bottom, null, hair, shoes];
     for (let i = 0; i < n; i++) {
       const p = pt[i] | 0;
@@ -186,8 +136,8 @@ export async function createCharacter(opts = {}) {
       col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
     }
     const g = new THREE.BufferGeometry();
-    for (const k of Object.keys(src.attributes)) if (k !== "hy" && k !== "part") g.setAttribute(k, src.attributes[k]);
-    if (src.index) g.setIndex(src.index);
+    for (const key of Object.keys(g0.attributes)) if (key !== "hy" && key !== "part") g.setAttribute(key, g0.attributes[key]);
+    if (g0.index) g.setIndex(g0.index);
     g.setAttribute("color", new THREE.BufferAttribute(col, 3));
     o.geometry = g;
   });
