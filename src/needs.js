@@ -1,5 +1,15 @@
 // src/needs.js — needs system, money, rank, phone apps
+// CRITICAL: State is keyed by UID in localStorage AND synced to Firebase.
+// On login, Firebase is the source of truth. localStorage is just a cache
+// so the game doesn't start at zero while waiting for Firebase to load.
 import { NEEDS, FOOD_ITEMS, JOBS, RANKS } from "./config.js";
+
+let _uid = null;
+
+export function setGameUid(uid) { _uid = uid; }
+export function getGameUid() { return _uid; }
+
+function _storageKey() { return _uid ? "kaduna-state-" + _uid : "kaduna-state-guest"; }
 
 export function createGameState() {
   const state = {
@@ -10,17 +20,29 @@ export function createGameState() {
     lastUpdate: Date.now(),
     look: { top: "#1f7a5a", bottom: "#2b3a55", skin: "#8a5a3c", hair: "#111111", shoes: "#222222", topStyle: "casual", bottomStyle: "trousers" },
   };
-  // Load from localStorage
-  try {
-    const saved = JSON.parse(localStorage.getItem("kaduna-state"));
-    if (saved) {
-      Object.assign(state, saved);
-      state.lastUpdate = Date.now();
-    }
-  } catch (e) {}
+  // Load from UID-keyed localStorage (NOT shared between accounts)
+  _loadFromStorage(state);
+
+  function _loadFromStorage(target) {
+    try {
+      const saved = JSON.parse(localStorage.getItem(_storageKey()));
+      if (saved) {
+        Object.assign(target, saved);
+        target.lastUpdate = Date.now();
+      }
+    } catch (e) {}
+  }
 
   function save() {
-    try { localStorage.setItem("kaduna-state", JSON.stringify({ money: state.money, needs: state.needs, rank: state.rank, jobCooldown: state.jobCooldown, posX: state.posX, posZ: state.posZ, heading: state.heading, look: state.look })); } catch (e) {}
+    try { localStorage.setItem(_storageKey(), JSON.stringify({ money: state.money, needs: state.needs, rank: state.rank, jobCooldown: state.jobCooldown, posX: state.posX, posZ: state.posZ, heading: state.heading, look: state.look })); } catch (e) {}
+  }
+
+  // Called when Firebase sends us the real balance/look — overrides localStorage
+  function syncFromFirebase(fbData) {
+    if (fbData.balance != null) { state.money = fbData.balance; }
+    if (fbData.look) { state.look = fbData.look; }
+    if (fbData.needs) { state.needs = fbData.needs; }
+    save();
   }
 
   function updateNeeds(dt) {
@@ -29,7 +51,6 @@ export function createGameState() {
       const current = state.needs[need.key] ?? 100;
       state.needs[need.key] = Math.max(0, Math.min(100, current - need.drainPerMin * mins));
     }
-    // Auto-rank check
     for (let i = RANKS.length - 1; i >= 0; i--) {
       if (state.money >= RANKS[i].minMoney) { state.rank = RANKS[i].id; break; }
     }
@@ -57,7 +78,7 @@ export function createGameState() {
     state.money += job.pay;
     state.needs.energy = Math.max(0, state.needs.energy - job.energyCost);
     state.needs.fun = Math.max(0, (state.needs.fun ?? 0) - 5);
-    state.jobCooldown = 30; // 30s cooldown
+    state.jobCooldown = 30;
     save();
     return { ok: true, msg: `You worked as ${job.name} and earned ₦${job.pay}!` };
   }
@@ -66,5 +87,13 @@ export function createGameState() {
     return RANKS.find(r => r.id === state.rank) || RANKS[0];
   }
 
-  return { state, updateNeeds, eat, work, getRank, save };
+  return { state, updateNeeds, eat, work, getRank, save, syncFromFirebase };
+}
+
+// Clear ALL kaduna state from localStorage (called on logout)
+export function clearAllGameState() {
+  try {
+    const keys = Object.keys(localStorage).filter(k => k.startsWith("kaduna-state"));
+    keys.forEach(k => localStorage.removeItem(k));
+  } catch (e) {}
 }

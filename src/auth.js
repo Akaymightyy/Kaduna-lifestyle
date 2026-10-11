@@ -75,7 +75,11 @@ export async function logout() {
   try {
     await signOut(auth);
     toast("Signed out");
-    // Reload to reset game state cleanly
+    // Clear ALL game state from localStorage so the next account starts fresh
+    try {
+      const keys = Object.keys(localStorage).filter(k => k.startsWith("kaduna-state"));
+      keys.forEach(k => localStorage.removeItem(k));
+    } catch (e) {}
     setTimeout(() => location.reload(), 500);
   } catch (e) {
     toast(e.message || "Could not sign out");

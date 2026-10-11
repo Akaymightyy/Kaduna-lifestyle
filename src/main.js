@@ -6,7 +6,7 @@ import { createControls, updateCamera } from "./controls.js";
 import { createMinimap } from "./minimap.js";
 import { addCity } from "./city.js";
 import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAILY_QUESTS, DAILY_REWARDS } from "./config.js";
-import { createGameState } from "./needs.js";
+import { createGameState, setGameUid, clearAllGameState } from "./needs.js";
 import { auth, db } from "./firebase.js";
 import { initAuth, showAuthModal, wireAuthUI, logout, isAuthed } from "./auth.js";
 import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition } from "./multiplayer.js";
@@ -15,7 +15,7 @@ import { subscribeRichList } from "./economy.js";
 import { createNPCs } from "./npcs.js";
 import { initAdmin, showAdminDashboard, hideAdminDashboard, isAdmin, adminTab } from "./admin.js";
 import { checkDailyReward, getDailyStatus, claimQuestReward } from "./daily.js";
-import { ref, onValue, update } from "firebase/database";
+import { ref, onValue, update, get } from "firebase/database";
 import { initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, getActivePlace, enterPlace, exitPlace, sendUIEvent } from "./places/manager.js";
 import { listPlaces, getPlace } from "./places/registry.js";
 
@@ -184,14 +184,9 @@ window.placeAction = (eventId) => sendUIEvent(eventId, {});
 
 function updateHUD() {
   const s=game.state;
-  const tpMoney=$("tp-money-val"); if(tpMoney) tpMoney.textContent=s.money.toLocaleString();
-  const mv=$("money-val"); if(mv) mv.textContent="₦"+s.money.toLocaleString();
-  const rank=game.getRank(); const rv=$("rank-val"); if(rv){rv.textContent=rank.name;rv.style.color=rank.color;}
+  $("money-val").textContent="₦"+s.money.toLocaleString();
+  const rank=game.getRank(); $("rank-val").textContent=rank.name; $("rank-val").style.color=rank.color;
   for(const need of NEEDS){const bar=$("need-"+need.key);if(bar){const val=s.needs[need.key]??0;bar.style.width=val+"%";bar.style.background=val<20?"#e11d48":val<40?"#f2b134":"#2e7d4f";}}
-  // Mood face + word in top pill
-  const avg=((s.needs.hunger||0)+(s.needs.energy||0)+(s.needs.fun||0)+(s.needs.social||0)+(s.needs.hygiene||0)+(s.needs.bladder||0))/6;
-  const moodEl=$("tp-mood");
-  if(moodEl){let f,w;if(avg>75){f="😊";w="Happy";}else if(avg>50){f="😐";w="Fine";}else if(avg>25){f="😟";w="Stressed";}else{f="😫";w="Suffering";}moodEl.textContent=f+" "+w;}
 }
 
 // ---- Phone UI (chat moved inside phone) ----
@@ -463,7 +458,7 @@ window.buyMed=(id)=>{
   game.state.needs.energy=Math.min(100,(game.state.needs.energy||0)+m.energy);
   game.state.needs.hygiene=Math.min(100,(game.state.needs.hygiene||0)+m.hygiene);
   if(m.all){for(const n of NEEDS){game.state.needs[n.key]=Math.min(100,(game.state.needs[n.key]||0)+m.all);}}
-  game.save?.(); updateHUD(); toast("Medicine taken! Feel better now.");
+  game.save?.(); _fbSaveMoney(); updateHUD(); toast("Medicine taken! Feel better now.");
   showPhoneApp("health");
 };
 window.buyClothing=(id,price,name)=>{
@@ -471,7 +466,7 @@ window.buyClothing=(id,price,name)=>{
   game.state.money-=price;
   game.state.needs.fun=Math.min(100,(game.state.needs.fun||0)+15);
   game.state.needs.social=Math.min(100,(game.state.needs.social||0)+10);
-  game.save?.(); updateHUD(); toast(name+" purchased! You look sharp.");
+  game.save?.(); _fbSaveMoney(); updateHUD(); toast(name+" purchased! You look sharp.");
   showPhoneApp("boutique");
 };
 // ---- Wardrobe: live colour/style change ----
@@ -505,6 +500,16 @@ window.sendMessage=(uid,name)=>{
   toast("Waved at "+name);
 };
 window.saveGame=()=>{game.save?.();toast("Game saved!");};
+// Write money to Firebase after every money change (eat, work, buy, etc.)
+function _fbSaveMoney() {
+  const uid = getMyUid();
+  if (uid) update(ref(db, "economy/" + uid + "/balance"), game.state.money);
+}
+// Patch: after eat/work, also save to Firebase
+const _origEat = game.eat;
+game.eat = function(id) { const r = _origEat(id); if (r.ok) _fbSaveMoney(); return r; };
+const _origWork = game.work;
+game.work = function(id) { const r = _origWork(id); if (r.ok) _fbSaveMoney(); return r; };
 window.logout=async()=>{ if(confirm("Log out of Kaduna Lifestyle?")){ await logout(); } };
 window.resetGame=()=>{
   if(!confirm("Reset all progress? You'll lose your money, needs, and rank."))return;
@@ -599,65 +604,26 @@ window.claimQuest = async function(questId) {
 // ---- UI buttons ----
 $("zin").onclick=()=>ctl.zoom(-1.8); $("zout").onclick=()=>ctl.zoom(1.8);
 $("fit").onclick=()=>{ctl.yaw=player.heading+Math.PI;ctl.pitch=0.38;ctl.dist=6.5;};
+$("eye").onclick=()=>$("ui").classList.add("hidden");
 $("eye-solo").onclick=()=>$("ui").classList.remove("hidden");
 $("jog").onclick=()=>{ctl.jog=!ctl.jog;$("jog").classList.toggle("on",ctl.jog);$("jog-t").textContent=ctl.jog?"Jog":"Walk";};
-$("phone-close").onclick=closePhone;
-// Top pill buttons
-$("tp-plus")?.addEventListener("click",()=>{openPhone();setTimeout(()=>showPhoneApp("daily"),50);});
-$("tp-sound")?.addEventListener("click",()=>{const b=$("tp-sound");b.textContent=b.textContent==="🔊"?"🔇":"🔊";toast(b.textContent==="🔊"?"Sound on":"Sound off");});
-$("tp-clean")?.addEventListener("click",()=>$("ui").classList.add("hidden"));
-// Bottom nav
-document.querySelectorAll("#bottom-nav .nav-btn").forEach(btn=>{
-  btn.addEventListener("click",()=>{
-    if(btn.classList.contains("disabled")){toast("Buy mode available at home — coming soon!");return;}
-    document.querySelectorAll("#bottom-nav .nav-btn").forEach(b=>b.classList.remove("active"));
-    btn.classList.add("active");
-    const n=btn.dataset.nav;
-    if(n==="phone")openPhone();
-    else if(n==="map"){openPhone();setTimeout(()=>showPhoneApp("map"),50);}
-    else if(n==="home"){closePhone();$("profile-sheet")?.classList.remove("show");}
-  });
-});
-// Avatar + needs chip → profile sheet
-$("avatar-bubble")?.addEventListener("click",()=>_openSheet("profile"));
-$("needs-chip")?.addEventListener("click",()=>_openSheet("needs"));
-// Profile sheet tabs
-document.querySelectorAll(".ps-tab").forEach(t=>{
-  t.addEventListener("click",()=>{document.querySelectorAll(".ps-tab").forEach(x=>x.classList.remove("active"));t.classList.add("active");_renderSheet(t.dataset.ps);});
-});
-function _openSheet(tab){const sh=$("profile-sheet");sh.classList.add("show");document.querySelectorAll(".ps-tab").forEach(t=>t.classList.remove("active"));document.querySelector('.ps-tab[data-ps="'+tab+'"]')?.classList.add("active");_renderSheet(tab);}
-window._openSheet=_openSheet;
-window.closeSheet=()=>$("profile-sheet")?.classList.remove("show");
-function _renderSheet(tab){
-  const el=$("ps-content");if(!el)return;const s=game.state;
-  if(tab==="profile"){
-    const rank=game.getRank();
-    el.innerHTML='<div style="text-align:center;margin-bottom:14px;"><div style="width:60px;height:60px;border-radius:50%;background:var(--green);color:#fff;display:flex;align-items:center;justify-content:center;font-size:28px;margin:0 auto 8px;">🧑</div><div style="font-size:16px;font-weight:700;color:var(--green);">'+(getMyName()||"Player")+'</div><div style="font-size:11px;color:#999;margin-top:2px;">'+(getMyUid()||"guest").slice(0,16)+'…</div></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;"><div style="background:#fff;border-radius:10px;padding:10px;text-align:center;"><div style="font-size:11px;color:#666;">Rank</div><div style="font-size:14px;font-weight:700;color:'+rank.color+';">'+rank.name+'</div></div><div style="background:#fff;border-radius:10px;padding:10px;text-align:center;"><div style="font-size:11px;color:#666;">Balance</div><div style="font-size:14px;font-weight:700;color:var(--green);">₦'+s.money.toLocaleString()+'</div></div></div><button onclick="window.openPhone();window.showApp(\'wardrobe\')" style="width:100%;background:var(--green);color:#fff;border:none;border-radius:10px;padding:12px;cursor:pointer;font-size:13px;font-weight:600;margin-bottom:6px;">👕 Wardrobe</button><button onclick="window.closeSheet()" style="width:100%;background:rgba(0,0,0,.05);color:#666;border:none;border-radius:10px;padding:12px;cursor:pointer;font-size:13px;font-weight:600;">Close</button>';
-  } else if(tab==="needs"){
-    const feelings=[];
-    if(s.needs.hunger<30)feelings.push({n:"Hungry",v:-20,i:"🍛"});else feelings.push({n:"Well Fed",v:10,i:"🍛"});
-    if(s.needs.energy<30)feelings.push({n:"Exhausted",v:-15,i:"⚡"});else feelings.push({n:"Energetic",v:8,i:"⚡"});
-    if(s.needs.fun<30)feelings.push({n:"Bored",v:-10,i:"🎉"});else feelings.push({n:"Having Fun",v:10,i:"🎉"});
-    if(s.needs.hygiene<30)feelings.push({n:"Needs Wash",v:-12,i:"🫧"});else feelings.push({n:"Fresh & Clean",v:10,i:"🫧"});
-    if(s.needs.social<30)feelings.push({n:"Lonely",v:-8,i:"💬"});else feelings.push({n:"Social",v:5,i:"💬"});
-    if(s.money>50000)feelings.push({n:"Big Oga",v:15,i:"💰"});
-    if(s.money<1000)feelings.push({n:"Broke",v:-10,i:"💸"});
-    const mood=feelings.reduce((s,f)=>s+f.v,0);
-    el.innerHTML='<div style="font-size:13px;font-weight:700;margin-bottom:8px;color:var(--green);">Needs</div>'+NEEDS.map(n=>{const v=Math.round(s.needs[n.key]||0);const c=v<20?"#e11d48":v<40?"#f2b134":"#2e7d4f";return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><span style="font-size:14px;">'+n.icon+'</span><div style="flex:1;height:8px;background:#e0ddd5;border-radius:4px;overflow:hidden;"><div style="height:100%;width:'+v+'%;background:'+c+';"></div></div><span style="font-size:11px;color:#666;width:30px;text-align:right;">'+v+'%</span></div>';}).join("")+'<div style="font-size:13px;font-weight:700;margin:14px 0 8px;color:var(--green);">Feelings</div><div style="font-size:11px;color:#666;margin-bottom:8px;">Mood: <b style="color:'+(mood>20?"#2e7d4f":mood>0?"#f2b134":"#e11d48")+';">'+(mood>20?"Happy":mood>0?"Fine":mood>-20?"Stressed":"Suffering")+'</b> ('+mood+')</div>'+feelings.map(f=>'<div class="feeling-card"><span>'+f.i+' '+f.n+'</span><span class="fc-val" style="color:'+(f.v>0?"#2e7d4f":"#e11d48")+';">'+(f.v>0?"+":"")+f.v+'</span></div>').join("")+'<button onclick="window.closeSheet()" style="width:100%;background:rgba(0,0,0,.05);color:#666;border:none;border-radius:10px;padding:12px;cursor:pointer;font-size:13px;font-weight:600;margin-top:10px;">Close</button>';
-  } else if(tab==="goals"){
-    el.innerHTML='<div style="font-size:13px;font-weight:700;margin-bottom:8px;color:var(--green);">Daily Goals</div><div class="feeling-card"><span>🍛 Eat something</span><span style="color:#2e7d4f;">+₦300</span></div><div class="feeling-card"><span>💼 Complete a job</span><span style="color:#2e7d4f;">+₦500</span></div><div class="feeling-card"><span>💬 Send a chat</span><span style="color:#2e7d4f;">+₦200</span></div><div class="feeling-card"><span>🛺 Travel to a place</span><span style="color:#2e7d4f;">+₦400</span></div><div class="feeling-card"><span>👕 Change your clothes</span><span style="color:#2e7d4f;">+₦100</span></div><div style="font-size:13px;font-weight:700;margin:14px 0 8px;color:var(--green);">Weekly Goals</div><div class="feeling-card"><span>🏆 Reach Hustler rank (₦10k)</span><span style="color:#999;">In progress</span></div><div class="feeling-card"><span>🏠 Rent a home</span><span style="color:#999;">Coming soon</span></div><div class="feeling-card"><span>👥 Make 5 friends</span><span style="color:#999;">0/5</span></div><button onclick="window.closeSheet()" style="width:100%;background:rgba(0,0,0,.05);color:#666;border:none;border-radius:10px;padding:12px;cursor:pointer;font-size:13px;font-weight:600;margin-top:10px;">Close</button>';
-  }
-}
-window.openPhone=openPhone;
+$("phone-btn").onclick=openPhone; $("phone-close").onclick=closePhone;
 setTimeout(()=>{const t=$("tip");if(t)t.style.display="none";},15000);
 
 // ---- Auth + Multiplayer + Admin ----
 wireAuthUI();
 initAuth((user) => {
-  initMultiplayer(scene, (count) => {
-    const el=$("online-count"); if(el) el.textContent=count+" here";
-    const hudEl=$("online-count-hud"); if(hudEl) hudEl.textContent=count;
-  },
+  // ---- CRITICAL: Set the game UID so localStorage is keyed per-account ----
+  // This prevents one account's money/look from bleeding into another.
+  setGameUid(user.uid);
+  // Reload game state from the correct UID-keyed localStorage
+  try {
+    const saved = JSON.parse(localStorage.getItem("kaduna-state-" + user.uid));
+    if (saved) { Object.assign(game.state, saved); }
+  } catch (e) {}
+  updateHUD();
+
+  initMultiplayer(scene, (count) => { const el=$("online-count"); if(el) el.textContent=count+" here"; const hudEl=$("online-count-hud"); if(hudEl) hudEl.textContent=count; },
     (msg) => {
       const log=$("chat-log"); if(!log)return;
       const div=document.createElement("div");
@@ -666,24 +632,49 @@ initAuth((user) => {
       log.appendChild(div); log.scrollTop=log.scrollHeight;
       while(log.children.length>30) log.removeChild(log.firstChild);
     });
-  // Check daily reward on login
-  checkDailyReward(user.uid).then((reward) => {
-    if (reward) { game.state.money += reward.money; updateHUD(); toast(reward.label+'! Welcome back.'); }
+
+  // ---- FIREBASE IS THE SOURCE OF TRUTH for money + look ----
+  // On login: read from Firebase. If Firebase has data, use it (not localStorage).
+  // This fixes: admin crediting money, look bleeding between accounts, new browser starting fresh.
+
+  // 1. Read economy (money) from Firebase — ONE-TIME on login
+  get(ref(db, "economy/" + user.uid)).then((snap) => {
+    const eco = snap.val() || {};
+    if (eco.balance != null) {
+      // Firebase has a balance → use it (overrides localStorage)
+      game.state.money = eco.balance;
+      game.save?.();
+      updateHUD();
+    } else {
+      // No Firebase entry yet → write current balance to Firebase (first login)
+      const playerName = user.displayName || user.email?.split("@")[0] || "Player";
+      update(ref(db, "economy/" + user.uid), { name: playerName, balance: game.state.money });
+    }
   });
-  // ---- SYNC: listen to Firebase economy/{uid}/balance so admin credits work ----
-  // When admin credits/deducts money, the player's game detects it and updates.
+
+  // 2. Read look from Firebase — ONE-TIME on login
+  get(ref(db, "players/" + user.uid + "/look")).then((snap) => {
+    const fbLook = snap.val();
+    if (fbLook) {
+      // Firebase has a look → use it (overrides localStorage)
+      game.state.look = fbLook;
+      game.save?.();
+      if (rig?.recolor) rig.recolor(game.state.look);
+      updateHUD();
+    } else {
+      // No Firebase look → write current look to Firebase
+      update(ref(db, "players/" + user.uid + "/look"), game.state.look);
+    }
+  });
+
+  // 3. LISTEN for real-time balance changes (admin credits/deducts)
   let _lastFirebaseBal = null;
   onValue(ref(db, "economy/" + user.uid + "/balance"), (snap) => {
     const fbBal = snap.val();
-    if (fbBal == null) return; // no economy entry yet
+    if (fbBal == null) return;
     if (_lastFirebaseBal === null) {
-      // First load — if Firebase has a balance, use it (admin may have set it)
       _lastFirebaseBal = fbBal;
-      if (fbBal !== game.state.money) {
-        game.state.money = fbBal;
-        game.save?.();
-        updateHUD();
-      }
+      // First load already handled by get() above
     } else if (fbBal !== _lastFirebaseBal) {
       // Balance changed in Firebase (admin credited/deducted)
       _lastFirebaseBal = fbBal;
@@ -693,11 +684,22 @@ initAuth((user) => {
       toast("💰 Balance updated to ₦" + fbBal.toLocaleString());
     }
   });
-  // ---- Also write player's name to economy node so admin shows it ----
+
+  // 4. Write player's name to economy + players nodes
   const playerName = user.displayName || user.email?.split("@")[0] || "Player";
-  update(ref(db, "economy/" + user.uid), { name: playerName, balance: game.state.money });
-  // ---- Sync look: save to Firebase so other players see it ----
-  update(ref(db, "players/" + user.uid + "/look"), game.state.look);
+  update(ref(db, "players/" + user.uid), { name: playerName });
+
+  // 5. Check daily reward
+  checkDailyReward(user.uid).then((reward) => {
+    if (reward) {
+      game.state.money += reward.money;
+      game.save?.();
+      // Also write new balance to Firebase
+      update(ref(db, "economy/" + user.uid + "/balance"), game.state.money);
+      updateHUD();
+      toast(reward.label + '! Welcome back.');
+    }
+  });
 });
 initAdmin((user) => {
   toast("Admin access detected — welcome, " + (user.email || "Admin"));
