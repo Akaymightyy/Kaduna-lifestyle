@@ -233,11 +233,13 @@ function renderPlayerList(players) {
   const entries = Object.entries(players);
   el.innerHTML = entries.length ? entries.map(([uid, p]) => {
     const bal = eco[uid]?.balance || 0;
+    // Read name from player data OR economy cache (fixes "Unknown")
+    const name = p.name || eco[uid]?.name || "Unknown";
     const isMe = _adminUser && uid === _adminUser.uid;
     return `
     <div style="display:flex;align-items:center;gap:8px;padding:8px;background:#16213e;border-radius:8px;margin-bottom:6px;">
       <div style="flex:1;">
-        <div style="font-weight:600;color:#fff;">${p.name||"Unknown"}${p.isAdmin?' 🔐':''}${isMe?' (you)':''}</div>
+        <div style="font-weight:600;color:#fff;">${name}${p.isAdmin?' 🔐':''}${isMe?' (you)':''}</div>
         <div style="font-size:10px;color:#6b7280;">UID: ${uid.slice(0,16)}… · ₦${bal.toLocaleString()}${p.suspended?' · 🔇 SUSPENDED':''}${p.banned?' · ⛔ BANNED':''}</div>
       </div>
       <button onclick="window.adminEditPlayer('${uid}')" style="background:#374151;color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;">Edit</button>
@@ -248,40 +250,73 @@ function renderPlayerList(players) {
   }).join("") : '<div style="color:#6b7280;padding:12px;">No players found.</div>';
 }
 
+// ---- Edit Player Modal (replaces prompt/alert) ----
 window.adminEditPlayer = async function(uid) {
   const balSnap = await get(ref(db, "economy/" + uid + "/balance"));
   const balance = balSnap.val() || 0;
+  // Try both players and economy nodes for the name
   const nameSnap = await get(ref(db, "players/" + uid + "/name"));
-  const name = nameSnap.val() || "Unknown";
-  const choice = prompt(`Edit player: ${name}\nUID: ${uid}\nCurrent balance: ₦${balance.toLocaleString()}\n\nType new balance (just the number), or type "name:NEWNAME" to rename, or "kick" to disconnect:`, balance);
-  if (choice === null) return;
-  if (choice.startsWith("name:")) {
-    const newName = choice.slice(5).trim();
-    if (newName) {
+  const ecoSnap = await get(ref(db, "economy/" + uid + "/name"));
+  const name = nameSnap.val() || ecoSnap.val() || "Unknown";
+
+  // Build a modal dialog (no prompt/alert)
+  const modal = document.createElement("div");
+  modal.style.cssText = "position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;";
+  modal.innerHTML = `
+    <div style="background:#1a1a2e;color:#fff;border-radius:16px;padding:24px;width:min(360px,90vw);box-shadow:0 10px 40px rgba(0,0,0,.5);">
+      <div style="font-size:18px;font-weight:700;margin-bottom:4px;">Edit Player</div>
+      <div style="font-size:14px;color:#f2b134;margin-bottom:12px;">${name}</div>
+      <div style="font-size:11px;color:#6b7280;margin-bottom:16px;">UID: ${uid}</div>
+      <div style="margin-bottom:12px;">
+        <label style="font-size:12px;color:#9ca3af;display:block;margin-bottom:4px;">Current Balance: ₦${balance.toLocaleString()}</label>
+        <input id="admin-edit-bal" type="number" value="${balance}" placeholder="New balance" style="width:100%;padding:10px;background:#16213e;color:#fff;border:1px solid #1f2937;border-radius:8px;font-family:inherit;font-size:14px;" />
+      </div>
+      <div style="margin-bottom:12px;">
+        <label style="font-size:12px;color:#9ca3af;display:block;margin-bottom:4px;">Rename to:</label>
+        <input id="admin-edit-name" type="text" value="${name}" placeholder="New name" style="width:100%;padding:10px;background:#16213e;color:#fff;border:1px solid #1f2937;border-radius:8px;font-family:inherit;font-size:14px;" />
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button id="admin-edit-save" style="flex:1;background:#16a34a;color:#fff;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:13px;font-weight:600;">💾 Save</button>
+        <button id="admin-edit-kick" style="flex:1;background:#f59e0b;color:#000;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:13px;font-weight:600;">👢 Kick</button>
+        <button id="admin-edit-cancel" style="flex:1;background:#374151;color:#fff;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:13px;font-weight:600;">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  // Wire buttons
+  modal.querySelector("#admin-edit-cancel").onclick = () => modal.remove();
+  modal.querySelector("#admin-edit-save").onclick = async () => {
+    const newBal = parseInt(modal.querySelector("#admin-edit-bal").value, 10);
+    const newName = modal.querySelector("#admin-edit-name").value.trim();
+    if (isNaN(newBal)) { toast("Invalid balance number"); return; }
+    // Update balance
+    await set(ref(db, "economy/" + uid + "/balance"), newBal);
+    // Update name if changed
+    if (newName && newName !== name) {
       await update(ref(db, "players/" + uid), { name: newName });
       await update(ref(db, "economy/" + uid), { name: newName });
-      alert("Player renamed to: " + newName);
     }
-  } else if (choice === "kick") {
+    toast("✓ " + name + " updated. Balance: ₦" + newBal.toLocaleString());
+    modal.remove();
+    loadAdminPlayers(); // refresh list
+  };
+  modal.querySelector("#admin-edit-kick").onclick = async () => {
     await remove(ref(db, "players/" + uid));
-    alert("Player disconnected.");
-  } else {
-    const newBal = parseInt(choice, 10);
-    if (isNaN(newBal)) { alert("Invalid number"); return; }
-    await set(ref(db, "economy/" + uid + "/balance"), newBal);
-    alert("Balance updated to ₦" + newBal.toLocaleString());
-  }
+    toast("👢 " + name + " disconnected.");
+    modal.remove();
+    loadAdminPlayers();
+  };
 };
 
 window.adminBanPlayer = async function(uid) {
   if (!confirm("Ban this player? They will be blocked from playing.")) return;
   await update(ref(db, "players/" + uid), { banned: true });
-  alert("Player banned.");
+  toast("Player banned.");
 };
 window.adminUnbanPlayer = async function(uid) {
   if (!confirm("Unban this player?")) return;
   await update(ref(db, "players/" + uid), { banned: false });
-  alert("Player unbanned.");
+  toast("Player unbanned.");
 };
 
 // ---- Economy ----
@@ -327,16 +362,16 @@ function loadAdminEconomy() {
 window.adminMintMoney = async function() {
   const uid = document.getElementById("admin-mint-uid")?.value?.trim();
   const amt = parseInt(document.getElementById("admin-mint-amt")?.value, 10);
-  if (!uid || isNaN(amt)) { alert("Enter UID and amount"); return; }
+  if (!uid || isNaN(amt)) { toast("Enter UID and amount"); return; }
   const balRef = ref(db, "economy/" + uid + "/balance");
   const snap = await get(balRef);
   const cur = snap.val() || 0;
   const next = cur + amt;
-  if (next < 0) { alert("Result would be negative. Aborting."); return; }
+  if (next < 0) { toast("Result would be negative. Aborting."); return; }
   await set(balRef, next);
   // Log
   await push(ref(db, "economy/" + uid + "/log"), { amount: amt, reason: "admin-mint", ts: Date.now(), bal: next });
-  alert(`Done. New balance for ${uid}: ₦${next.toLocaleString()}`);
+  toast(`Done. New balance for ${uid}: ₦${next.toLocaleString()}`);
   document.getElementById("admin-mint-uid").value = "";
   document.getElementById("admin-mint-amt").value = "";
 };
@@ -373,7 +408,7 @@ window.adminDeleteMsg = async function(key) {
 window.adminClearAllChat = async function() {
   if (!confirm("Clear ALL chat messages? This cannot be undone.")) return;
   await remove(ref(db, "chat"));
-  alert("Chat cleared.");
+  toast("Chat cleared.");
 };
 
 // ---- Announcements ----
@@ -409,7 +444,7 @@ window.adminSendAnnounce = async function(isAlert) {
   const key = Date.now().toString();
   await set(ref(db, "announcements/" + key), { text, ts: Date.now(), alert: !!isAlert, by: _adminUser?.email || "admin" });
   document.getElementById("admin-announce-text").value = "";
-  alert("Announcement sent to all players!");
+  toast("Announcement sent to all players!");
 };
 window.adminDeleteAnnounce = async function(key) {
   await remove(ref(db, "announcements/" + key));
@@ -497,7 +532,7 @@ window.adminTriggerEvent = async function(type) {
     alert: true,
     by: _adminUser?.email || "admin"
   });
-  alert(`Event "${e.name}" started!`);
+  toast(`Event "${e.name}" started!`);
 };
 window.adminEndEvent = async function(key) {
   await remove(ref(db, "events/" + key));

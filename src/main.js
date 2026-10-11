@@ -15,7 +15,7 @@ import { subscribeRichList } from "./economy.js";
 import { createNPCs } from "./npcs.js";
 import { initAdmin, showAdminDashboard, hideAdminDashboard, isAdmin, adminTab } from "./admin.js";
 import { checkDailyReward, getDailyStatus, claimQuestReward } from "./daily.js";
-import { ref, onValue } from "firebase/database";
+import { ref, onValue, update } from "firebase/database";
 import { initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, getActivePlace, enterPlace, exitPlace, sendUIEvent } from "./places/manager.js";
 import { listPlaces, getPlace } from "./places/registry.js";
 
@@ -23,6 +23,20 @@ const $ = (id) => document.getElementById(id);
 const showError = (m) => { const e = $("err"); e.style.display = "flex"; e.textContent = m; };
 // A stray runtime error must not kill the whole game screen: log it, only load failures are fatal.
 addEventListener("error", (e) => { console.error("[game error]", e.message); });
+
+// ---- Prevent back button from exiting the site ----
+// Push a dummy history state so the browser's back button stays in the app
+// instead of navigating away. If the user presses back again, show a confirm.
+history.pushState({ app: true }, "");
+addEventListener("popstate", (e) => {
+  if (!e.state?.app) {
+    if (confirm("Leave Kaduna Lifestyle?")) {
+      history.back();
+    } else {
+      history.pushState({ app: true }, "");
+    }
+  }
+});
 
 let tipI = 0;
 $("ltip").textContent = TIPS[0];
@@ -564,6 +578,32 @@ initAuth((user) => {
   checkDailyReward(user.uid).then((reward) => {
     if (reward) { game.state.money += reward.money; updateHUD(); toast(reward.label+'! Welcome back.'); }
   });
+  // ---- SYNC: listen to Firebase economy/{uid}/balance so admin credits work ----
+  // When admin credits/deducts money, the player's game detects it and updates.
+  let _lastFirebaseBal = null;
+  onValue(ref(db, "economy/" + user.uid + "/balance"), (snap) => {
+    const fbBal = snap.val();
+    if (fbBal == null) return; // no economy entry yet
+    if (_lastFirebaseBal === null) {
+      // First load — if Firebase has a balance, use it (admin may have set it)
+      _lastFirebaseBal = fbBal;
+      if (fbBal !== game.state.money) {
+        game.state.money = fbBal;
+        game.save?.();
+        updateHUD();
+      }
+    } else if (fbBal !== _lastFirebaseBal) {
+      // Balance changed in Firebase (admin credited/deducted)
+      _lastFirebaseBal = fbBal;
+      game.state.money = fbBal;
+      game.save?.();
+      updateHUD();
+      toast("💰 Balance updated to ₦" + fbBal.toLocaleString());
+    }
+  });
+  // ---- Also write player's name to economy node so admin shows it ----
+  const playerName = user.displayName || user.email?.split("@")[0] || "Player";
+  update(ref(db, "economy/" + user.uid), { name: playerName, balance: game.state.money });
 });
 initAdmin((user) => {
   toast("Admin access detected — welcome, " + (user.email || "Admin"));
