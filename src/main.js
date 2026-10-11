@@ -212,6 +212,7 @@ function showPhoneApp(appId) {
       {id:"events",icon:"🎉",label:"Events"},
       {id:"news",icon:"📰",label:"Gist"},
       {id:"boutique",icon:"👕",label:"Boutique"},
+      {id:"wardrobe",icon:"👔",label:"Wardrobe"},
       {id:"contacts",icon:"📲",label:"Contacts"},
       {id:"settings",icon:"⚙️",label:"Settings"}
     ];
@@ -386,6 +387,27 @@ function showPhoneApp(appId) {
     c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">👕 Kaduna Boutique</div>'+items.map(it=>'<div style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid #eee;border-radius:8px;margin-bottom:6px;"><span style="font-size:24px;">'+it.emoji+'</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;">'+it.name+'</div><div style="font-size:11px;color:#666;">'+it.desc+'</div></div><button onclick="window.buyClothing(\''+it.id+'\','+it.price+',\''+it.name.replace(/'/g,"")+'\')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;">₦'+it.price+'</button></div>').join("")+backBtn;
     return;
   }
+  if(appId==="wardrobe"){
+    // THE WARDROBE — change clothes live with colour swatches + style cards
+    const look = game.state.look;
+    const colours = ["#1f7a5a","#c0392b","#f2f2ee","#1d5fa8","#d98e2b","#6b4a8a","#2e2e2e","#e8c547","#3c8dbc","#a23b72","#f4efe4","#9fc2d9","#c9b38a","#7aa58a","#2d3a4a","#d9c7a0","#8a9bb5","#2b3a55","#1f2a36","#6b5a45"];
+    const skinColours = ["#8a5a3c","#6b4429","#a5714a","#5a3825","#c28a5c","#7a4b2e"];
+    const hairColours = ["#111111","#1b1b1b","#2a1e14"];
+    const shoeColours = ["#f2f2ee","#222222","#8a5a3c","#c0392b"];
+    const swatch = (col, current, key) => '<div onclick="window._setLook(\''+key+'\',\''+col+'\')" style="width:28px;height:28px;border-radius:50%;background:'+col+';cursor:pointer;border:'+(current===col?'3px solid var(--green)':'1px solid #ddd')+';display:inline-block;margin:2px;"></div>';
+    const styleCard = (label, val, key) => '<div onclick="window._setLook(\''+key+'\',\''+val+'\')" style="padding:6px 12px;background:'+(look[key]===val?'var(--green)':'var(--cream)')+';color:'+(look[key]===val?'#fff':'var(--green)')+';border-radius:8px;cursor:pointer;font-size:11px;font-weight:600;margin:2px;display:inline-block;">'+label+'</div>';
+    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">👕 Wardrobe</div>'+
+      '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">🎨 Top Colour</div><div style="display:flex;flex-wrap:wrap;">'+colours.map(c=>swatch(c,look.top,"top")).join("")+'</div></div>'+
+      '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">👖 Bottom Colour</div><div style="display:flex;flex-wrap:wrap;">'+colours.map(c=>swatch(c,look.bottom,"bottom")).join("")+'</div></div>'+
+      '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">🧦 Shoes</div><div style="display:flex;flex-wrap:wrap;">'+shoeColours.map(c=>swatch(c,look.shoes,"shoes")).join("")+'</div></div>'+
+      '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">🧑 Skin Tone</div><div style="display:flex;flex-wrap:wrap;">'+skinColours.map(c=>swatch(c,look.skin,"skin")).join("")+'</div></div>'+
+      '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">💇 Hair</div><div style="display:flex;flex-wrap:wrap;">'+hairColours.map(c=>swatch(c,look.hair,"hair")).join("")+'</div></div>'+
+      '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">👔 Top Style</div>'+styleCard("Casual","casual","topStyle")+styleCard("Kaftan","kaftan","topStyle")+'</div>'+
+      '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">👖 Bottom Style</div>'+styleCard("Trousers","trousers","bottomStyle")+styleCard("Shorts","shorts","bottomStyle")+'</div>'+
+      '<button onclick="window._saveLook()" style="width:100%;background:var(--green);color:#fff;border:none;border-radius:10px;padding:14px;cursor:pointer;font-size:14px;font-weight:700;margin-top:6px;">✓ Save Outfit</button>'+
+      backBtn;
+    return;
+  }
   if(appId==="contacts"){
     c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">📲 Contacts</div><div id="contacts-list" style="font-size:12px;">Loading players...</div>'+backBtn;
     onValue(ref(db,"players"),(snap)=>{
@@ -446,6 +468,22 @@ window.buyClothing=(id,price,name)=>{
   game.state.needs.social=Math.min(100,(game.state.needs.social||0)+10);
   game.save?.(); updateHUD(); toast(name+" purchased! You look sharp.");
   showPhoneApp("boutique");
+};
+// ---- Wardrobe: live colour/style change ----
+window._setLook=(key,val)=>{
+  game.state.look[key]=val;
+  game.save?.();
+  // Apply live to player model (no reload)
+  if(rig?.recolor) rig.recolor(game.state.look);
+  // Refresh the wardrobe UI to highlight the new selection
+  showPhoneApp("wardrobe");
+};
+window._saveLook=()=>{
+  game.save?.();
+  // Write to Firebase so other players see it
+  const uid=getMyUid();
+  if(uid) update(ref(db,"players/"+uid+"/look"),game.state.look);
+  toast("✓ Outfit saved! Other players can see it.");
 };
 window.travelToPlace=(placeId)=>{
   // Called from the map app: open the ride app with this place preselected
@@ -604,6 +642,8 @@ initAuth((user) => {
   // ---- Also write player's name to economy node so admin shows it ----
   const playerName = user.displayName || user.email?.split("@")[0] || "Player";
   update(ref(db, "economy/" + user.uid), { name: playerName, balance: game.state.money });
+  // ---- Sync look: save to Firebase so other players see it ----
+  update(ref(db, "players/" + user.uid + "/look"), game.state.look);
 });
 initAdmin((user) => {
   toast("Admin access detected — welcome, " + (user.email || "Admin"));
@@ -726,7 +766,7 @@ function frame() {
   requestAnimationFrame(frame);
 }
 
-Promise.all([loadPlayer(manager, scene), addCity(scene, world, manager)]).then(([r]) => {
+Promise.all([loadPlayer(manager, scene, game.state.look), addCity(scene, world, manager)]).then(([r]) => {
   mmDraw = createMinimap($("mm"), world.mapShapes);
   rig = r; rig.group.castShadow = true;
   setProgress(1);

@@ -100,16 +100,23 @@ function makeRig(group, model, baseY, pose = "stand") {
   return animate;
 }
 
-/** Make one character. opts: { seed, height, outfit, pose, top, bottom, skin, hair, shoes } */
+/** Make one character. opts: { seed, height, outfit, pose, look } or individual colours.
+ *  look = { top, bottom, skin, hair, shoes, topStyle, bottomStyle } — overrides seed colours.
+ */
 export async function createCharacter(opts = {}) {
   const src = await loadCharacterBase();
   const R = rng((opts.seed ?? 1) * 7919 + 13);
   const pick = (arr) => arr[Math.floor(R() * arr.length)];
   const outfit = opts.outfit || (R() < 0.3 ? "kaftan" : "casual");
-  const top = new THREE.Color(opts.top || (outfit === "kaftan" ? pick(KAFTANS) : pick(SHIRTS)));
-  const bottom = opts.bottom ? new THREE.Color(opts.bottom) : outfit === "kaftan" ? top.clone().multiplyScalar(0.92) : new THREE.Color(pick(TROUSERS));
-  const skin = new THREE.Color(opts.skin || pick(SKINS)), hair = new THREE.Color(opts.hair || pick(HAIRS));
-  const shoes = new THREE.Color(opts.shoes || (R() < 0.5 ? "#f2f2ee" : "#222222"));
+
+  // Build the look object from opts or random seed
+  const look = opts.look || {};
+  const top = look.top || opts.top || (outfit === "kaftan" ? pick(KAFTANS) : pick(SHIRTS));
+  const bottom = look.bottom || opts.bottom || (outfit === "kaftan" ? top : pick(TROUSERS));
+  const skin = look.skin || opts.skin || pick(SKINS);
+  const hair = look.hair || opts.hair || pick(HAIRS);
+  const shoes = look.shoes || opts.shoes || (R() < 0.5 ? "#f2f2ee" : "#222222");
+  const fullLook = { top, bottom, skin, hair, shoes, topStyle: look.topStyle || outfit, bottomStyle: look.bottomStyle || "trousers" };
 
   const model = cloneSkinned(src);
   const height = opts.height || 1.75;
@@ -118,31 +125,78 @@ export async function createCharacter(opts = {}) {
   const baseY = -baseInfo.box.min.y * k;
   model.position.set(-baseInfo.center.x * k, baseY, -baseInfo.center.z * k);
 
-  // NOTE: mergeSkinned is NOT called — it breaks bone animation (causes T-pose/floating).
-  // Characters use original ~240 skinned meshes. Frustum culling + distance culling
-  // (in npcs.js / people.js) keep draw calls manageable.
+  // Apply colours by material name (no mergeSkinned — keeps bone animation working)
+  _applyLook(model, fullLook);
 
-  const hipFrac = outfit === "kaftan" ? 0.32 : 0.5;
-  model.traverse((o) => {
-    if (!o.isMesh) return;
-    o.castShadow = false; o.frustumCulled = true; // PERFORMANCE: no shadows + frustum culling on characters
-    if (o.name !== "__paint") return;
-    // shared geometry, own colour attribute so every character wears different clothes
-    const g0 = o.geometry, n = g0.attributes.position.count, hy = g0.attributes.hy.array, pt = g0.attributes.part.array;
-    const col = new Float32Array(n * 3), cols = [top, bottom, null, hair, shoes];
-    for (let i = 0; i < n; i++) {
-      const p = pt[i] | 0;
-      const c = p === 0 ? (hy[i] > hipFrac ? top : bottom) : p === 2 ? skin : cols[p];
-      col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
-    }
-    const g = new THREE.BufferGeometry();
-    for (const key of Object.keys(g0.attributes)) if (key !== "hy" && key !== "part") g.setAttribute(key, g0.attributes[key]);
-    if (g0.index) g.setIndex(g0.index);
-    g.setAttribute("color", new THREE.BufferAttribute(col, 3));
-    o.geometry = g;
-  });
   const group = new THREE.Group();
   group.add(model);
+  group.userData.look = fullLook; // store for recolorCharacter
   const animate = makeRig(group, model, baseY, opts.pose || "stand");
-  return { group, model, animate };
+  return { group, model, animate, look: fullLook };
+}
+
+// Recolour an existing character in-place (no model reload).
+// ch = { group, model } from createCharacter. look = { top, bottom, skin, hair, shoes, topStyle, bottomStyle }
+export function recolorCharacter(ch, look) {
+  if (!ch?.model) return;
+  _applyLook(ch.model, look);
+  if (ch.group) ch.group.userData.look = look;
+}
+
+// Internal: apply colours to a model's meshes by material name.
+// The GLB has materials named with keywords: "clothing"/"shirt"/"pant", "skin", "hair", "shoes".
+function _applyLook(model, look) {
+  const top = new THREE.Color(look.top || "#1f7a5a");
+  const bottom = new THREE.Color(look.bottom || "#2b3a55");
+  const skin = new THREE.Color(look.skin || "#8a5a3c");
+  const hair = new THREE.Color(look.hair || "#111111");
+  const shoes = new THREE.Color(look.shoes || "#222222");
+  const isKaftan = look.topStyle === "kaftan";
+  const isShorts = look.bottomStyle === "shorts";
+
+  model.traverse((o) => {
+    if (!o.isMesh) return;
+    o.castShadow = false; o.frustumCulled = true;
+
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    const fixed = mats.map((m) => {
+      const mm = m.clone();
+      const n = (mm.name || "").toLowerCase();
+      mm.metalness = 0; mm.roughness = 0.85;
+
+      if (n.includes("skin") || n.includes("body") || n.includes("face") || n.includes("hand") || n.includes("arm") || n.includes("leg")) {
+        // Skin — but if it's a leg mesh and shorts style, keep skin (bare legs)
+        mm.map = null; mm.color.copy(skin);
+      } else if (n.includes("hair") || n.includes("head_top")) {
+        mm.map = null; mm.color.copy(hair);
+      } else if (n.includes("shoe") || n.includes("foot") || n.includes("sole")) {
+        mm.map = null; mm.color.copy(shoes);
+      } else if (n.includes("cloth") || n.includes("shirt") || n.includes("pant") || n.includes("trouser") || n.includes("jean")) {
+        // Clothing — determine if top or bottom by mesh height
+        mm.map = null;
+        if (isKaftan) {
+          mm.color.copy(top); // kaftan = one colour everywhere
+        } else {
+          // Check mesh height to decide top vs bottom
+          o.geometry.computeBoundingBox();
+          const bb = o.geometry.boundingBox;
+          const meshCenterY = (bb.min.y + bb.max.y) / 2;
+          const modelHeight = bb.max.y - bb.min.y;
+          // If the mesh center is in the upper half, it's a top; lower half = bottom
+          if (meshCenterY > modelHeight * 0.5) {
+            mm.color.copy(top);
+          } else {
+            mm.color.copy(bottom);
+          }
+        }
+      } else if (n.includes("eye") || n.includes("brow") || n.includes("mouth") || n.includes("teeth")) {
+        // Leave facial features as-is
+      } else {
+        // Unknown material — try to colour as clothing
+        mm.map = null; mm.color.copy(top);
+      }
+      return mm;
+    });
+    o.material = Array.isArray(o.material) ? fixed : fixed[0];
+  });
 }

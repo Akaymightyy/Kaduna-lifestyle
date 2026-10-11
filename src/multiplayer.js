@@ -52,7 +52,8 @@ export function sendChat(text) {
 
 async function createAvatarFor(uid, d) {
   try {
-    const ch = await createCharacter({ seed: Math.abs(hashStr(uid)) % 100000, height: 1.75 });
+    // Use the player's saved look from Firebase (d.look), or fall back to seed
+    const ch = await createCharacter({ seed: Math.abs(hashStr(uid)) % 100000, height: 1.75, look: d.look || {} });
     const model = ch.model;
     const group = ch.group;
     // PERFORMANCE: remote players don't cast shadows (only the local player does)
@@ -65,7 +66,7 @@ async function createAvatarFor(uid, d) {
     sp.position.y = 2.0; sp.scale.set(1.6, 0.4, 1);
     group.add(sp);
     _scene.add(group);
-    _meshes[uid] = { group, model, walker: { animate: (dt, speed, moving) => ch.animate(dt, moving ? speed : 0) }, lastX: d.x||0, lastZ: d.z||0, phase: 0 };
+    _meshes[uid] = { group, model, ch, walker: { animate: (dt, speed, moving) => ch.animate(dt, moving ? speed : 0) }, lastX: d.x||0, lastZ: d.z||0, phase: 0, look: d.look };
     // Apply current position immediately
     group.position.set(d.x||0, 0, d.z||0);
     group.rotation.y = d.heading||0;
@@ -111,6 +112,13 @@ function updateAvatars() {
     }
     const m = _meshes[uid];
     const px = d.x||0, pz = d.z||0;
+    // Check if look changed (player changed clothes) → recolor
+    if (d.look && m.look && JSON.stringify(d.look) !== JSON.stringify(m.look)) {
+      m.look = d.look;
+      if (m.ch) {
+        import("./characters.js").then(({ recolorCharacter }) => recolorCharacter(m.ch, d.look));
+      }
+    }
     // Distance from local player
     const ddx = px - _myX, ddz = pz - _myZ;
     const distSq = ddx * ddx + ddz * ddz;

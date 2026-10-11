@@ -1,17 +1,18 @@
 import * as THREE from "three";
-import { loadCharacterBase, createCharacter } from "./characters.js";
+import { loadCharacterBase, createCharacter, recolorCharacter } from "./characters.js";
 import { PLAYER_LIMIT_X, PLAYER_LIMIT_Z } from "./config.js";
 
 const ARM_DOWN = 1.25;
 const _q = new THREE.Quaternion(), _ax = new THREE.Vector3();
 
-export async function loadPlayer(manager, scene) {
-  // The player uses the same (merged, light) character as everybody else.
+export async function loadPlayer(manager, scene, look) {
+  // The player uses the same character as everybody else, with the saved look.
   await loadCharacterBase(manager);
-  const ch = await createCharacter({ seed: 1, height: 1.8, outfit: "casual", top: "#1f7a5a", bottom: "#2b3a55", skin: "#8a5a3c", hair: "#111111", shoes: "#f2f2ee" });
+  const ch = await createCharacter({ seed: 1, height: 1.8, look: look || {} });
   ch.group.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = true; } });
   scene.add(ch.group);
-  return { group: ch.group, animate: ch.animate, height: 1.8 };
+  // Expose recolor so main.js can change clothes live
+  return { group: ch.group, model: ch.model, animate: ch.animate, height: 1.8, recolor: (newLook) => recolorCharacter(ch, newLook) };
 }
 
 export function collide(pos, colliders, r = 0.45) {

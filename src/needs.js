@@ -8,6 +8,7 @@ export function createGameState() {
     rank: "newcomer",
     jobCooldown: 0,
     lastUpdate: Date.now(),
+    look: { top: "#1f7a5a", bottom: "#2b3a55", skin: "#8a5a3c", hair: "#111111", shoes: "#222222", topStyle: "casual", bottomStyle: "trousers" },
   };
   // Load from localStorage
   try {
@@ -19,7 +20,7 @@ export function createGameState() {
   } catch (e) {}
 
   function save() {
-    try { localStorage.setItem("kaduna-state", JSON.stringify({ money: state.money, needs: state.needs, rank: state.rank, jobCooldown: state.jobCooldown, posX: state.posX, posZ: state.posZ, heading: state.heading })); } catch (e) {}
+    try { localStorage.setItem("kaduna-state", JSON.stringify({ money: state.money, needs: state.needs, rank: state.rank, jobCooldown: state.jobCooldown, posX: state.posX, posZ: state.posZ, heading: state.heading, look: state.look })); } catch (e) {}
   }
 
   function updateNeeds(dt) {
