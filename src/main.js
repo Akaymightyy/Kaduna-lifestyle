@@ -8,7 +8,7 @@ import { addCity } from "./city.js";
 import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAILY_QUESTS, DAILY_REWARDS } from "./config.js";
 import { createGameState } from "./needs.js";
 import { auth, db } from "./firebase.js";
-import { initAuth, showAuthModal, wireAuthUI, logout } from "./auth.js";
+import { initAuth, showAuthModal, wireAuthUI, logout, isAuthed } from "./auth.js";
 import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition } from "./multiplayer.js";
 import { startRide, travelToZone, travelToPlace, getDestinations } from "./travel.js";
 import { subscribeRichList } from "./economy.js";
@@ -79,6 +79,7 @@ function skyAt(h) { let i=0; while(i<SKY.length-2&&h>=SKY[i+1][0])i++; const a=S
 const qs = new URLSearchParams(location.search);
 const fixedHour = qs.has("t") ? parseFloat(qs.get("t")) : null;
 const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const INTERIOR_BG = new THREE.Color(0x1a1510);
 let lastClock = "";
 function applyTime() {
   const mins = Date.now()/60000; const hour = fixedHour ?? (mins%24);
@@ -606,6 +607,8 @@ onValue(ref(db, "events"), (snap) => {
 const clock = new THREE.Clock();
 let mmT=0, hitCool=0, hudT=0;
 function frame() {
+  // Nothing runs until the player has signed in / signed up.
+  if (!isAuthed && !window.__bypassAuth) { clock.getDelta(); renderer.render(scene, camera); requestAnimationFrame(frame); return; }
   const dt = Math.min(clock.getDelta(), 0.05);
   const now = Date.now() / 1000;
   const it = ctl.intent();
@@ -618,9 +621,9 @@ function frame() {
     player.heading += d * (1 - Math.exp(-dt * 12));
     player.pos.x += it.x * player.speed * dt; player.pos.z += it.z * player.speed * dt;
   }
-  collide(player.pos, world.colliders);
-  // If we're inside a place, also collide with the place's local colliders
   const active = getActivePlace();
+  if (!active) collide(player.pos, world.colliders);
+  // If we're inside a place, also collide with the place's local colliders
   if (active?.handle?.colliders) {
     for (const c of active.handle.colliders) {
       const cx = Math.max(c.minX, Math.min(player.pos.x, c.maxX));
@@ -651,8 +654,9 @@ function frame() {
     }
   }
   if (rig) { rig.group.position.copy(player.pos); rig.group.rotation.y = player.heading; rig.animate(dt, player.speed); }
-  updateCamera(camera, ctl, player.pos, world.colliders, dt);
+  updateCamera(camera, ctl, player.pos, active ? (active.handle.colliders || []) : world.colliders, dt);
   applyTime();
+  if (active) { scene.background = INTERIOR_BG; scene.fog.color.copy(INTERIOR_BG); sun.intensity = 0; hemi.intensity = 0.25; }
   game.updateNeeds(dt);
   hudT += dt; if (hudT > 0.5) { hudT = 0; updateHUD(); }
   sendPosition(player.pos.x, player.pos.z, player.heading);
@@ -668,9 +672,9 @@ Promise.all([loadPlayer(manager, scene), addCity(scene, world, manager)]).then((
   setProgress(1);
   ctl.yaw = player.heading + Math.PI;
   updateHUD();
-  setTimeout(() => { if (!auth.currentUser) showAuthModal(); }, 500);
+  
   frame();
   $("loading").classList.add("done");
-  window.__dbg = { player, ctl, npcs };
+  window.__dbg = { player, ctl, npcs, renderer, scene };
   window.__ready = true;
 }).catch((e) => showError("Could not load the game: " + e.message));

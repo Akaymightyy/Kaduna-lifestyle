@@ -1,5 +1,5 @@
 // src/auth.js — Firebase Auth (Guest, Google, Email/Password) + Admin quick-login
-import { auth } from "./firebase.js";
+import { auth, authPersistReady } from "./firebase.js";
 import {
   signInAnonymously,
   signInWithPopup,
@@ -12,13 +12,23 @@ import {
 
 let _onAuth = null;
 
+export let isAuthed = false;
+let _started = false;
 export function initAuth(onAuth) {
   _onAuth = onAuth;
-  onAuthStateChanged(auth, (user) => {
-    if (user) {
-      hideAuthModal();
-      if (_onAuth) _onAuth(user);
-    }
+  authPersistReady.then(() => {
+    onAuthStateChanged(auth, async (user) => {
+      // Guests are no longer allowed: drop any old anonymous session.
+      if (user && user.isAnonymous) { try { await signOut(auth); } catch (_) {} return; }
+      if (user) {
+        isAuthed = true;
+        hideAuthModal();
+        if (!_started) { _started = true; if (_onAuth) _onAuth(user); }
+      } else {
+        isAuthed = false;
+        showAuthModal();
+      }
+    });
   });
 }
 
@@ -41,7 +51,7 @@ export async function loginGoogle() {
   try {
     await signInWithPopup(auth, new GoogleAuthProvider());
   } catch (e) {
-    toast(e.message);
+    toast(friendly(e, "Google sign-in failed"));
   }
 }
 
@@ -49,7 +59,7 @@ export async function loginEmail(email, pass) {
   try {
     await signInWithEmailAndPassword(auth, email, pass);
   } catch (e) {
-    toast(e.message || "Invalid credentials");
+    toast(friendly(e, "Could not log in"));
   }
 }
 
@@ -57,7 +67,7 @@ export async function signupEmail(email, pass) {
   try {
     await createUserWithEmailAndPassword(auth, email, pass);
   } catch (e) {
-    toast(e.message || "Could not create account");
+    toast(friendly(e, "Could not create account"));
   }
 }
 
@@ -72,6 +82,16 @@ export async function logout() {
   }
 }
 
+function friendly(e, fallback) {
+  const c = (e && e.code) || "";
+  if (c.includes("email-already-in-use")) return "That email already has an account. Tap Log In.";
+  if (c.includes("weak-password")) return "Password must be at least 6 characters.";
+  if (c.includes("invalid-email")) return "Enter a valid email address.";
+  if (c.includes("invalid-credential") || c.includes("wrong-password") || c.includes("user-not-found")) return "Wrong email or password. New here? Tap Sign Up.";
+  if (c.includes("popup-closed") || c.includes("cancelled")) return "Sign-in cancelled.";
+  if (c.includes("network")) return "No network. Check your data and try again.";
+  return fallback;
+}
 function toast(msg) {
   const t = document.getElementById("toast");
   if (t) {
@@ -82,7 +102,6 @@ function toast(msg) {
 }
 
 export function wireAuthUI() {
-  document.getElementById("auth-guest")?.addEventListener("click", loginGuest);
   document.getElementById("auth-google")?.addEventListener("click", loginGoogle);
   document.getElementById("auth-login-btn")?.addEventListener("click", () => {
     const e = document.getElementById("auth-email")?.value;
@@ -94,7 +113,6 @@ export function wireAuthUI() {
     const p = document.getElementById("auth-pass")?.value;
     if (e && p) signupEmail(e, p);
   });
-  document.getElementById("auth-close")?.addEventListener("click", hideAuthModal);
   // Enter key on password field triggers login
   document.getElementById("auth-pass")?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
