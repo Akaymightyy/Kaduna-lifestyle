@@ -8,7 +8,7 @@ import { addCity } from "./city.js";
 import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAILY_QUESTS, DAILY_REWARDS } from "./config.js";
 import { createGameState } from "./needs.js";
 import { auth, db } from "./firebase.js";
-import { initAuth, showAuthModal, wireAuthUI } from "./auth.js";
+import { initAuth, showAuthModal, wireAuthUI, logout } from "./auth.js";
 import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition } from "./multiplayer.js";
 import { startRide, travelToZone, travelToPlace, getDestinations } from "./travel.js";
 import { subscribeRichList } from "./economy.js";
@@ -244,17 +244,66 @@ function showPhoneApp(appId) {
     return;
   }
   if(appId==="map"){
-    // Show all registered places (tappable to travel there)
+    // Visual drone-style top-down map (canvas) + place list below
     const places = listPlaces();
     const gameHour = _gameHour();
-    c.innerHTML='<div style="font-size:14px;margin-bottom:8px;font-weight:700;color:var(--green);">🗺️ Kaduna Map</div>'+
-      '<div style="background:var(--green);color:#fff;border-radius:10px;padding:8px;margin-bottom:10px;font-size:11px;">📍 Tap a place to travel there</div>'+
-      places.map(p => {
-        const open = (p.hours == null) ? true : (gameHour >= p.hours.open && gameHour < p.hours.close);
-        const openBadge = open ? '<span style="color:#2e7d4f;font-size:10px;">● open</span>' : '<span style="color:#e11d48;font-size:10px;">● closed</span>';
-        return '<div onclick="window.travelToPlace(\''+p.id+'\')" style="padding:10px;background:'+(open?'#e8f5e9':'#f5e8e8')+';border-radius:8px;margin-bottom:6px;font-size:12px;font-weight:600;color:var(--green);cursor:pointer;">'+p.minimapIcon+' '+p.name+' '+openBadge+'<div style="font-size:10px;color:#666;font-weight:400;margin-top:2px;">'+(p.type==='interior'?'Interior':'Outdoor')+' · '+p.activities.length+' activities</div></div>';
-      }).join("")+
-      backBtn;
+    // Map bounds: x from -160 to 160, z from -50 to 50
+    const MAP_W = 300, MAP_H = 120;
+    const minWX = -160, maxWX = 160, minWZ = -50, maxWZ = 50;
+    const toMapX = (wx) => ((wx - minWX) / (maxWX - minWX)) * MAP_W;
+    const toMapZ = (wz) => ((wz - minWZ) / (maxWZ - minWZ)) * MAP_H;
+    // Player position
+    const px = player.pos.x, pz = player.pos.z;
+    // Build SVG (crisp, tappable)
+    let svg = '<svg width="100%" viewBox="0 0 '+MAP_W+' '+MAP_H+'" style="background:#9aab62;border-radius:12px;display:block;touch-action:manipulation;">';
+    // Grass background already set. Draw road (gray horizontal strip)
+    svg += '<rect x="0" y="'+(toMapZ(-9))+'" width="'+MAP_W+'" height="'+(toMapZ(9)-toMapZ(-9))+'" fill="#555a62"/>';
+    // Road markings (dashed center line)
+    svg += '<line x1="0" y1="'+toMapZ(0)+'" x2="'+MAP_W+'" y2="'+toMapZ(0)+'" stroke="#fff" stroke-width="0.8" stroke-dasharray="4,3"/>';
+    // Side streets
+    for (const sx of [-90, 90]) {
+      svg += '<rect x="'+(toMapX(sx)-2)+'" y="0" width="4" height="'+MAP_H+'" fill="#555a62"/>';
+    }
+    // Buildings strip (top + bottom)
+    svg += '<rect x="0" y="0" width="'+MAP_W+'" height="'+toMapZ(-12)+'" fill="#8f7a5e"/>';
+    svg += '<rect x="0" y="'+toMapZ(12)+'" width="'+MAP_W+'" height="'+(MAP_H-toMapZ(12))+'" fill="#8f7a5e"/>';
+    // Place markers (tappable)
+    for (const p of places) {
+      const mx = toMapX(p.entranceX), mz = toMapZ(p.entranceZ);
+      const open = (p.hours == null) ? true : (gameHour >= p.hours.open && gameHour < p.hours.close);
+      const color = "#" + (p.minimapColor || 0xc0392b).toString(16).padStart(6, "0");
+      svg += '<g style="cursor:pointer;" onclick="window.travelToPlace(\''+p.id+'\')">';
+      // Glow ring (open only)
+      if (open) svg += '<circle cx="'+mx+'" cy="'+mz+'" r="7" fill="'+color+'" opacity="0.25"/>';
+      // Main dot
+      svg += '<circle cx="'+mx+'" cy="'+mz+'" r="4.5" fill="'+color+'" stroke="#fff" stroke-width="1.5"/>';
+      // Label (short)
+      const shortName = p.name.split(" ").slice(0, 2).join(" ");
+      svg += '<text x="'+mx+'" y="'+(mz-7)+'" text-anchor="middle" font-size="6" font-weight="700" fill="#fff" style="paint-order:stroke;stroke:#000;stroke-width:1.5;">'+shortName+'</text>';
+      svg += '</g>';
+    }
+    // Player position (pulsing red dot)
+    const pmx = toMapX(px), pmz = toMapZ(pz);
+    svg += '<circle cx="'+pmx+'" cy="'+pmz+'" r="6" fill="#ff6a3d" opacity="0.3"><animate attributeName="r" values="6;9;6" dur="1.5s" repeatCount="indefinite"/></circle>';
+    svg += '<circle cx="'+pmx+'" cy="'+pmz+'" r="3.5" fill="#ff6a3d" stroke="#fff" stroke-width="1.5"/>';
+    // "YOU" label
+    svg += '<text x="'+pmx+'" y="'+(pmz+10)+'" text-anchor="middle" font-size="5" font-weight="700" fill="#fff" style="paint-order:stroke;stroke:#000;stroke-width:1.5;">YOU</text>';
+    svg += '</svg>';
+    // Legend
+    const legend = '<div style="display:flex;gap:10px;font-size:9px;color:#666;margin:6px 0 10px;flex-wrap:wrap;">'+
+      '<span><span style="display:inline-block;width:8px;height:8px;background:#ff6a3d;border-radius:50%;border:1px solid #fff;"></span> You</span>'+
+      '<span><span style="display:inline-block;width:8px;height:8px;background:#2e7d4f;border-radius:50%;"></span> Open place</span>'+
+      '<span><span style="display:inline-block;width:8px;height:8px;background:#e11d48;border-radius:50%;"></span> Closed place</span>'+
+      '<span>👆 Tap a place to travel</span>'+
+    '</div>';
+    // Place list (tappable)
+    const placeList = places.map(p => {
+      const open = (p.hours == null) ? true : (gameHour >= p.hours.open && gameHour < p.hours.close);
+      const openBadge = open ? '<span style="color:#2e7d4f;font-size:10px;">● open</span>' : '<span style="color:#e11d48;font-size:10px;">● closed</span>';
+      const color = "#" + (p.minimapColor || 0xc0392b).toString(16).padStart(6, "0");
+      return '<div onclick="window.travelToPlace(\''+p.id+'\')" style="padding:8px;background:'+(open?'#e8f5e9':'#f5e8e8')+';border-radius:8px;margin-bottom:5px;font-size:12px;font-weight:600;color:var(--green);cursor:pointer;border-left:4px solid '+color+';">'+p.minimapIcon+' '+p.name+' '+openBadge+'<div style="font-size:10px;color:#666;font-weight:400;margin-top:2px;">'+(p.type==='interior'?'Interior':'Outdoor')+' · '+p.activities.length+' activities</div></div>';
+    }).join("");
+    c.innerHTML='<div style="font-size:14px;margin-bottom:8px;font-weight:700;color:var(--green);">🗺️ Kaduna Map</div>'+svg+legend+'<div style="font-size:11px;font-weight:600;margin:8px 0 6px;color:#666;">All Places:</div>'+placeList+backBtn;
     return;
   }
   if(appId==="daily"){
@@ -335,7 +384,22 @@ function showPhoneApp(appId) {
   }
   if(appId==="settings"){
     const s=game.state;
-    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">⚙️ Settings</div><div style="background:var(--cream);border-radius:10px;padding:12px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:8px;">Game</div><button onclick="window.saveGame()" style="width:100%;background:var(--green);color:#fff;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:13px;font-weight:600;margin-bottom:6px;">💾 Save Game</button><button onclick="window.resetGame()" style="width:100%;background:#e11d48;color:#fff;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:13px;font-weight:600;">🗑 Reset Game (lose all progress)</button></div><div style="background:var(--cream);border-radius:10px;padding:12px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">Account</div><div style="font-size:11px;color:#666;">Signed in as: <b>'+(getMyName()||"Guest")+'</b></div><div style="font-size:10px;color:#999;margin-top:4px;">UID: '+(getMyUid()||"guest").slice(0,20)+'</div></div><div style="background:var(--cream);border-radius:10px;padding:12px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">About</div><div style="font-size:11px;color:#666;line-height:1.5;">Kaduna Lifestyle v0.3 — A 3D multiplayer life-sim set in Kaduna, Nigeria. Built with Three.js + Firebase.</div></div>'+backBtn;
+    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">⚙️ Settings</div>'+
+      '<div style="background:var(--cream);border-radius:10px;padding:12px;margin-bottom:8px;">'+
+        '<div style="font-size:12px;font-weight:600;margin-bottom:8px;">Game</div>'+
+        '<button onclick="window.saveGame()" style="width:100%;background:var(--green);color:#fff;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:13px;font-weight:600;margin-bottom:6px;">💾 Save Game</button>'+
+        '<button onclick="window.resetGame()" style="width:100%;background:#e11d48;color:#fff;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:13px;font-weight:600;">🗑 Reset Game (lose all progress)</button>'+
+      '</div>'+
+      '<div style="background:var(--cream);border-radius:10px;padding:12px;margin-bottom:8px;">'+
+        '<div style="font-size:12px;font-weight:600;margin-bottom:6px;">Account</div>'+
+        '<div style="font-size:11px;color:#666;margin-bottom:4px;">Signed in as: <b>'+(getMyName()||"Guest")+'</b></div>'+
+        '<div style="font-size:10px;color:#999;margin-bottom:10px;">UID: '+(getMyUid()||"guest").slice(0,20)+'</div>'+
+        '<button onclick="window.logout()" style="width:100%;background:#e11d48;color:#fff;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:13px;font-weight:600;">🚪 Log Out</button>'+
+      '</div>'+
+      '<div style="background:var(--cream);border-radius:10px;padding:12px;">'+
+        '<div style="font-size:12px;font-weight:600;margin-bottom:6px;">About</div>'+
+        '<div style="font-size:11px;color:#666;line-height:1.5;">Kaduna Lifestyle v0.3 — A 3D multiplayer life-sim set in Kaduna, Nigeria. Built with Three.js + Firebase.</div>'+
+      '</div>'+backBtn;
     return;
   }
   if(appId==="admin"){
@@ -383,6 +447,7 @@ window.sendMessage=(uid,name)=>{
   toast("Waved at "+name);
 };
 window.saveGame=()=>{game.save?.();toast("Game saved!");};
+window.logout=async()=>{ if(confirm("Log out of Kaduna Lifestyle?")){ await logout(); } };
 window.resetGame=()=>{
   if(!confirm("Reset all progress? You'll lose your money, needs, and rank."))return;
   localStorage.removeItem("kaduna-state");

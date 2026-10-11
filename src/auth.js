@@ -7,6 +7,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   onAuthStateChanged,
+  signOut,
 } from "firebase/auth";
 
 let _onAuth = null;
@@ -57,6 +58,17 @@ export async function signupEmail(email, pass) {
     await createUserWithEmailAndPassword(auth, email, pass);
   } catch (e) {
     toast(e.message || "Could not create account");
+  }
+}
+
+export async function logout() {
+  try {
+    await signOut(auth);
+    toast("Signed out");
+    // Reload to reset game state cleanly
+    setTimeout(() => location.reload(), 500);
+  } catch (e) {
+    toast(e.message || "Could not sign out");
   }
 }
 
