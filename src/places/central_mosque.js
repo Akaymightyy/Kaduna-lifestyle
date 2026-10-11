@@ -201,7 +201,7 @@ export async function build(scene, ctx) {
     })),
   }));
   // Extra warm glow at mihrab
-  const mihrabLight = new THREE.PointLight(0xffd070, 0.6, 10, 2.0);
+  const mihrabLight = new THREE.PointLight(0xffd070, 0.6, 10, 2.0); mihrabLight.visible = false; // no per-pixel point lights (perf)
   mihrabLight.position.set(0, 3, -13);
   group.add(mihrabLight);
 

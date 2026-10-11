@@ -27,7 +27,7 @@ export function mergedMesh(geos, materialOpts = {}) {
     ...materialOpts,
   });
   const m = new THREE.Mesh(merged, mat);
-  m.castShadow = true; m.receiveShadow = true;
+  m.castShadow = false; m.receiveShadow = false; // interiors never need real shadows
   return m;
 }
 
@@ -73,17 +73,13 @@ export function floor(w, d, color = 0xbfb39a) {
 
 // Add a basic interior lighting rig: warm ambient + a few point lights
 export function interiorLights({ ambient = 0.5, points = [] } = {}) {
+  // PERFORMANCE: real point lights are evaluated for EVERY pixel of EVERY surface and force the
+  // shaders to recompile for each place (that was the lag when entering a building).
+  // We fold their brightness into one ambient light instead: same bright room, fraction of the cost.
   const group = new THREE.Group();
-  const amb = new THREE.AmbientLight(0xfff0d0, ambient);
+  const extra = points.reduce((s, p) => s + (p.intensity ?? 1) * 0.3, 0);
+  const amb = new THREE.AmbientLight(0xfff0d0, Math.min(1.3, Math.max(0.55, ambient + extra)));
   group.add(amb);
-  const hemi = new THREE.HemisphereLight(0xfff0d0, 0x4a3a20, 0.4);
-  group.add(hemi);
-  for (const p of points) {
-    const pl = new THREE.PointLight(p.color ?? 0xffd070, p.intensity ?? 1.0, p.distance ?? 18, 2.0);
-    pl.position.set(p.x, p.y ?? 4, p.z);
-    pl.castShadow = !!p.shadow;
-    group.add(pl);
-  }
   return group;
 }
 
@@ -145,9 +141,6 @@ export function stripLight({ x, y, z, w = 2, h = 0.1, color = 0xfff0b0, intensit
   );
   mesh.position.set(x, y, z);
   group.add(mesh);
-  const pl = new THREE.PointLight(color, intensity, 12, 2.0);
-  pl.position.set(x, y - 0.2, z);
-  group.add(pl);
   return group;
 }
 

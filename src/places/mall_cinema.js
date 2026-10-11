@@ -36,7 +36,7 @@ export async function build(scene, ctx) {
   // Cinema (upper level)
   const cinemaGroup = _buildCinema(R); cinemaGroup.position.set(18, 4, -18); group.add(cinemaGroup);
   // Stairs to cinema
-  for (let i = 0; i < 5; i++) { const step = box(4, 0.2, 1, 18, 0.1 + i * 0.8, -12 + i * 1.2, 0xc8c2b0); group.add(step); }
+  for (let i = 0; i < 5; i++) { const step = mergedMesh([box(4, 0.2, 1, 18, 0.1 + i * 0.8, -12 + i * 1.2, 0xc8c2b0)]); group.add(step); }
   // Indoor tree planter
   const planter = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.8, 0.8, 12), new THREE.MeshLambertMaterial({ color: 0x8a6a45 }));
   planter.position.set(0, 0.4, 0); group.add(planter);
@@ -105,7 +105,7 @@ function _act(ctx, cost, msg, effects) {
 
 function _buildStorefront(shop, R) {
   const g = new THREE.Group();
-  g.add(box(8, 5, 0.3, 0, 2.5, -1, shop.color));
+  g.add(mergedMesh([box(8, 5, 0.3, 0, 2.5, -1, shop.color)]));
   const glass = new THREE.Mesh(new THREE.BoxGeometry(7.5, 3, 0.1), new THREE.MeshLambertMaterial({ color: 0x9fc2d9, transparent: true, opacity: 0.4 }));
   glass.position.set(0, 2.5, 1); g.add(glass);
   g.add(mergedMesh([box(8, 0.2, 0.2, 0, 1, 1, 0x222222), box(8, 0.2, 0.2, 0, 4, 1, 0x222222), box(0.2, 3, 0.2, -3.75, 2.5, 1, 0x222222), box(0.2, 3, 0.2, 3.75, 2.5, 1, 0x222222), box(0.2, 3, 0.2, 0, 2.5, 1, 0x222222)]));
@@ -134,7 +134,7 @@ function _buildFoodCourt(R) {
 }
 function _buildCinema(R) {
   const g = new THREE.Group();
-  g.add(box(14, 0.3, 10, 0, -0.15, 0, 0x222230));
+  g.add(mergedMesh([box(14, 0.3, 10, 0, -0.15, 0, 0x222230)]));
   const screen = new THREE.Mesh(new THREE.PlaneGeometry(8, 4), new THREE.MeshBasicMaterial({ color: 0xf0f0d0 }));
   screen.position.set(0, 2.5, -4); g.add(screen);
   g.add(mergedMesh([box(8.4, 0.2, 0.1, 0, 4.5, -4, 0x222222), box(8.4, 0.2, 0.1, 0, 0.5, -4, 0x222222), box(0.2, 4, 0.1, -4.2, 2.5, -4, 0x222222), box(0.2, 4, 0.1, 4.2, 2.5, -4, 0x222222)]));

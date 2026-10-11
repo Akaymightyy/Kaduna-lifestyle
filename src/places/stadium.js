@@ -66,7 +66,7 @@ export async function build(scene, ctx) {
     const panel = new THREE.Mesh(new THREE.BoxGeometry(2, 1.5, 0.2), new THREE.MeshBasicMaterial({ color: 0xfff0b0 }));
     panel.position.set(fx, 12, fz); group.add(panel);
     // Actual light
-    const pl = new THREE.PointLight(0xfff0b0, 0, 40, 2.0);
+    const pl = new THREE.PointLight(0xfff0b0, 0, 40, 2.0); pl.visible = false; // perf: hidden lights cost nothing
     pl.position.set(fx, 12, fz); group.add(pl);
     if (!group.userData.floodLights) group.userData.floodLights = [];
     group.userData.floodLights.push(pl);
