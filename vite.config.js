@@ -1,8 +1,10 @@
 import { defineConfig } from "vite";
+import { viteSingleFile } from "vite-plugin-singlefile";
 
-// Plain Vite build (code split into small files that load in parallel and are cached).
 export default defineConfig({
+  plugins: [viteSingleFile()],
   build: {
     chunkSizeWarningLimit: 2000,
+    emptyOutDir: true,
   },
 });
