@@ -44,8 +44,10 @@ export function createControls(canvas, camera, ui) {
   const jend = (e) => { if (e.pointerId !== jid) return; jid = null; knob.style.transform = ""; st.joyX = st.joyY = 0; };
   joy.addEventListener("pointerup", jend); joy.addEventListener("pointercancel", jend);
 
-  addEventListener("keydown", (e) => { st.keys[e.key.toLowerCase()] = true; });
-  addEventListener("keyup", (e) => { st.keys[e.key.toLowerCase()] = false; });
+  // Phone keyboards / autofill fire key events with NO e.key -> that crashed the game when typing in sign up.
+  const typing = (e) => { const t = e.target; return t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable); };
+  addEventListener("keydown", (e) => { if (typing(e) || typeof e.key !== "string") return; st.keys[e.key.toLowerCase()] = true; });
+  addEventListener("keyup", (e) => { if (typeof e.key !== "string") return; st.keys[e.key.toLowerCase()] = false; });
 
   // movement intent (camera-relative), magnitude 0..1
   st.intent = () => {

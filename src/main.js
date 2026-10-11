@@ -1,6 +1,5 @@
 import * as THREE from "three";
 import { buildWorld } from "./world.js";
-import { fetchKadunaData, buildRealMap } from "./realmap.js";
 import { createTraffic } from "./traffic.js";
 import { loadPlayer, collide } from "./player.js";
 import { createControls, updateCamera } from "./controls.js";
@@ -22,7 +21,8 @@ import { listPlaces, getPlace } from "./places/registry.js";
 
 const $ = (id) => document.getElementById(id);
 const showError = (m) => { const e = $("err"); e.style.display = "flex"; e.textContent = m; };
-addEventListener("error", (e) => showError("Something broke: " + e.message));
+// A stray runtime error must not kill the whole game screen: log it, only load failures are fatal.
+addEventListener("error", (e) => { console.error("[game error]", e.message); });
 
 let tipI = 0;
 $("ltip").textContent = TIPS[0];
@@ -52,7 +52,7 @@ const canvas = $("game");
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: Q.antialias, powerPreference: "high-performance" });
 renderer.setPixelRatio(Q.pixelRatio);
 renderer.shadowMap.enabled = Q.shadows;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;  // cheaper than PCFSoft on phones
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0xa9d6f2, Q.fogNear, Q.fogFar);
@@ -74,70 +74,47 @@ const ctl = createControls(canvas, camera, { joy: $("joy"), knob: $("knob") });
 const game = createGameState();
 const npcs = createNPCs(scene);
 
-// ---- Real Kaduna map (async, with fallback) ----
-// Fetch kaduna.json and add the real river + landmark positions.
-// Falls back silently to the procedural world if the data fails to load.
-let _realMap = null;
-fetchKadunaData().then((data) => {
-  if (!data) return;
-  _realMap = buildRealMap(scene, data);
-  if (_realMap) {
-    // Merge real map colliders + mapShapes into the world
-    world.colliders.push(..._realMap.colliders);
-    if (_realMap.mapShapes.roads) {
-      world.mapShapes.roads = _realMap.mapShapes.roads;
-    }
-    // Rebuild minimap with real road data
-    mmDraw = createMinimap($("mm"), world.mapShapes);
-    console.log("[realmap] Real Kaduna map loaded — river + landmarks added");
-  }
-});
-
 // ---- day/night ----
 const SKY = [[0,0x0b1230,0.0,0.25,0x8899ff],[5,0x1b2548,0.0,0.3,0x8899ff],[6.5,0xf3a56b,0.9,0.7,0xffb070],[9,0x9fd4f5,1.8,1.0,0xfff2d6],[16,0x9fd4f5,1.8,1.0,0xfff2d6],[18,0xf08a5d,1.0,0.75,0xff9a5a],[19.5,0x2a2f55,0.1,0.35,0x8899ff],[24,0x0b1230,0.0,0.25,0x8899ff]];
 function skyAt(h) { let i=0; while(i<SKY.length-2&&h>=SKY[i+1][0])i++; const a=SKY[i],b=SKY[i+1],t=(h-a[0])/(b[0]-a[0]); const lc=(x,y)=>new THREE.Color(x).lerp(new THREE.Color(y),t); return {sky:lc(a[1],b[1]),sun:a[2]+(b[2]-a[2])*t,hemi:a[3]+(b[3]-a[3])*t,sunCol:lc(a[4],b[4])}; }
 const qs = new URLSearchParams(location.search);
-// ALWAYS DAYTIME: force noon unless ?t= is given (user doesn't want night)
-const fixedHour = qs.has("t") ? parseFloat(qs.get("t")) : 12;
+const fixedHour = qs.has("t") ? parseFloat(qs.get("t")) : null;
 const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const INTERIOR_BG = new THREE.Color(0x1a1510);
 let lastClock = "";
+// ALWAYS DAYTIME: the clock still runs (for opening hours) but the sky/light stay bright.
+const DAY_SKY = skyAt(12);
+let _dayApplied = false;
 function applyTime() {
   const mins = Date.now()/60000; const hour = fixedHour ?? (mins%24);
-  const k = skyAt(hour); scene.background=k.sky; scene.fog.color.copy(k.sky);
-  sun.intensity=k.sun; sun.color.copy(k.sunCol); hemi.intensity=k.hemi;
-  const ang = ((hour-6)/12)*Math.PI;
-  sun.position.set(player.pos.x+Math.cos(ang)*40, Math.max(8,Math.sin(ang)*60), player.pos.z+20);
-  sun.target.position.set(player.pos.x,0,player.pos.z);
-  const night = hour<6||hour>18.7;
-  traffic.setNight(night);
-  world.lamps.material.color.set(night?0xfff0b0:0x555555);
-  // PERFORMANCE: move the 6-light pool to the nearest lamps to the player.
-  // This gives the same "lit street" effect as 30 static lights but with
-  // 1/5 the shader cost. Lights are only on at night.
-  if (world.lampLights && world.lampPositions) {
-    const intensity = night ? 1.4 : 0;
-    // Find the 6 nearest lamp positions to the player
-    const px = player.pos.x, pz = player.pos.z;
-    const sorted = world.lampPositions
-      .map(([x, z]) => ({ x, z, d: (x - px) * (x - px) + (z - pz) * (z - pz) }))
-      .sort((a, b) => a.d - b.d)
-      .slice(0, world.lampLights.length);
-    for (let i = 0; i < world.lampLights.length; i++) {
-      const pl = world.lampLights[i];
-      const lp = sorted[i];
-      if (lp) { pl.position.set(lp.x, 6.0, lp.z); pl.intensity = intensity; }
-      else pl.intensity = 0;
-    }
+  if (!_dayApplied) {
+    _dayApplied = true;
+    scene.background = DAY_SKY.sky; scene.fog.color.copy(DAY_SKY.sky);
+    sun.intensity = DAY_SKY.sun; sun.color.copy(DAY_SKY.sunCol); hemi.intensity = DAY_SKY.hemi;
+    traffic.setNight(false);
+    world.lamps.material.color.set(0x555555);
+    if (world.lampLights) for (const pl of world.lampLights) { pl.intensity = 0; pl.visible = false; }
   }
+  // sun follows the player (shadows) at a fixed high angle
+  sun.position.set(player.pos.x + 25, 55, player.pos.z + 20);
+  sun.target.position.set(player.pos.x, 0, player.pos.z);
+  const night = false;
   const hh=Math.floor(hour),mm=Math.floor((hour-hh)*60);
   const txt = `${DAYS[Math.floor(mins/24)%7]} · ${((hh+11)%12)+1}:${String(mm).padStart(2,"0")} ${hh<12?"AM":"PM"}`;
   if(txt!==lastClock){lastClock=txt;$("clock").textContent=txt;$("sun").textContent=night?"🌙":"☀️";}
 }
 
-// Restore player position from saved state (so refresh doesn't reset to start)
-const _savedState = (() => { try { return JSON.parse(localStorage.getItem("kaduna-state")); } catch { return null; } })();
-const player = { pos: new THREE.Vector3(_savedState?.posX ?? -9, 0, _savedState?.posZ ?? 11), heading: _savedState?.heading ?? Math.PI, speed: 0 };
+const player = { pos: new THREE.Vector3(-9,0,11), heading: Math.PI, speed: 0 };
+// Remember where the player was, so a refresh does not send them back to the start.
+try {
+  const sp = JSON.parse(localStorage.getItem("kaduna-pos"));
+  if (sp && Number.isFinite(sp.x) && Number.isFinite(sp.z)) { player.pos.set(sp.x, 0, sp.z); if (Number.isFinite(sp.h)) player.heading = sp.h; }
+} catch (e) {}
+let _posSaveT = 0;
+function savePos(dt) {
+  _posSaveT += dt; if (_posSaveT < 2) return; _posSaveT = 0;
+  try { localStorage.setItem("kaduna-pos", JSON.stringify({ x: +player.pos.x.toFixed(1), z: +player.pos.z.toFixed(1), h: +player.heading.toFixed(2) })); } catch (e) {}
+}
 let rig; let toastT=0;
 function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("show"),2000);}
 
@@ -190,58 +167,6 @@ function _renderPlaceActions(def) {
   bar.style.display = "flex";
 }
 window.placeAction = (eventId) => sendUIEvent(eventId, {});
-
-// ---- Nearby-person detection for the "Talk to <name>" button ----
-// Runs every ~300ms while inside a place. Checks the active place's people
-// list for anyone within 2.2 m of the player, and shows a Talk button.
-let _talkCheckT = 0;
-let _currentTalkTarget = null;
-function _tickTalkButton(dt) {
-  _talkCheckT += dt;
-  if (_talkCheckT < 0.3) return;
-  _talkCheckT = 0;
-  const active = getActivePlace();
-  if (!active?.handle?.people) { _hideTalkButton(); return; }
-  const people = active.handle.people();
-  if (!people?.people) { _hideTalkButton(); return; }
-  const px = player.pos.x, pz = player.pos.z;
-  let nearest = null, nearestD = 2.2 * 2.2;
-  for (const p of people.people) {
-    if (!p.ready || !p.group || !p.name || p.name === "Shopper" || p.name === "Customer" || p.name === "Person") continue;
-    const dx = p.x - px, dz = p.z - pz;
-    const d = dx * dx + dz * dz;
-    if (d < nearestD) { nearestD = d; nearest = p; }
-  }
-  if (nearest) {
-    _currentTalkTarget = nearest;
-    _showTalkButton(nearest.name, nearest.id);
-  } else {
-    _currentTalkTarget = null;
-    _hideTalkButton();
-  }
-}
-function _showTalkButton(name, personId) {
-  let btn = document.getElementById("talk-btn");
-  if (!btn) {
-    btn = document.createElement("button");
-    btn.id = "talk-btn";
-    btn.style.cssText =
-      "position:fixed;left:50%;bottom:calc(180px + env(safe-area-inset-bottom));" +
-      "transform:translateX(-50%);background:#f2b134;color:#0f4d3a;border:none;" +
-      "border-radius:20px;padding:10px 20px;cursor:pointer;z-index:31;" +
-      "font:700 13px Poppins,sans-serif;box-shadow:0 3px 10px rgba(0,0,0,.3);display:none;";
-    document.body.appendChild(btn);
-    btn.addEventListener("click", () => {
-      if (_currentTalkTarget) sendUIEvent("talk", { personId: _currentTalkTarget.id });
-    });
-  }
-  btn.textContent = "💬 Talk to " + name;
-  btn.style.display = "block";
-}
-function _hideTalkButton() {
-  const btn = document.getElementById("talk-btn");
-  if (btn) btn.style.display = "none";
-}
 
 function updateHUD() {
   const s=game.state;
@@ -526,7 +451,7 @@ window.saveGame=()=>{game.save?.();toast("Game saved!");};
 window.logout=async()=>{ if(confirm("Log out of Kaduna Lifestyle?")){ await logout(); } };
 window.resetGame=()=>{
   if(!confirm("Reset all progress? You'll lose your money, needs, and rank."))return;
-  localStorage.removeItem("kaduna-state");
+  localStorage.removeItem("kaduna-state"); localStorage.removeItem("kaduna-pos");
   location.reload();
 };
 window.bookRide=(rideId)=>{
@@ -681,10 +606,29 @@ onValue(ref(db, "events"), (snap) => {
 // ---- Main loop ----
 const clock = new THREE.Clock();
 let mmT=0, hitCool=0, hudT=0;
+// ---- Automatic speed governor: if the phone is slow, lower quality step by step ----
+let _gAcc = 0, _gN = 0, _gLevel = 0, _gWarm = 0;
+function governor(raw) {
+  if (raw > 0.25) return;                 // tab was hidden / big hitch: ignore
+  _gWarm += raw; if (_gWarm < 4) return;  // let loading finish first
+  _gAcc += raw; _gN++;
+  if (_gAcc < 2.5) return;
+  const fps = _gN / _gAcc; _gAcc = 0; _gN = 0;
+  if (fps >= 42 || _gLevel >= 4) return;
+  _gLevel++;
+  const pr = renderer.getPixelRatio();
+  if (_gLevel === 1) renderer.setPixelRatio(Math.max(1, pr * 0.8));
+  else if (_gLevel === 2) renderer.setPixelRatio(1);
+  else if (_gLevel === 3) { renderer.shadowMap.enabled = false; sun.castShadow = false; scene.traverse((o) => { if (o.material) { const m = Array.isArray(o.material) ? o.material : [o.material]; m.forEach((x) => { x.needsUpdate = true; }); } }); }
+  else if (_gLevel === 4) { renderer.setPixelRatio(0.75); scene.fog.near = 30; scene.fog.far = 90; }
+  console.log("[quality] fps", fps.toFixed(0), "-> level", _gLevel);
+}
+
 function frame() {
   // Nothing runs until the player has signed in / signed up.
   if (!isAuthed && !window.__bypassAuth) { clock.getDelta(); renderer.render(scene, camera); requestAnimationFrame(frame); return; }
-  const dt = Math.min(clock.getDelta(), 0.05);
+  const _raw = clock.getDelta(); governor(_raw);
+  const dt = Math.min(_raw, 0.05);
   const now = Date.now() / 1000;
   const it = ctl.intent();
   const maxSpd = ctl.jog ? 4.8 : 2.1;
@@ -712,11 +656,9 @@ function frame() {
     }
   }
   // Update active place (NPC animations, smoke, etc.)
-  updateActive(dt, now, player.pos.x, player.pos.z);
+  updateActive(dt, now);
   // Show entrance/exit prompt
   tickEntrancePrompt(player.pos.x, player.pos.z, _gameHour());
-  // Check for nearby named people to show Talk button
-  _tickTalkButton(dt);
 
   traffic.update(now);
   npcs.update(dt, now, player.pos.x, player.pos.z);
@@ -733,13 +675,10 @@ function frame() {
   if (rig) { rig.group.position.copy(player.pos); rig.group.rotation.y = player.heading; rig.animate(dt, player.speed); }
   updateCamera(camera, ctl, player.pos, active ? (active.handle.colliders || []) : world.colliders, dt);
   applyTime();
-  if (active) { scene.background = INTERIOR_BG; scene.fog.color.copy(INTERIOR_BG); sun.intensity = 0; hemi.intensity = 0.25; }
+  if (active) { scene.background = INTERIOR_BG; scene.fog.color.copy(INTERIOR_BG); sun.intensity = 0; hemi.intensity = 0.8; _dayApplied = false; }
   game.updateNeeds(dt);
-  // Save player position so refresh restores it
-  game.state.posX = player.pos.x;
-  game.state.posZ = player.pos.z;
-  game.state.heading = player.heading;
-  hudT += dt; if (hudT > 0.5) { hudT = 0; updateHUD(); game.save?.(); }
+  hudT += dt; if (hudT > 0.5) { hudT = 0; updateHUD(); }
+  if (!active) savePos(dt);
   sendPosition(player.pos.x, player.pos.z, player.heading);
   setMyPosition(player.pos.x, player.pos.z);
   mmT += dt; if (mmT > 0.1) { mmT = 0; mmDraw(player.pos.x, player.pos.z, ctl.yaw, player.heading, traffic.positions); }

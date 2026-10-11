@@ -22,7 +22,8 @@ function mergeSkinned(model) {
   const skinned = [];
   model.traverse((o) => { if (o.isSkinnedMesh) skinned.push(o); });
   if (skinned.length < 2) return;
-  const ref = skinned[0], refBones = ref.skeleton.bones;
+  // the main body mesh owns the OUTERMOST copy of the skeleton (the one the posing code moves)
+  const ref = skinned.reduce((a, m) => (m.geometry.attributes.position.count > a.geometry.attributes.position.count ? m : a), skinned[0]), refBones = ref.skeleton.bones;
   const idx = new Map(refBones.map((b, i) => [b.name, i]));
   const paint = [], others = new Map();
   for (const m of skinned) {
@@ -60,6 +61,10 @@ function mergeSkinned(model) {
     const mesh = new THREE.SkinnedMesh(mergeGeometries(geos), mat);
     mesh.name = name; mesh.frustumCulled = false;
     mesh.bind(ref.skeleton, ref.bindMatrix);
+    parent.add(mesh); parent.updateMatrixWorld(true);
+    mesh.computeBoundingSphere();            // once, here: clones copy it (computing it per character = CPU skinning of every vertex)
+    if (mesh.boundingSphere) mesh.boundingSphere.radius *= 1.5;
+    parent.remove(mesh);
     made.push(mesh);
   };
   const made = [];
@@ -77,8 +82,7 @@ export function loadCharacterBase(manager) {
       const box = new THREE.Box3().setFromObject(model);
       const size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
       baseInfo = { box, size, center };
-      // NOTE: mergeSkinned is NOT called here — it breaks cloneSkinned's bone
-      // rebinding, causing T-pose. Instead, each character merges its own clone.
+      try { mergeSkinned(model); } catch (e) { console.warn("character merge failed", e); }
       return model;
     });
   }
@@ -150,7 +154,7 @@ function makeRig(group, model, baseY, pose = "stand") {
   return animate;
 }
 
-/** Make one character. opts: { seed, height, outfit, pose, top, bottom, skin, hair, shoes } */
+/** Make one character. opts: { seed, height, outfit: 'casual'|'kaftan' } */
 export async function createCharacter(opts = {}) {
   const src = await loadCharacterBase();
   const R = rng((opts.seed ?? 1) * 7919 + 13);
@@ -168,18 +172,13 @@ export async function createCharacter(opts = {}) {
   const baseY = -baseInfo.box.min.y * k;
   model.position.set(-baseInfo.center.x * k, baseY, -baseInfo.center.z * k);
 
-  // Merge skinned meshes PER CHARACTER (after clone) so the skeleton binding
-  // is correct. This keeps draw calls low (~5 per character) while preserving
-  // bone animation.
-  try { mergeSkinned(model); } catch (e) { /* fall back to un-merged */ }
-
   const hipFrac = outfit === "kaftan" ? 0.32 : 0.5;
   model.traverse((o) => {
     if (!o.isMesh) return;
     o.castShadow = true; o.frustumCulled = false;
     if (o.name !== "__paint") return;
     // shared geometry, own colour attribute so every character wears different clothes
-    const g0 = o.geometry, n = g0.attributes.position.count, hy = g0.attributes.hy.array, pt = g0.attributes.part.array;
+    const src = o.geometry, n = src.attributes.position.count, hy = src.attributes.hy.array, pt = src.attributes.part.array;
     const col = new Float32Array(n * 3), cols = [top, bottom, null, hair, shoes];
     for (let i = 0; i < n; i++) {
       const p = pt[i] | 0;
@@ -187,8 +186,8 @@ export async function createCharacter(opts = {}) {
       col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
     }
     const g = new THREE.BufferGeometry();
-    for (const key of Object.keys(g0.attributes)) if (key !== "hy" && key !== "part") g.setAttribute(key, g0.attributes[key]);
-    if (g0.index) g.setIndex(g0.index);
+    for (const k of Object.keys(src.attributes)) if (k !== "hy" && k !== "part") g.setAttribute(k, src.attributes[k]);
+    if (src.index) g.setIndex(src.index);
     g.setAttribute("color", new THREE.BufferAttribute(col, 3));
     o.geometry = g;
   });
