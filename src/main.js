@@ -795,10 +795,11 @@ function frame() {
   // Show entrance/exit prompt
   tickEntrancePrompt(player.pos.x, player.pos.z, _gameHour());
 
-  traffic.update(now);
-  npcs.update(dt, now, player.pos.x, player.pos.z);
+  // Hide traffic when inside a place (fixes "cars inside buildings" bug)
+  traffic.setVisible?.(!active);
+  if (!active) traffic.update(now);
+  if (!active) npcs.update(dt, now, player.pos.x, player.pos.z);
   hitCool -= dt;
-  // Only check traffic collisions when not inside a place
   if (!active) {
     for (const c of traffic.positions) {
       if (Math.abs(player.pos.x - c.x) < c.hl + 0.4 && Math.abs(player.pos.z - c.z) < c.hw + 0.4) {

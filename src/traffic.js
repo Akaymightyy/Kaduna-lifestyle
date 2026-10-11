@@ -179,5 +179,5 @@ export function createTraffic(scene) {
   function setNight(night) {
     for (const k in meshes) meshes[k].lights.material.color.setScalar(night ? 1 : 0.7);
   }
-  return { update, setNight, positions, cars };
+  return { update, setNight, positions, cars, meshes, setVisible(v) { for (const k in meshes) { meshes[k].body.visible = v; meshes[k].lights.visible = v; } } };
 }
