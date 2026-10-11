@@ -8,7 +8,6 @@
 import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { rng } from "../config.js";
-import { spawnPeople, getNamedDialogue, getDialogue } from "./people.js";
 
 let _built = false;
 
@@ -144,26 +143,6 @@ export async function build(scene, ctx) {
   colliders.push({ minX: -30.2, maxX: 30.2, minZ: -20.2, maxZ: -19.8 }, { minX: -30.2, maxX: 30.2, minZ: 19.8, maxZ: 20.2 }, { minX: -30.2, maxX: -29.8, minZ: -20, maxZ: 20 }, { minX: 29.8, maxX: 30.2, minZ: -20, maxZ: 20 });
 
   // ---- PlaceHandle ----
-  // ---- People: 5 sellers behind stalls + 9 shoppers walking routes + 2 sitting ----
-  let _people = null;
-  const sellerSpecs = [
-    { id: "seller1", name: "Mama Nkechi", role: "fabric seller", outfit: "casual", pose: "stand", x: -18, z: -12.5, ry: Math.PI, top: "#c0392b" },
-    { id: "seller2", name: "Alhaji Sani", role: "spice trader", outfit: "kaftan", pose: "stand", x: 0, z: -12.5, ry: Math.PI, top: "#9fc2d9" },
-    { id: "seller3", name: "Aunty Bisi", role: "tailor", outfit: "casual", pose: "stand", x: 18, z: -12.5, ry: Math.PI, top: "#2e7d4f" },
-    { id: "seller4", name: "Iya Basira", role: "food corner", outfit: "casual", pose: "stand", x: -18, z: 14.5, ry: 0, top: "#d98e2b" },
-    { id: "seller5", name: "Mallam Yusuf", role: "vegetable seller", outfit: "kaftan", pose: "stand", x: 18, z: 14.5, ry: 0, top: "#f4efe4" },
-  ];
-  const shopperSpecs = [];
-  for (let i = 0; i < 9; i++) {
-    const zLane = [-9, 0, 9][i % 3];
-    shopperSpecs.push({ id: "shopper" + i, name: "Shopper", role: "shopper", outfit: i % 3 === 0 ? "kaftan" : "casual", pose: "stand", x: -22 + (i * 5), z: zLane, ry: 0, route: [{ x: -22 + (i * 5), z: zLane }, { x: 22 - (i * 4), z: zLane }, { x: 22 - (i * 4), z: zLane + (i % 2 ? 4 : -4) }, { x: -22 + (i * 5), z: zLane + (i % 2 ? 4 : -4) }], speed: 0.6 + (i % 3) * 0.2 });
-  }
-  const sittingSpecs = [
-    { id: "sitter1", name: "Customer", role: "customer", outfit: "casual", pose: "sit", x: -8, z: 16, ry: 0 },
-    { id: "sitter2", name: "Customer", role: "customer", outfit: "kaftan", pose: "sit", x: 8, z: 16, ry: Math.PI },
-  ];
-  spawnPeople(group, [...sellerSpecs, ...shopperSpecs, ...sittingSpecs]).then((p) => { _people = p; });
-
   const handle = {
     group,
     enter(playerState) {
@@ -172,22 +151,18 @@ export async function build(scene, ctx) {
       playerState.heading = Math.PI;
     },
     exit() { /* nothing to clean up beyond dispose */ },
-    update(dt, now, px, pz) {
-      if (_people) _people.update(dt, now, px, pz);
+    update(dt, now) {
       // Future: NPC animations, fan rotations, etc.
     },
     dispose() {
-      if (_people) _people.dispose();
       scene.remove(group);
       disposeGroup(group);
       _built = false;
       _cache = null;
     },
     onUIEvent(eventId, payload) {
-      if (eventId === "talk" && payload?.personId) _talk(ctx, payload.personId);
       if (eventId === "haggle") _startHaggle(ctx);
     },
-    people: () => _people,
     colliders,
   };
 
@@ -368,39 +343,36 @@ function _buildBasket(R) {
   return basketGroup;
 }
 
-// ---- Haggling mini-game (toast-based, no prompt()) ----
+// ---- Haggling mini-game ----
 function _startHaggle(ctx) {
+  // Quick prompt-based haggle: seller asks a price, player counters
   const askPrice = 2000 + Math.floor(Math.random() * 3000);
   const fairPrice = Math.floor(askPrice * 0.6);
-  const offer = fairPrice;
-  ctx.toast('Mama Nkechi: "Ankara na ₦' + askPrice.toLocaleString() + '. You haggle well — ₦' + offer.toLocaleString() + ' final!"');
-  if (ctx.game) {
-    if (ctx.game.state.money >= offer) {
-      ctx.game.state.money -= offer;
-      ctx.game.state.needs.fun = Math.min(100, (ctx.game.state.needs.fun || 0) + 8);
-      ctx.game.state.needs.social = Math.min(100, (ctx.game.state.needs.social || 0) + 3);
-      ctx.game.save?.();
-      ctx.updateHUD?.();
-      setTimeout(() => ctx.toast('✓ Ankara bought for ₦' + offer.toLocaleString() + '!'), 1500);
-    } else {
-      setTimeout(() => ctx.toast('Not enough money! Need ₦' + offer.toLocaleString()), 1500);
+  const playerOffer = prompt(
+    "Mama Nkechi: \"My sister, this Ankara na ₦" + askPrice.toLocaleString() + ". You know say na quality.\"\n\n" +
+    "Your offer (₦):", fairPrice
+  );
+  if (playerOffer === null) return;
+  const offer = parseInt(playerOffer, 10);
+  if (isNaN(offer)) { ctx.toast("Enter a number"); return; }
+  if (offer < fairPrice * 0.5) {
+    ctx.toast("Mama Nkechi: \"Haba! You wan price me out of business?\"");
+  } else if (offer < fairPrice) {
+    ctx.toast("Mama Nkechi: \"Add small money, my customer.\"");
+  } else if (offer <= askPrice) {
+    const saving = askPrice - offer;
+    ctx.toast("✓ Deal at ₦" + offer.toLocaleString() + "! You saved ₦" + saving.toLocaleString());
+    if (ctx.game) {
+      // Pay for the fabric
+      if (ctx.game.state.money >= offer) {
+        ctx.game.state.money -= offer;
+        ctx.game.state.needs.fun = Math.min(100, (ctx.game.state.needs.fun || 0) + 8);
+        ctx.updateHUD?.();
+      } else {
+        ctx.toast("Not enough money!");
+      }
     }
-  }
-}
-
-// ---- Talk to a person ----
-function _talk(ctx, personId) {
-  const handle = _cache;
-  if (!handle?.people) return;
-  const people = handle.people();
-  if (!people) return;
-  const person = people.getPersonById?.(personId);
-  if (!person) return;
-  const line = getNamedDialogue(person.name) || getDialogue(person.role, person.name);
-  ctx.toast("\u{1F4AC} " + person.name + ': "' + line + '"');
-  if (ctx.game) {
-    ctx.game.state.needs.social = Math.min(100, (ctx.game.state.needs.social || 0) + 1);
-    ctx.game.save?.();
-    ctx.updateHUD?.();
+  } else {
+    ctx.toast("Mama Nkechi: \"God bless you, my customer!\"");
   }
 }

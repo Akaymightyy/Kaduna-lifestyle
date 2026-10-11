@@ -10,7 +10,6 @@
 import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { rng } from "../config.js";
-import { spawnPeople, getNamedDialogue, getDialogue } from "./people.js";
 
 let _built = false;
 let _cache = null;
@@ -236,21 +235,6 @@ export async function build(scene, ctx) {
 
   // ---- PlaceHandle ----
   let _lastSalatCheck = 0;
-    // ---- People: Imam + guard + worshippers + readers ----
-  let _people = null;
-  const _worshippers = [];
-  for (let row = 0; row < 2; row++) for (let col = 0; col < 5; col++) {
-    _worshippers.push({ id: "worshipper_" + row + "_" + col, name: "Worshipper", role: "worshipper", outfit: "kaftan", pose: "stand", x: -6 + col * 3, z: -8 + row * 2.5, ry: 0, top: ["#f4efe4", "#9fc2d9", "#c9b38a", "#d9c7a0"][col % 4] });
-  }
-  spawnPeople(group, [
-    { id: "imam", name: "Imam Ibrahim", role: "Imam", outfit: "kaftan", pose: "stand", x: 0, z: -13.5, ry: 0, top: "#f4efe4" },
-    { id: "guard1", name: "Mallam Garba", role: "entrance guard", outfit: "kaftan", pose: "stand", x: 0, z: 12, ry: Math.PI, top: "#d9c7a0" },
-    ..._worshippers,
-    { id: "reader1", name: "Reader", role: "worshipper", outfit: "kaftan", pose: "sit", x: -16, z: 5, ry: Math.PI / 2, top: "#8a9bb5" },
-    { id: "reader2", name: "Reader", role: "worshipper", outfit: "kaftan", pose: "sit", x: 16, z: 5, ry: -Math.PI / 2, top: "#c9b38a" },
-    { id: "walker1", name: "Believer", role: "worshipper", outfit: "kaftan", pose: "stand", x: -8, z: 10, ry: Math.PI, top: "#9fc2d9", route: [{ x: -8, z: 10 }, { x: -8, z: -10 }, { x: 8, z: -10 }, { x: 8, z: 10 }], speed: 0.5 },
-  ]).then((p) => { _people = p; });
-
   const handle = {
     group,
     enter(playerState) {
@@ -261,8 +245,7 @@ export async function build(scene, ctx) {
       _checkDress(ctx);
     },
     exit() {},
-    update(dt, now, px, pz) {
-      if (_people) _people.update(dt, now, px, pz);
+    update(dt, now) {
       // Check for adhan time every 5 seconds of real time
       const t = Date.now() / 1000;
       if (t - _lastSalatCheck > 5) {
@@ -271,15 +254,12 @@ export async function build(scene, ctx) {
       }
     },
     dispose() {
-      if (_people) _people.dispose();
       scene.remove(group);
       disposeGroup(group);
       _built = false;
       _cache = null;
     },
-    people: () => _people,
     onUIEvent(eventId, payload) {
-      if (eventId === "talk" && payload?.personId) _talk(ctx, payload.personId);
       if (eventId === "pray") _pray(ctx);
     },
     colliders: [

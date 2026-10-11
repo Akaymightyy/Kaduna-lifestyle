@@ -206,6 +206,8 @@ export function bindInteractKey(getPlayerState, getGameHour) {
   if (_keyBound) return;
   _keyBound = true;
   window.addEventListener("keydown", (e) => {
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return; // typing in login / chat
     if (e.key === "e" || e.key === "E" || e.key === "Enter") {
       const ps = getPlayerState();
       if (!ps) return;
