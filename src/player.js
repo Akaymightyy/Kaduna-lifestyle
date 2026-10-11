@@ -6,10 +6,11 @@ const ARM_DOWN = 1.25;
 const _q = new THREE.Quaternion(), _ax = new THREE.Vector3();
 
 export async function loadPlayer(manager, scene) {
-  // The player uses the same (merged, light) character as everybody else.
+  // The player uses the same character as everybody else.
   await loadCharacterBase(manager);
   const ch = await createCharacter({ seed: 1, height: 1.8, outfit: "casual", top: "#1f7a5a", bottom: "#2b3a55", skin: "#8a5a3c", hair: "#111111", shoes: "#f2f2ee" });
-  ch.group.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
+  // Player casts shadow; frustum culling is already enabled in createCharacter
+  ch.group.traverse((o) => { if (o.isMesh) { o.castShadow = true; } });
   scene.add(ch.group);
   return { group: ch.group, animate: ch.animate, height: 1.8 };
 }
