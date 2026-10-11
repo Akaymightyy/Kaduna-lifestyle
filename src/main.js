@@ -9,7 +9,7 @@ import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAIL
 import { createGameState } from "./needs.js";
 import { auth, db } from "./firebase.js";
 import { initAuth, showAuthModal, wireAuthUI } from "./auth.js";
-import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName } from "./multiplayer.js";
+import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition } from "./multiplayer.js";
 import { startRide, travelToZone, travelToPlace, getDestinations } from "./travel.js";
 import { subscribeRichList } from "./economy.js";
 import { createNPCs } from "./npcs.js";
@@ -30,19 +30,37 @@ const manager = new THREE.LoadingManager();
 manager.onProgress = (_u, l, t) => setProgress(l / t);
 function setProgress(p) { const v = Math.round(Math.min(1, p) * 100); $("bar").firstElementChild.style.width = v + "%"; $("pct").textContent = v + "%"; }
 
+// ---- Quality auto-detect for low-end phones ----
+// Heuristics: CPU cores, deviceMemory, screen size, mobile UA, touch
+const _isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+const _cores = navigator.hardwareConcurrency || 4;
+const _mem = navigator.deviceMemory || 4; // GB (Chrome only)
+const _smallScreen = Math.min(innerWidth, innerHeight) < 480;
+const LOW_END = _isMobile && (_cores <= 4 || _mem <= 3 || _smallScreen);
+const MID_END = _isMobile && !LOW_END;
+// Quality presets
+const Q = LOW_END
+  ? { pixelRatio: 1.0, shadowMap: 512,  antialias: false, fogNear: 40, fogFar: 100, shadows: true }
+  : MID_END
+  ? { pixelRatio: 1.5, shadowMap: 1024, antialias: false, fogNear: 50, fogFar: 130, shadows: true }
+  : { pixelRatio: Math.min(devicePixelRatio, 2), shadowMap: 1024, antialias: true, fogNear: 60, fogFar: 150, shadows: true };
+if (LOW_END) console.log("[quality] LOW_END preset:", Q);
+else if (MID_END) console.log("[quality] MID_END preset:", Q);
+
 const canvas = $("game");
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.shadowMap.enabled = true;
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: Q.antialias, powerPreference: "high-performance" });
+renderer.setPixelRatio(Q.pixelRatio);
+renderer.shadowMap.enabled = Q.shadows;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0xa9d6f2, 60, 150);
+scene.fog = new THREE.Fog(0xa9d6f2, Q.fogNear, Q.fogFar);
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 400);
 const hemi = new THREE.HemisphereLight(0xdfeeff, 0x8a7a55, 1.0); scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff2d6, 1.8);
-sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
-Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 1, far: 120 });
+sun.castShadow = Q.shadows;
+if (Q.shadows) sun.shadow.mapSize.set(Q.shadowMap, Q.shadowMap);
+Object.assign(sun.shadow.camera, { left: -25, right: 25, top: 25, bottom: -25, near: 1, far: 100 });
 sun.shadow.bias = -0.0004; scene.add(sun, sun.target);
 
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
@@ -72,10 +90,23 @@ function applyTime() {
   const night = hour<6||hour>18.7;
   traffic.setNight(night);
   world.lamps.material.color.set(night?0xfff0b0:0x555555);
-  // Turn on street lamp PointLights at night
-  if (world.lampLights) {
-    const intensity = night ? 1.2 : 0;
-    for (const pl of world.lampLights) pl.intensity = intensity;
+  // PERFORMANCE: move the 6-light pool to the nearest lamps to the player.
+  // This gives the same "lit street" effect as 30 static lights but with
+  // 1/5 the shader cost. Lights are only on at night.
+  if (world.lampLights && world.lampPositions) {
+    const intensity = night ? 1.4 : 0;
+    // Find the 6 nearest lamp positions to the player
+    const px = player.pos.x, pz = player.pos.z;
+    const sorted = world.lampPositions
+      .map(([x, z]) => ({ x, z, d: (x - px) * (x - px) + (z - pz) * (z - pz) }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, world.lampLights.length);
+    for (let i = 0; i < world.lampLights.length; i++) {
+      const pl = world.lampLights[i];
+      const lp = sorted[i];
+      if (lp) { pl.position.set(lp.x, 6.0, lp.z); pl.intensity = intensity; }
+      else pl.intensity = 0;
+    }
   }
   const hh=Math.floor(hour),mm=Math.floor((hour-hh)*60);
   const txt = `${DAYS[Math.floor(mins/24)%7]} · ${((hh+11)%12)+1}:${String(mm).padStart(2,"0")} ${hh<12?"AM":"PM"}`;
@@ -543,7 +574,7 @@ function frame() {
   tickEntrancePrompt(player.pos.x, player.pos.z, _gameHour());
 
   traffic.update(now);
-  npcs.update(dt, now);
+  npcs.update(dt, now, player.pos.x, player.pos.z);
   hitCool -= dt;
   // Only check traffic collisions when not inside a place
   if (!active) {
@@ -560,6 +591,7 @@ function frame() {
   game.updateNeeds(dt);
   hudT += dt; if (hudT > 0.5) { hudT = 0; updateHUD(); }
   sendPosition(player.pos.x, player.pos.z, player.heading);
+  setMyPosition(player.pos.x, player.pos.z);
   mmT += dt; if (mmT > 0.1) { mmT = 0; mmDraw(player.pos.x, player.pos.z, ctl.yaw, player.heading, traffic.positions); }
   renderer.render(scene, camera);
   requestAnimationFrame(frame);

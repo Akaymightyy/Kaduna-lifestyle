@@ -55,6 +55,10 @@ async function createAvatarFor(uid, d) {
     const ch = await createCharacter({ seed: Math.abs(hashStr(uid)) % 100000, height: 1.75 });
     const model = ch.model;
     const group = ch.group;
+    // PERFORMANCE: remote players don't cast shadows (only the local player does)
+    group.traverse((o) => {
+      if (o.isMesh) { o.castShadow = false; o.frustumCulled = true; }
+    });
     // Name tag sprite above head
     const tex = makeNameTag(d.name || "Player", d.color || "#f2b134");
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
@@ -72,7 +76,7 @@ async function createAvatarFor(uid, d) {
       new THREE.CapsuleGeometry(0.3, 0.8, 4, 8),
       new THREE.MeshLambertMaterial({ color: d.color || "#e11d48" })
     );
-    body.position.y = 0.7; body.castShadow = true; g.add(body);
+    body.position.y = 0.7; body.castShadow = false; g.add(body);
     const tex = makeNameTag(d.name || "Player", d.color);
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
     sp.position.y = 1.8; sp.scale.set(1.5, 0.4, 1); g.add(sp);
@@ -89,10 +93,16 @@ function hashStr(s) {
   return h;
 }
 
+// Local player position (set from main.js each frame) so we can skip animating
+// remote players who are too far away to be seen.
+let _myX = 0, _myZ = 0;
+export function setMyPosition(x, z) { _myX = x; _myZ = z; }
+
 function updateAvatars() {
   if(!_scene) return;
   const seen=new Set();
-  let _dt = 0.016; // approx
+  const _dt = 0.016; // approx
+  const FAR = 80 * 80; // hide + skip animation beyond 80m
   for(const [uid,d] of Object.entries(_players)) {
     seen.add(uid);
     if(!_meshes[uid]) {
@@ -100,14 +110,24 @@ function updateAvatars() {
       continue;
     }
     const m = _meshes[uid];
-    m.group.position.set(d.x||0, 0, d.z||0);
+    const px = d.x||0, pz = d.z||0;
+    // Distance from local player
+    const ddx = px - _myX, ddz = pz - _myZ;
+    const distSq = ddx * ddx + ddz * ddz;
+    if (distSq > FAR) {
+      // Hide far players entirely — saves draw calls
+      m.group.visible = false;
+      continue;
+    }
+    m.group.visible = true;
+    m.group.position.set(px, 0, pz);
     m.group.rotation.y = d.heading||0;
     // Determine if moving (compare to last pos)
-    const dx = (d.x||0) - m.lastX, dz = (d.z||0) - m.lastZ;
+    const dx = px - m.lastX, dz = pz - m.lastZ;
     const dist = Math.sqrt(dx*dx + dz*dz);
     const moving = dist > 0.05;
     const speed = Math.min(3, dist / _dt);
-    m.lastX = d.x||0; m.lastZ = d.z||0;
+    m.lastX = px; m.lastZ = pz;
     if (m.walker && moving) m.walker.animate(_dt, speed, true);
     else if (m.walker) m.walker.animate(_dt, 0, false);
   }

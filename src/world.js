@@ -169,7 +169,7 @@ export function buildWorld(scene) {
   for (const sx of SIDE_STREETS) for (const side of [1, -1]) addBuilding(sx, side * 62, 26, 12, 16, C(0xe8d3b0), side);
   const bMat = new THREE.MeshLambertMaterial({ map: windowTexture(), vertexColors: true });
   const buildings = new THREE.Mesh(mergeGeometries(geos), bMat);
-  buildings.castShadow = true; buildings.receiveShadow = true;
+  buildings.castShadow = false; buildings.receiveShadow = true; // big merged mesh — only receive, don't cast (saves shadow map cost)
   world.add(buildings);
 
   // ---- Central Mosque ----
@@ -281,13 +281,13 @@ export function buildWorld(scene) {
       m4.compose(new THREE.Vector3(x, 0, z), new THREE.Quaternion(), new THREE.Vector3(r, h, r));
       tm.setMatrixAt(i, m4);
     });
-    tm.castShadow = true; world.add(tm);
+    tm.castShadow = false; tm.receiveShadow = true; world.add(tm);
     const cm = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), new THREE.MeshLambertMaterial({ color: 0xffffff }), crowns.length);
     crowns.forEach(([x, y, z, s, col, flat], i) => {
       m4.compose(new THREE.Vector3(x, y, z), new THREE.Quaternion(), new THREE.Vector3(s, s * (flat === 0.5 ? 0.45 : 0.8), s));
       cm.setMatrixAt(i, m4); cm.setColorAt(i, C(col));
     });
-    cm.castShadow = true; world.add(cm);
+    cm.castShadow = false; cm.receiveShadow = true; world.add(cm);
   }
 
   // ---- street lights (real PointLights everywhere) ----
@@ -314,28 +314,20 @@ export function buildWorld(scene) {
   });
   world.add(poles, heads, bulbs);
 
-  // Real PointLights — sample every 3rd lamp for performance (still ~30 lit lamps at night)
+  // Real PointLights — PERFORMANCE: use a small POOL of 6 lights that follow
+  // the player to the nearest lamp positions. This gives the same "lit street"
+  // effect as 30 static lights but with 1/5 the shader cost.
+  // The lamp POOL is repositioned each frame in main.js (applyTime).
+  const POOL_SIZE = 6;
   const lampLights = [];
-  for (let i = 0; i < lampPos.length; i += 3) {
-    const [x, z] = lampPos[i];
-    const pl = new THREE.PointLight(0xffd070, 0, 18, 2.0);
-    pl.position.set(x, 6.0, z);
+  for (let i = 0; i < POOL_SIZE; i++) {
+    const pl = new THREE.PointLight(0xffd070, 0, 22, 2.0);
+    pl.position.set(0, 6.0, 0);
     world.add(pl);
     lampLights.push(pl);
   }
-  // Also one bright light at each landmark (Mosque, Market, Petrol, Keke Park)
-  const landmarkLights = [
-    { x: 48, z: 34, color: 0xfff0b0 },    // Central Mosque
-    { x: -30, z: -25, color: 0xff8030 },  // Market (warm orange)
-    { x: -110, z: 28, color: 0xffe070 },  // Petrol station
-    { x: 60, z: -28, color: 0xfff0b0 },   // Keke park
-  ];
-  for (const L of landmarkLights) {
-    const pl = new THREE.PointLight(L.color, 0, 25, 2.0);
-    pl.position.set(L.x, 8, L.z);
-    world.add(pl);
-    lampLights.push(pl);
-  }
+  // Expose lampPos so main.js can find the nearest lamps to the player
+  world.lampPositions = lampPos;
 
   // Window-glow texture for buildings at night — emissive map on a few random buildings
   // (handled by adding emissive windows material)

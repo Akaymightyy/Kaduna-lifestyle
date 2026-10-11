@@ -76,7 +76,7 @@ export async function addCity(scene, world, manager) {
     }
   }
   const mesh = new THREE.Mesh(mergeGeometries(parts), material);
-  mesh.castShadow = true; mesh.receiveShadow = true;
+  mesh.castShadow = false; mesh.receiveShadow = true; // big merged city mesh — receive only, don't cast (saves shadow map cost)
   scene.add(mesh);
   return true;
 }

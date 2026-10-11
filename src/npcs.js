@@ -1,75 +1,22 @@
 // src/npcs.js — AI pedestrians walking on sidewalks (real GLB human models)
+// PERFORMANCE: NPCs are created lazily AFTER the loading screen finishes,
+// staggered across frames (one per frame) so the main thread never blocks.
+// Meshes have frustumCulled=true (default) and animations are skipped when
+// the NPC is far from the player.
 import * as THREE from "three";
 import { createCharacter } from "./characters.js";
 import { ROAD_HALF, WORLD_HALF_X, CROSSINGS, rng } from "./config.js";
 
-const NPC_COUNT = 14; // keep modest for perf
+const NPC_COUNT = 8;            // reduced from 14 (perf)
+const ANIM_DISTANCE = 60;       // metres — skip animation beyond this
+const DRAW_DISTANCE = 120;      // metres — hide entirely beyond this
 
 export function createNPCs(scene) {
   const R = rng(9988);
   const npcs = [];
-  let loaded = 0;
+  let spawnIdx = 0;
 
-  // Bone-rotation utility (same approach as player.js)
-  const _ax = new THREE.Vector3(), _q = new THREE.Quaternion();
-  const base = (n) => n.replace(/^mixamorig[:_]?/i, "").replace(/_\d+$/, "");
-  const want = ["LeftArm","RightArm","LeftForeArm","RightForeArm","LeftUpLeg","RightUpLeg","LeftLeg","RightLeg"];
-  function findBones(model) {
-    const bones = {};
-    model.traverse((o) => {
-      if (!o.isBone) return;
-      const key = base(o.name);
-      if (!want.includes(key) || (o.parent && base(o.parent.name) === key)) return;
-      (bones[key] ||= []).push({ bone: o, rest: o.quaternion.clone() });
-    });
-    return bones;
-  }
-  function turn(bones, name, angle) {
-    _ax.set(1, 0, 0); _q.setFromAxisAngle(_ax, angle);
-    for (const b of bones[name] || []) b.bone.quaternion.copy(b.rest).multiply(_q);
-  }
-
-  function makeWalker(model) {
-    const bones = findBones(model);
-    let phase = R() * Math.PI * 2;
-    function animate(dt, speed) {
-      phase += dt * (5 + speed * 1.4);
-      const sw = Math.sin(phase), amp = Math.min(1, speed / 2.5);
-      if (speed > 0.15) {
-        model.position.y = Math.abs(sw) * 0.04 * amp;
-        turn(bones, "LeftUpLeg", sw * 0.6 * amp);
-        turn(bones, "RightUpLeg", -sw * 0.6 * amp);
-        turn(bones, "LeftLeg", Math.max(0, -sw) * 0.8 * amp);
-        turn(bones, "RightLeg", Math.max(0, sw) * 0.8 * amp);
-        // Arm swing
-        turn(bones, "LeftArm", -sw * 0.5 * amp);
-        turn(bones, "RightArm", sw * 0.5 * amp);
-      } else {
-        turn(bones, "LeftUpLeg", 0); turn(bones, "RightUpLeg", 0);
-        turn(bones, "LeftLeg", 0); turn(bones, "RightLeg", 0);
-        turn(bones, "LeftArm", 0.04); turn(bones, "RightArm", 0.04);
-      }
-    }
-    return { animate };
-  }
-
-  function normalizeModel(model, targetHeight = 1.75) {
-    const box = new THREE.Box3().setFromObject(model);
-    const size = box.getSize(new THREE.Vector3());
-    const k = targetHeight / size.y;
-    model.scale.setScalar(k);
-    model.position.set(-box.min.x * k - size.x * k / 2, -box.min.y * k, -box.min.z * k - size.z * k / 2);
-    model.traverse((o) => {
-      if (!o.isMesh) return;
-      o.castShadow = true; o.frustumCulled = false;
-      if (o.material) {
-        const mats = Array.isArray(o.material) ? o.material : [o.material];
-        mats.forEach(m => { m.metalness = 0; m.roughness = 0.9; });
-      }
-    });
-  }
-
-  // Spawn NPC state first (positions, directions)
+  // Spawn NPC state first (positions, directions) — no models yet
   for (let i = 0; i < NPC_COUNT; i++) {
     const side = R() < 0.5 ? 1 : -1;
     npcs.push({
@@ -82,18 +29,42 @@ export function createNPCs(scene) {
       group: null,
       walker: null,
       ready: false,
+      loading: false,
     });
   }
 
-  // Each NPC is built from male.glb with its own clothes and skin colour
-  npcs.forEach((npc, i) => {
-    createCharacter({ seed: 500 + i * 37, height: 1.7 + R() * 0.15 }).then((ch) => {
-      scene.add(ch.group);
-      npc.group = ch.group; npc.model = ch.model; npc.walker = ch; npc.ready = true;
-    }).catch(() => { npc.ready = false; });
-  });
+  // Spawn one NPC per frame (staggered) so we never block the main thread.
+  // Returns true while still spawning.
+  function spawnTick() {
+    if (spawnIdx >= npcs.length) return false;
+    const npc = npcs[spawnIdx];
+    spawnIdx++;
+    if (npc.loading || npc.ready) return spawnIdx < npcs.length;
+    npc.loading = true;
+    // Defer the actual createCharacter to next microtask so this frame stays cheap
+    createCharacter({ seed: 500 + spawnIdx * 37, height: 1.7 + R() * 0.15 })
+      .then((ch) => {
+        // Re-enable frustum culling so off-screen NPCs don't draw
+        ch.group.traverse((o) => {
+          if (o.isMesh) { o.frustumCulled = true; o.castShadow = true; }
+        });
+        scene.add(ch.group);
+        npc.group = ch.group;
+        npc.walker = ch;
+        npc.ready = true;
+        npc.loading = false;
+      })
+      .catch(() => { npc.loading = false; npc.ready = false; });
+    return true;
+  }
 
-  function update(dt, now) {
+  // Reusable vectors to avoid per-frame allocation
+  const _tmpVec = new THREE.Vector3();
+
+  function update(dt, now, playerX, playerZ) {
+    // Spawn one NPC per frame until all are loaded
+    spawnTick();
+
     for (const n of npcs) {
       // Walk along X
       n.x += n.dir * n.speed * dt;
@@ -111,9 +82,23 @@ export function createNPCs(scene) {
 
       n.heading = n.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
 
-      if (n.ready && n.group) {
-        n.group.position.set(n.x, 0, n.z);
-        n.group.rotation.y = n.heading;
+      if (!n.ready || !n.group) continue;
+
+      // Distance culling — skip everything if far from player
+      const dx = n.x - (playerX || 0), dz = n.z - (playerZ || 0);
+      const distSq = dx * dx + dz * dz;
+
+      if (distSq > DRAW_DISTANCE * DRAW_DISTANCE) {
+        // Hide entirely — saves draw calls
+        n.group.visible = false;
+        continue;
+      }
+      n.group.visible = true;
+      n.group.position.set(n.x, 0, n.z);
+      n.group.rotation.y = n.heading;
+
+      // Only animate if close enough to be seen
+      if (distSq < ANIM_DISTANCE * ANIM_DISTANCE) {
         n.walker.animate(dt, n.speed);
       }
     }
