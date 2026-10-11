@@ -1,24 +1,13 @@
 // src/npcs.js — AI pedestrians walking on sidewalks (real GLB human models)
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { createCharacter } from "./characters.js";
 import { ROAD_HALF, WORLD_HALF_X, CROSSINGS, rng } from "./config.js";
-
-// Available character models (Kaduna-appropriate mix)
-const NPC_MODELS = [
-  "/models/male-polo.glb",
-  "/models/male-kaftan.glb",
-  "/models/male-hoodie.glb",
-  "/models/female-polo.glb",
-  "/models/female-kaftan.glb",
-  "/models/female-hoodie.glb",
-];
 
 const NPC_COUNT = 14; // keep modest for perf
 
 export function createNPCs(scene) {
   const R = rng(9988);
   const npcs = [];
-  const loader = new GLTFLoader();
   let loaded = 0;
 
   // Bone-rotation utility (same approach as player.js)
@@ -96,20 +85,12 @@ export function createNPCs(scene) {
     });
   }
 
-  // Load each NPC with a random model
-  npcs.forEach((n, i) => {
-    const url = NPC_MODELS[i % NPC_MODELS.length];
-    loader.load(url, (gltf) => {
-      const model = gltf.scene;
-      normalizeModel(model, 1.7 + R() * 0.15);
-      const group = new THREE.Group();
-      group.add(model);
-      scene.add(group);
-      n.group = group;
-      n.model = model;
-      n.walker = makeWalker(model);
-      n.ready = true;
-    }, undefined, () => { n.ready = false; });
+  // Each NPC is built from male.glb with its own clothes and skin colour
+  npcs.forEach((npc, i) => {
+    createCharacter({ seed: 500 + i * 37, height: 1.7 + R() * 0.15 }).then((ch) => {
+      scene.add(ch.group);
+      npc.group = ch.group; npc.model = ch.model; npc.walker = ch; npc.ready = true;
+    }).catch(() => { npc.ready = false; });
   });
 
   function update(dt, now) {

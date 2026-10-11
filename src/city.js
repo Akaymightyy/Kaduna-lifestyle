@@ -31,6 +31,14 @@ export async function addCity(scene, world, manager) {
   if (!houseNames.length) return false;               // fall back to the procedural buildings
   const material = loaded[houseNames[0]].mat.clone();
   material.roughness = 1; material.metalness = 0;
+  // The colour atlas: works whether the folder is called "texture" or "Textures"
+  const tl = new THREE.TextureLoader();
+  const useAtlas = (url, next) => tl.load(url, (t) => {
+    t.flipY = false; t.colorSpace = THREE.SRGBColorSpace;
+    t.magFilter = THREE.NearestFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true; t.needsUpdate = true;
+    material.map = t; material.needsUpdate = true;
+  }, undefined, () => { if (next) useAtlas(next); });
+  useAtlas("/models/city/texture/colormap.png", "/models/city/Textures/colormap.png");
   const R = rng(4242);
   const parts = [];
   const place = (n, x, z, rotY, s) => {

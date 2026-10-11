@@ -60,19 +60,6 @@ export async function signupEmail(email, pass) {
   }
 }
 
-// One-tap admin login — uses the owner-provided credentials
-// (admin@kaduna.com / 363438). Useful for quick access from any device.
-export async function loginAdmin() {
-  const ADMIN_EMAIL = "admin@kaduna.com";
-  const ADMIN_PASS = "363438";
-  try {
-    toast("Signing in as Admin…");
-    await signInWithEmailAndPassword(auth, ADMIN_EMAIL, ADMIN_PASS);
-  } catch (e) {
-    toast("Admin login failed: " + (e.message || "unknown error"));
-  }
-}
-
 function toast(msg) {
   const t = document.getElementById("toast");
   if (t) {
@@ -96,10 +83,6 @@ export function wireAuthUI() {
     if (e && p) signupEmail(e, p);
   });
   document.getElementById("auth-close")?.addEventListener("click", hideAuthModal);
-  document.getElementById("auth-admin-btn")?.addEventListener("click", (e) => {
-    e.preventDefault();
-    loginAdmin();
-  });
   // Enter key on password field triggers login
   document.getElementById("auth-pass")?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {

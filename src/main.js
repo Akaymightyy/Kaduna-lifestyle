@@ -437,5 +437,6 @@ Promise.all([loadPlayer(manager, scene), addCity(scene, world, manager)]).then((
   setTimeout(() => { if (!auth.currentUser) showAuthModal(); }, 500);
   frame();
   $("loading").classList.add("done");
+  window.__dbg = { player, ctl, npcs };
   window.__ready = true;
 }).catch((e) => showError("Could not load the game: " + e.message));

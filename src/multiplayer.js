@@ -1,93 +1,12 @@
 // src/multiplayer.js — real-time presence + chat with real GLB character avatars
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { auth, db } from "./firebase.js";
 import { ref, onValue, set, update, onDisconnect, push, serverTimestamp } from "firebase/database";
 import { onAuthStateChanged } from "firebase/auth";
+import { createCharacter } from "./characters.js";
 
-const AVATAR_MODELS = [
-  "/models/male-polo.glb",
-  "/models/male-kaftan.glb",
-  "/models/male-hoodie.glb",
-  "/models/female-polo.glb",
-  "/models/female-kaftan.glb",
-  "/models/female-hoodie.glb",
-];
 
 let _uid=null, _name="Guest", _players={}, _meshes={}, _scene=null, _sendT=null, _onCount=null, _onChat=null;
-let _loader = null, _modelCache = {};
-
-function getLoader() {
-  if (!_loader) _loader = new GLTFLoader();
-  return _loader;
-}
-
-function loadModelCached(url) {
-  if (_modelCache[url]) return Promise.resolve(_modelCache[url]);
-  return new Promise((resolve, reject) => {
-    getLoader().load(url, (gltf) => {
-      _modelCache[url] = gltf.scene;
-      resolve(gltf.scene);
-    }, undefined, reject);
-  });
-}
-
-function normalizeModel(model, targetHeight = 1.75) {
-  const box = new THREE.Box3().setFromObject(model);
-  const size = box.getSize(new THREE.Vector3());
-  const k = targetHeight / size.y;
-  model.scale.setScalar(k);
-  model.position.set(-box.min.x * k - size.x * k / 2, -box.min.y * k, -box.min.z * k - size.z * k / 2);
-  model.traverse((o) => {
-    if (!o.isMesh) return;
-    o.castShadow = true; o.frustumCulled = false;
-    if (o.material) {
-      const mats = Array.isArray(o.material) ? o.material : [o.material];
-      mats.forEach(m => { m.metalness = 0; m.roughness = 0.9; });
-    }
-  });
-}
-
-const _ax = new THREE.Vector3(), _q = new THREE.Quaternion();
-const base = (n) => n.replace(/^mixamorig[:_]?/i, "").replace(/_\d+$/, "");
-const want = ["LeftArm","RightArm","LeftForeArm","RightForeArm","LeftUpLeg","RightUpLeg","LeftLeg","RightLeg"];
-function findBones(model) {
-  const bones = {};
-  model.traverse((o) => {
-    if (!o.isBone) return;
-    const key = base(o.name);
-    if (!want.includes(key) || (o.parent && base(o.parent.name) === key)) return;
-    (bones[key] ||= []).push({ bone: o, rest: o.quaternion.clone() });
-  });
-  return bones;
-}
-function turn(bones, name, angle) {
-  _ax.set(1, 0, 0); _q.setFromAxisAngle(_ax, angle);
-  for (const b of bones[name] || []) b.bone.quaternion.copy(b.rest).multiply(_q);
-}
-
-function makeWalker(model) {
-  const bones = findBones(model);
-  let phase = 0;
-  function animate(dt, speed, moving) {
-    phase += dt * (5 + speed * 1.4);
-    const sw = Math.sin(phase), amp = Math.min(1, speed / 3);
-    if (moving) {
-      model.position.y = Math.abs(sw) * 0.04 * amp;
-      turn(bones, "LeftUpLeg", sw * 0.6 * amp);
-      turn(bones, "RightUpLeg", -sw * 0.6 * amp);
-      turn(bones, "LeftLeg", Math.max(0, -sw) * 0.8 * amp);
-      turn(bones, "RightLeg", Math.max(0, sw) * 0.8 * amp);
-      turn(bones, "LeftArm", -sw * 0.5 * amp);
-      turn(bones, "RightArm", sw * 0.5 * amp);
-    } else {
-      turn(bones, "LeftUpLeg", 0); turn(bones, "RightUpLeg", 0);
-      turn(bones, "LeftLeg", 0); turn(bones, "RightLeg", 0);
-      turn(bones, "LeftArm", 0.04); turn(bones, "RightArm", 0.04);
-    }
-  }
-  return { animate };
-}
 
 function makeNameTag(name, color) {
   const c = document.createElement("canvas");
@@ -132,29 +51,17 @@ export function sendChat(text) {
 }
 
 async function createAvatarFor(uid, d) {
-  const idx = Math.abs(hashStr(uid)) % AVATAR_MODELS.length;
-  const url = AVATAR_MODELS[idx];
   try {
-    const src = await loadModelCached(url);
-    const model = src.clone(true);
-    // Re-enable material rendering for the clone
-    model.traverse((o) => {
-      if (o.isMesh && o.material) {
-        o.material = o.material.clone();
-        o.castShadow = true;
-        o.frustumCulled = false;
-      }
-    });
-    normalizeModel(model, 1.75);
-    const group = new THREE.Group();
-    group.add(model);
+    const ch = await createCharacter({ seed: Math.abs(hashStr(uid)) % 100000, height: 1.75 });
+    const model = ch.model;
+    const group = ch.group;
     // Name tag sprite above head
     const tex = makeNameTag(d.name || "Player", d.color || "#f2b134");
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
     sp.position.y = 2.0; sp.scale.set(1.6, 0.4, 1);
     group.add(sp);
     _scene.add(group);
-    _meshes[uid] = { group, model, walker: makeWalker(model), lastX: d.x||0, lastZ: d.z||0, phase: 0 };
+    _meshes[uid] = { group, model, walker: { animate: (dt, speed, moving) => ch.animate(dt, moving ? speed : 0) }, lastX: d.x||0, lastZ: d.z||0, phase: 0 };
     // Apply current position immediately
     group.position.set(d.x||0, 0, d.z||0);
     group.rotation.y = d.heading||0;
