@@ -19,7 +19,7 @@ export function createGameState() {
   } catch (e) {}
 
   function save() {
-    try { localStorage.setItem("kaduna-state", JSON.stringify({ money: state.money, needs: state.needs, rank: state.rank, jobCooldown: state.jobCooldown })); } catch (e) {}
+    try { localStorage.setItem("kaduna-state", JSON.stringify({ money: state.money, needs: state.needs, rank: state.rank, jobCooldown: state.jobCooldown, posX: state.posX, posZ: state.posZ, heading: state.heading })); } catch (e) {}
   }
 
   function updateNeeds(dt) {

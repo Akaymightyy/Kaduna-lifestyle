@@ -77,7 +77,8 @@ const npcs = createNPCs(scene);
 const SKY = [[0,0x0b1230,0.0,0.25,0x8899ff],[5,0x1b2548,0.0,0.3,0x8899ff],[6.5,0xf3a56b,0.9,0.7,0xffb070],[9,0x9fd4f5,1.8,1.0,0xfff2d6],[16,0x9fd4f5,1.8,1.0,0xfff2d6],[18,0xf08a5d,1.0,0.75,0xff9a5a],[19.5,0x2a2f55,0.1,0.35,0x8899ff],[24,0x0b1230,0.0,0.25,0x8899ff]];
 function skyAt(h) { let i=0; while(i<SKY.length-2&&h>=SKY[i+1][0])i++; const a=SKY[i],b=SKY[i+1],t=(h-a[0])/(b[0]-a[0]); const lc=(x,y)=>new THREE.Color(x).lerp(new THREE.Color(y),t); return {sky:lc(a[1],b[1]),sun:a[2]+(b[2]-a[2])*t,hemi:a[3]+(b[3]-a[3])*t,sunCol:lc(a[4],b[4])}; }
 const qs = new URLSearchParams(location.search);
-const fixedHour = qs.has("t") ? parseFloat(qs.get("t")) : null;
+// ALWAYS DAYTIME: force noon unless ?t= is given (user doesn't want night)
+const fixedHour = qs.has("t") ? parseFloat(qs.get("t")) : 12;
 const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const INTERIOR_BG = new THREE.Color(0x1a1510);
 let lastClock = "";
@@ -114,7 +115,9 @@ function applyTime() {
   if(txt!==lastClock){lastClock=txt;$("clock").textContent=txt;$("sun").textContent=night?"🌙":"☀️";}
 }
 
-const player = { pos: new THREE.Vector3(-9,0,11), heading: Math.PI, speed: 0 };
+// Restore player position from saved state (so refresh doesn't reset to start)
+const _savedState = (() => { try { return JSON.parse(localStorage.getItem("kaduna-state")); } catch { return null; } })();
+const player = { pos: new THREE.Vector3(_savedState?.posX ?? -9, 0, _savedState?.posZ ?? 11), heading: _savedState?.heading ?? Math.PI, speed: 0 };
 let rig; let toastT=0;
 function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("show"),2000);}
 
@@ -712,7 +715,11 @@ function frame() {
   applyTime();
   if (active) { scene.background = INTERIOR_BG; scene.fog.color.copy(INTERIOR_BG); sun.intensity = 0; hemi.intensity = 0.25; }
   game.updateNeeds(dt);
-  hudT += dt; if (hudT > 0.5) { hudT = 0; updateHUD(); }
+  // Save player position so refresh restores it
+  game.state.posX = player.pos.x;
+  game.state.posZ = player.pos.z;
+  game.state.heading = player.heading;
+  hudT += dt; if (hudT > 0.5) { hudT = 0; updateHUD(); game.save?.(); }
   sendPosition(player.pos.x, player.pos.z, player.heading);
   setMyPosition(player.pos.x, player.pos.z);
   mmT += dt; if (mmT > 0.1) { mmT = 0; mmDraw(player.pos.x, player.pos.z, ctl.yaw, player.heading, traffic.positions); }
