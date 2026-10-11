@@ -811,6 +811,7 @@ function frame() {
   updateCamera(camera, ctl, player.pos, active ? (active.handle.colliders || []) : world.colliders, dt);
   applyTime();
   if (active) { scene.background = INTERIOR_BG; scene.fog.color.copy(INTERIOR_BG); sun.intensity = 0; hemi.intensity = 0.8; _dayApplied = false; }
+  renderer.shadowMap.autoUpdate = !active;   // no shadow pass inside buildings
   game.updateNeeds(dt);
   hudT += dt; if (hudT > 0.5) { hudT = 0; updateHUD(); }
   if (!active) savePos(dt);

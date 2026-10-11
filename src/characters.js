@@ -15,10 +15,65 @@ const HAIRS = ["#111111", "#1b1b1b", "#2a1e14"];
 let basePromise = null, baseInfo = null;
 const PART = { clothing: 0, skin: 2, hair: 3, shoes: 4 };
 
-// NOTE: mergeSkinned was removed — it broke bone animation (caused T-pose/floating).
-// The function merged ~240 skinned meshes into ~5, but bound them to a skeleton
-// that lived on the original meshes which were then deleted → orphaned skeleton.
-// Characters now use original meshes with frustum culling + distance culling.
+// male.glb is split into ~240 tiny skinned meshes. Drawing 9 people = 2000+ draw calls (the lag).
+// Here they are merged ONCE into a handful of meshes: one "paintable" mesh (clothes/skin/hair/shoes
+// coloured per vertex) + one mesh per remaining material (eyes, brows...).
+function mergeSkinned(model) {
+  const skinned = [];
+  model.traverse((o) => { if (o.isSkinnedMesh) skinned.push(o); });
+  if (skinned.length < 2) return;
+  // the main body mesh owns the OUTERMOST copy of the skeleton (the one the posing code moves)
+  const ref = skinned.reduce((a, m) => (m.geometry.attributes.position.count > a.geometry.attributes.position.count ? m : a), skinned[0]), refBones = ref.skeleton.bones;
+  const idx = new Map(refBones.map((b, i) => [b.name, i]));
+  const paint = [], others = new Map();
+  for (const m of skinned) {
+    const g = m.geometry.clone();
+    g.morphAttributes = {}; g.morphTargetsRelative = false;
+    if (!g.index) { const c = g.attributes.position.count, ix = new (c > 65535 ? Uint32Array : Uint16Array)(c); for (let i = 0; i < c; i++) ix[i] = i; g.setIndex(new THREE.BufferAttribute(ix, 1)); }
+    // remap bone indices into the reference skeleton (matched by bone name)
+    if (m.skeleton !== ref.skeleton) {
+      const map = m.skeleton.bones.map((b) => idx.get(b.name) ?? 0);
+      const si = g.attributes.skinIndex;
+      for (let i = 0; i < si.array.length; i++) si.array[i] = map[si.array[i]];
+    }
+    const mats = Array.isArray(m.material) ? m.material : [m.material];
+    const n = (mats[0].name || "").toLowerCase();
+    const part = Object.keys(PART).find((k) => n.includes(k));
+    if (part && mats.length === 1) {
+      g.computeBoundingBox();
+      const y0 = g.boundingBox.min.y, y1 = g.boundingBox.max.y, pos = g.attributes.position;
+      const hy = new Float32Array(pos.count), pt = new Float32Array(pos.count);
+      for (let i = 0; i < pos.count; i++) { hy[i] = (pos.getY(i) - y0) / Math.max(1e-6, y1 - y0); pt[i] = PART[part]; }
+      g.setAttribute("hy", new THREE.BufferAttribute(hy, 1)); g.setAttribute("part", new THREE.BufferAttribute(pt, 1));
+      for (const k of Object.keys(g.attributes)) if (!["position", "normal", "skinIndex", "skinWeight", "hy", "part"].includes(k)) g.deleteAttribute(k);
+      paint.push(g);
+    } else {
+      const key = mats[0].uuid;
+      if (!others.has(key)) others.set(key, { mat: mats[0], geos: [] });
+      others.get(key).geos.push(g);
+    }
+  }
+  const parent = ref.parent || model;
+  const add = (geos, mat, name) => {
+    // keep only attributes every geometry has, so they merge
+    const keep = Object.keys(geos[0].attributes).filter((k) => geos.every((g) => g.attributes[k]));
+    for (const g of geos) for (const k of Object.keys(g.attributes)) if (!keep.includes(k)) g.deleteAttribute(k);
+    const mesh = new THREE.SkinnedMesh(mergeGeometries(geos), mat);
+    mesh.name = name; mesh.frustumCulled = false;
+    mesh.bind(ref.skeleton, ref.bindMatrix);
+    parent.add(mesh); parent.updateMatrixWorld(true);
+    mesh.computeBoundingSphere();            // once, here: clones copy it (computing it per character = CPU skinning of every vertex)
+    if (mesh.boundingSphere) mesh.boundingSphere.radius *= 1.5;
+    parent.remove(mesh);
+    made.push(mesh);
+  };
+  const made = [];
+  if (paint.length) add(paint, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 }), "__paint");
+  for (const { mat, geos } of others.values()) add(geos, mat, "__other");
+  // only now (everything merged fine) swap the old meshes for the new ones
+  for (const m of skinned) m.parent && m.parent.remove(m);
+  for (const m of made) parent.add(m);
+}
 
 export function loadCharacterBase(manager) {
   if (!basePromise) {
@@ -27,8 +82,7 @@ export function loadCharacterBase(manager) {
       const box = new THREE.Box3().setFromObject(model);
       const size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
       baseInfo = { box, size, center };
-      // NOTE: mergeSkinned is NOT called here — it breaks cloneSkinned's bone
-      // rebinding, causing T-pose. Instead, each character merges its own clone.
+      try { mergeSkinned(model); } catch (e) { console.warn("character merge failed", e); }
       return model;
     });
   }
@@ -101,22 +155,19 @@ function makeRig(group, model, baseY, pose = "stand") {
 }
 
 /** Make one character. opts: { seed, height, outfit, pose, look } or individual colours.
- *  look = { top, bottom, skin, hair, shoes, topStyle, bottomStyle } — overrides seed colours.
- */
+ *  look = { top, bottom, skin, hair, shoes, topStyle, bottomStyle } */
 export async function createCharacter(opts = {}) {
   const src = await loadCharacterBase();
   const R = rng((opts.seed ?? 1) * 7919 + 13);
   const pick = (arr) => arr[Math.floor(R() * arr.length)];
   const outfit = opts.outfit || (R() < 0.3 ? "kaftan" : "casual");
-
-  // Build the look object from opts or random seed
-  const look = opts.look || {};
-  const top = look.top || opts.top || (outfit === "kaftan" ? pick(KAFTANS) : pick(SHIRTS));
-  const bottom = look.bottom || opts.bottom || (outfit === "kaftan" ? top : pick(TROUSERS));
-  const skin = look.skin || opts.skin || pick(SKINS);
-  const hair = look.hair || opts.hair || pick(HAIRS);
-  const shoes = look.shoes || opts.shoes || (R() < 0.5 ? "#f2f2ee" : "#222222");
-  const fullLook = { top, bottom, skin, hair, shoes, topStyle: look.topStyle || outfit, bottomStyle: look.bottomStyle || "trousers" };
+  const lk = opts.look || {};
+  const top = lk.top || opts.top || (outfit === "kaftan" ? pick(KAFTANS) : pick(SHIRTS));
+  const bottom = lk.bottom || opts.bottom || (outfit === "kaftan" ? top : pick(TROUSERS));
+  const skin = lk.skin || opts.skin || pick(SKINS);
+  const hair = lk.hair || opts.hair || pick(HAIRS);
+  const shoes = lk.shoes || opts.shoes || (R() < 0.5 ? "#f2f2ee" : "#222222");
+  const fullLook = { top, bottom, skin, hair, shoes, topStyle: lk.topStyle || outfit, bottomStyle: lk.bottomStyle || "trousers" };
 
   const model = cloneSkinned(src);
   const height = opts.height || 1.75;
@@ -125,78 +176,47 @@ export async function createCharacter(opts = {}) {
   const baseY = -baseInfo.box.min.y * k;
   model.position.set(-baseInfo.center.x * k, baseY, -baseInfo.center.z * k);
 
-  // Apply colours by material name (no mergeSkinned — keeps bone animation working)
+  model.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.frustumCulled = true; } });
   _applyLook(model, fullLook);
-
   const group = new THREE.Group();
   group.add(model);
-  group.userData.look = fullLook; // store for recolorCharacter
+  group.userData.look = fullLook;
   const animate = makeRig(group, model, baseY, opts.pose || "stand");
   return { group, model, animate, look: fullLook };
 }
 
-// Recolour an existing character in-place (no model reload).
-// ch = { group, model } from createCharacter. look = { top, bottom, skin, hair, shoes, topStyle, bottomStyle }
+// Recolour an existing character in place (cheap: rewrites one vertex-colour attribute).
 export function recolorCharacter(ch, look) {
   if (!ch?.model) return;
   _applyLook(ch.model, look);
   if (ch.group) ch.group.userData.look = look;
 }
 
-// Internal: apply colours to a model's meshes by material name.
-// The GLB has materials named with keywords: "clothing"/"shirt"/"pant", "skin", "hair", "shoes".
 function _applyLook(model, look) {
-  const top = new THREE.Color(look.top || "#1f7a5a");
-  const bottom = new THREE.Color(look.bottom || "#2b3a55");
-  const skin = new THREE.Color(look.skin || "#8a5a3c");
-  const hair = new THREE.Color(look.hair || "#111111");
+  const top = new THREE.Color(look.top || "#1f7a5a"), bottom = new THREE.Color(look.bottom || "#2b3a55");
+  const skin = new THREE.Color(look.skin || "#8a5a3c"), hair = new THREE.Color(look.hair || "#111111");
   const shoes = new THREE.Color(look.shoes || "#222222");
-  const isKaftan = look.topStyle === "kaftan";
-  const isShorts = look.bottomStyle === "shorts";
-
+  const kaftan = look.topStyle === "kaftan";
+  const hipFrac = kaftan ? 0.32 : 0.5;
+  const cols = [top, bottom, null, hair, shoes];
   model.traverse((o) => {
-    if (!o.isMesh) return;
-    o.castShadow = false; o.frustumCulled = true;
-
-    const mats = Array.isArray(o.material) ? o.material : [o.material];
-    const fixed = mats.map((m) => {
-      const mm = m.clone();
-      const n = (mm.name || "").toLowerCase();
-      mm.metalness = 0; mm.roughness = 0.85;
-
-      if (n.includes("skin") || n.includes("body") || n.includes("face") || n.includes("hand") || n.includes("arm") || n.includes("leg")) {
-        // Skin — but if it's a leg mesh and shorts style, keep skin (bare legs)
-        mm.map = null; mm.color.copy(skin);
-      } else if (n.includes("hair") || n.includes("head_top")) {
-        mm.map = null; mm.color.copy(hair);
-      } else if (n.includes("shoe") || n.includes("foot") || n.includes("sole")) {
-        mm.map = null; mm.color.copy(shoes);
-      } else if (n.includes("cloth") || n.includes("shirt") || n.includes("pant") || n.includes("trouser") || n.includes("jean")) {
-        // Clothing — determine if top or bottom by mesh height
-        mm.map = null;
-        if (isKaftan) {
-          mm.color.copy(top); // kaftan = one colour everywhere
-        } else {
-          // Check mesh height to decide top vs bottom
-          o.geometry.computeBoundingBox();
-          const bb = o.geometry.boundingBox;
-          const meshCenterY = (bb.min.y + bb.max.y) / 2;
-          const modelHeight = bb.max.y - bb.min.y;
-          // If the mesh center is in the upper half, it's a top; lower half = bottom
-          if (meshCenterY > modelHeight * 0.5) {
-            mm.color.copy(top);
-          } else {
-            mm.color.copy(bottom);
-          }
-        }
-      } else if (n.includes("eye") || n.includes("brow") || n.includes("mouth") || n.includes("teeth")) {
-        // Leave facial features as-is
-      } else {
-        // Unknown material — try to colour as clothing
-        mm.map = null; mm.color.copy(top);
-      }
-      return mm;
-    });
-    o.material = Array.isArray(o.material) ? fixed : fixed[0];
+    if (!o.isMesh || o.name !== "__paint") return;
+    let g = o.geometry;
+    if (!o.userData._own) {           // first time: own colour attribute, share everything else
+      const s = g, ng = new THREE.BufferGeometry();
+      for (const key of Object.keys(s.attributes)) if (key !== "hy" && key !== "part") ng.setAttribute(key, s.attributes[key]);
+      if (s.index) ng.setIndex(s.index);
+      ng.boundingSphere = s.boundingSphere ? s.boundingSphere.clone() : null;
+      o.userData._own = { hy: s.attributes.hy.array, pt: s.attributes.part.array };
+      ng.setAttribute("color", new THREE.BufferAttribute(new Float32Array(s.attributes.position.count * 3), 3));
+      o.geometry = g = ng;
+    }
+    const { hy, pt } = o.userData._own, col = g.attributes.color.array, n = hy.length;
+    for (let i = 0; i < n; i++) {
+      const p = pt[i] | 0;
+      const c = p === 0 ? (kaftan || hy[i] > hipFrac ? top : bottom) : p === 2 ? skin : cols[p];
+      col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+    }
+    g.attributes.color.needsUpdate = true;
   });
 }
