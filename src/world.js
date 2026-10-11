@@ -362,5 +362,56 @@ export function buildWorld(scene) {
     colliders.push({ minX: bx - 0.3, maxX: bx + 0.3, minZ: z - 0.3, maxZ: z + 0.3 });
   }
 
+  // ---- Place entrance markers (visible doors/signs at each registered place) ----
+  // These are visual cues only — the actual enter trigger is in places/manager.js
+  // and uses the entrance positions from places/registry.js.
+  try {
+    // Lazy-read the registry without creating a circular import:
+    // (world.js -> registry.js is fine; registry.js does not import world.js)
+    const _placeMarkers = [
+      // Mirror of registry.js entrance data — kept in sync manually for the visual
+      { id: "central_market", x: -28, z: -22, name: "CENTRAL MARKET", icon: "🛒", color: 0xc0392b },
+      { id: "suya_spot", x: -53, z: 20, name: "MAI SUYA", icon: "🍢", color: 0xd98e2b },
+      { id: "central_mosque", x: 48, z: 23, name: "CENTRAL MOSQUE", icon: "🕌", color: 0x1f7a5a },
+    ];
+    for (const m of _placeMarkers) {
+      // Entrance pad (glowing circle on the ground)
+      const pad = new THREE.Mesh(
+        new THREE.CircleGeometry(2.5, 24),
+        new THREE.MeshBasicMaterial({ color: m.color, transparent: true, opacity: 0.3 })
+      );
+      pad.rotation.x = -Math.PI / 2;
+      pad.position.set(m.x, 0.05, m.z);
+      world.add(pad);
+      // Border ring
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(2.3, 2.5, 24),
+        new THREE.MeshBasicMaterial({ color: m.color, side: THREE.DoubleSide })
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(m.x, 0.06, m.z);
+      world.add(ring);
+      // Floating sign with place name
+      const sign = new THREE.Mesh(
+        new THREE.PlaneGeometry(6, 1.2),
+        new THREE.MeshBasicMaterial({
+          map: labelTexture(m.name, 320, 64, "#" + m.color.toString(16).padStart(6, "0"), "#ffffff", 30),
+          side: THREE.DoubleSide,
+        })
+      );
+      sign.position.set(m.x, 4, m.z);
+      world.add(sign);
+      // Post for the sign
+      const post = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.08, 0.1, 4, 6),
+        new THREE.MeshLambertMaterial({ color: 0x4a4f55 })
+      );
+      post.position.set(m.x, 2, m.z);
+      world.add(post);
+      // Add to map shapes so minimap shows them
+      mapShapes.buildings.push({ x: m.x, z: m.z, w: 4, d: 4, place: true, placeId: m.id, placeColor: m.color, placeIcon: m.icon });
+    }
+  } catch (e) { console.warn("Could not add place markers", e); }
+
   return { world, colliders, mapShapes, lamps: heads, lampLights, ground, buildingsMesh: buildings };
 }

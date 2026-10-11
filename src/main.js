@@ -10,12 +10,14 @@ import { createGameState } from "./needs.js";
 import { auth, db } from "./firebase.js";
 import { initAuth, showAuthModal, wireAuthUI } from "./auth.js";
 import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName } from "./multiplayer.js";
-import { startRide, travelToZone } from "./travel.js";
+import { startRide, travelToZone, travelToPlace, getDestinations } from "./travel.js";
 import { subscribeRichList } from "./economy.js";
 import { createNPCs } from "./npcs.js";
 import { initAdmin, showAdminDashboard, hideAdminDashboard, isAdmin, adminTab } from "./admin.js";
 import { checkDailyReward, getDailyStatus, claimQuestReward } from "./daily.js";
 import { ref, onValue } from "firebase/database";
+import { initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, getActivePlace, enterPlace, exitPlace, sendUIEvent } from "./places/manager.js";
+import { listPlaces, getPlace } from "./places/registry.js";
 
 const $ = (id) => document.getElementById(id);
 const showError = (m) => { const e = $("err"); e.style.display = "flex"; e.textContent = m; };
@@ -84,6 +86,56 @@ const player = { pos: new THREE.Vector3(-9,0,11), heading: Math.PI, speed: 0 };
 let rig; let toastT=0;
 function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("show"),2000);}
 
+// ---- Place Manager init ----
+// The shared context that every place module can use.
+const placeCtx = {
+  game,
+  toast,
+  updateHUD: () => updateHUD(),
+  onPlaceChange: (def) => {
+    // Update the HUD chip + show activity buttons when inside a place
+    const titleEl = document.querySelector(".chip.title");
+    if (titleEl) {
+      titleEl.firstChild.textContent = def ? "📍 " + def.name : "📍 Ahmadu Bello Way";
+    }
+    const subEl = document.getElementById("zone-sub");
+    if (subEl) subEl.textContent = def ? (def.type === "interior" ? "Inside" : "At") : "Kaduna";
+    // Show/hide place actions bar
+    _renderPlaceActions(def);
+  },
+};
+initPlaceManager({ scene, worldGroup: world.world, ctx: placeCtx });
+bindInteractKey(
+  () => ({ pos: player.pos, heading: player.heading }),
+  () => _gameHour()
+);
+function _gameHour() {
+  if (fixedHour != null) return fixedHour;
+  return (Date.now() / 60000) % 24;
+}
+function _renderPlaceActions(def) {
+  let bar = document.getElementById("place-actions");
+  if (!def) { if (bar) bar.style.display = "none"; return; }
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "place-actions";
+    bar.style.cssText =
+      "position:fixed;left:50%;bottom:calc(120px + env(safe-area-inset-bottom));" +
+      "transform:translateX(-50%);background:rgba(15,77,58,.95);color:#fff;" +
+      "padding:8px;gap:6px;border-radius:14px;display:none;z-index:30;" +
+      "border:1px solid rgba(255,255,255,.2);max-width:90vw;flex-wrap:wrap;" +
+      "justify-content:center;";
+    document.body.appendChild(bar);
+  }
+  bar.innerHTML = def.activities.map(a =>
+    '<button onclick="window.placeAction(\'' + a.id + '\')" ' +
+    'style="background:#fff;color:#0f4d3a;border:none;border-radius:8px;padding:6px 10px;' +
+    'cursor:pointer;font:600 12px Poppins,sans-serif;">' + a.label + '</button>'
+  ).join("");
+  bar.style.display = "flex";
+}
+window.placeAction = (eventId) => sendUIEvent(eventId, {});
+
 function updateHUD() {
   const s=game.state;
   $("money-val").textContent="₦"+s.money.toLocaleString();
@@ -137,7 +189,23 @@ function showPhoneApp(appId) {
     return;
   }
   if(appId==="ride"){
-    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">🛺 Book a Ride</div>'+RIDES.map(r=>'<div style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid #eee;border-radius:8px;margin-bottom:6px;"><span style="font-size:24px;">'+r.icon+'</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;">'+r.name+'</div><div style="font-size:11px;color:#666;">'+r.time+'s ride · ₦'+r.price+'</div></div><select id="ride-dest-'+r.id+'" style="padding:5px;border:1px solid #ddd;border-radius:6px;font-size:11px;font-family:inherit;">'+ZONES.map(z=>'<option value="'+z.id+'">'+z.name+'</option>').join("")+'</select><button onclick="window.bookRide(\''+r.id+'\')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:12px;font-weight:600;">Go</button></div>').join("")+backBtn;
+    // Use the place registry for destinations (places + legacy zones)
+    const dests = getDestinations(_gameHour());
+    const rideOpts = [
+      { id: "walk", name: "Walk", price: 0, time: 8, icon: "🚶" },
+      { id: "keke", name: "Keke Napep", price: 300, time: 3, icon: "🛺" },
+      { id: "bus", name: "Bus", price: 200, time: 5, icon: "🚌" },
+      { id: "okada", name: "Okada", price: 500, time: 2, icon: "🏍️" },
+      { id: "taxi", name: "Taxi", price: 1500, time: 2, icon: "🚕" },
+    ];
+    c.innerHTML='<div style="font-size:14px;margin-bottom:8px;font-weight:700;color:var(--green);">🛺 Book a Ride</div>'+
+      '<div style="font-size:11px;color:#666;margin-bottom:8px;">Pick where you want to go:</div>'+
+      '<select id="ride-dest-select" style="width:100%;padding:8px;border:1.5px solid var(--green);border-radius:8px;font-family:inherit;font-size:13px;margin-bottom:12px;">'+
+        dests.map(d => '<option value="'+d.id+'"'+(d.open===false?' disabled':'')+'>'+(d.icon||'📍')+' '+d.name+(d.open===false?' (closed)':'')+'</option>').join('')+
+      '</select>'+
+      '<div style="font-size:11px;color:#666;margin-bottom:8px;">Choose how to get there:</div>'+
+      rideOpts.map(r => '<div style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid #eee;border-radius:8px;margin-bottom:6px;"><span style="font-size:24px;">'+r.icon+'</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;">'+r.name+'</div><div style="font-size:11px;color:#666;">'+r.time+'s ride · '+(r.price===0?'Free':'₦'+r.price)+'</div></div><button onclick="window.bookRide(\''+r.id+'\')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:600;">Go</button></div>').join("")+
+      backBtn;
     return;
   }
   if(appId==="chat"){
@@ -145,9 +213,17 @@ function showPhoneApp(appId) {
     return;
   }
   if(appId==="map"){
-    const major=MAP_LOCATIONS.filter(l=>l.major), minor=MAP_LOCATIONS.filter(l=>!l.major);
-    const safeName=(n)=>String(n||"").replace(/'/g,"").replace(/"/g,"");
-    c.innerHTML='<div style="font-size:14px;margin-bottom:8px;font-weight:700;color:var(--green);">🗺️ Kaduna Map</div><div style="background:var(--green);color:#fff;border-radius:10px;padding:8px;margin-bottom:10px;font-size:11px;">📍 Major Locations — tap to travel there</div>'+major.map(l=>'<div onclick="window.travelToPlace(\''+safeName(l.name)+'\')" style="padding:8px;background:#e8f5e9;border-radius:8px;margin-bottom:5px;font-size:12px;font-weight:600;color:var(--green);cursor:pointer;">📍 '+l.name+'<div style="font-size:10px;color:#666;font-weight:400;">'+l.desc+'</div></div>').join("")+'<div style="font-size:11px;color:#666;margin:10px 0 6px;font-weight:600;">More Places in Kaduna:</div>'+minor.map(l=>'<div style="padding:6px 8px;font-size:11px;color:#666;">• '+l.name+' — '+l.desc+'</div>').join("")+backBtn;
+    // Show all registered places (tappable to travel there)
+    const places = listPlaces();
+    const gameHour = _gameHour();
+    c.innerHTML='<div style="font-size:14px;margin-bottom:8px;font-weight:700;color:var(--green);">🗺️ Kaduna Map</div>'+
+      '<div style="background:var(--green);color:#fff;border-radius:10px;padding:8px;margin-bottom:10px;font-size:11px;">📍 Tap a place to travel there</div>'+
+      places.map(p => {
+        const open = (p.hours == null) ? true : (gameHour >= p.hours.open && gameHour < p.hours.close);
+        const openBadge = open ? '<span style="color:#2e7d4f;font-size:10px;">● open</span>' : '<span style="color:#e11d48;font-size:10px;">● closed</span>';
+        return '<div onclick="window.travelToPlace(\''+p.id+'\')" style="padding:10px;background:'+(open?'#e8f5e9':'#f5e8e8')+';border-radius:8px;margin-bottom:6px;font-size:12px;font-weight:600;color:var(--green);cursor:pointer;">'+p.minimapIcon+' '+p.name+' '+openBadge+'<div style="font-size:10px;color:#666;font-weight:400;margin-top:2px;">'+(p.type==='interior'?'Interior':'Outdoor')+' · '+p.activities.length+' activities</div></div>';
+      }).join("")+
+      backBtn;
     return;
   }
   if(appId==="daily"){
@@ -261,9 +337,15 @@ window.buyClothing=(id,price,name)=>{
   game.save?.(); updateHUD(); toast(name+" purchased! You look sharp.");
   showPhoneApp("boutique");
 };
-window.travelToPlace=(name)=>{
-  toast("Opening travel to "+name+"...");
+window.travelToPlace=(placeId)=>{
+  // Called from the map app: open the ride app with this place preselected
+  toast("Opening travel to " + (getPlace(placeId)?.name || placeId) + "...");
   showPhoneApp("ride");
+  // Preselect the destination in the dropdown
+  setTimeout(() => {
+    const sel = document.getElementById("ride-dest-select");
+    if (sel) sel.value = placeId;
+  }, 50);
 };
 window.sendMessage=(uid,name)=>{
   sendChat("👋 Hi "+name+"!");
@@ -275,7 +357,40 @@ window.resetGame=()=>{
   localStorage.removeItem("kaduna-state");
   location.reload();
 };
-window.bookRide=(rideId)=>{const destSel=document.getElementById("ride-dest-"+rideId);if(!destSel)return;const zoneId=destSel.value;const ride=RIDES.find(r=>r.id===rideId);if(game.state.money<ride.price){toast("Not enough money for "+ride.name);return;}game.state.money-=ride.price;closePhone();startRide(rideId,zoneId,game.state.money,()=>{},(result)=>{if(result.ok){toast("Welcome to "+result.zone.name+"!");travelToZone(getMyUid(),result.zone.id);const titleEl=document.querySelector(".chip.title");if(titleEl)titleEl.firstChild.textContent="📍 "+result.zone.name;const subEl=document.getElementById("zone-sub");if(subEl)subEl.textContent=result.zone.desc;updateHUD();player.pos.set(-9,0,11);player.heading=Math.PI;}else{toast(result.error||"Travel failed");}});};
+window.bookRide=(rideId)=>{
+  const destSel=document.getElementById("ride-dest-select");
+  if(!destSel){toast("No destination selected");return;}
+  const destId=destSel.value;
+  // Determine fare from the new ride list (walk=0, keke=300, bus=200, okada=500, taxi=1500)
+  const fareMap={walk:0,keke:300,bus:200,okada:500,taxi:1500};
+  const fare=fareMap[rideId] ?? 0;
+  if(game.state.money<fare){toast("Not enough money");return;}
+  game.state.money-=fare;
+  closePhone();
+  startRide(rideId,destId,game.state.money,()=>{},(result)=>{
+    if(result.ok){
+      toast("Welcome to "+result.dest.name+"!");
+      updateHUD();
+      // If destination is a place, move player to its entrance
+      if(result.dest.isPlace && result.dest.entrance){
+        player.pos.set(result.dest.entrance.x, 0, result.dest.entrance.z);
+        player.heading = Math.PI; // face the door
+        travelToPlace(getMyUid(), result.dest.id);
+      } else {
+        // Legacy zone — reset to default position
+        player.pos.set(-9,0,11);
+        player.heading=Math.PI;
+        travelToZone(getMyUid(), result.dest.id);
+      }
+      const titleEl=document.querySelector(".chip.title");
+      if(titleEl) titleEl.firstChild.textContent = "📍 "+result.dest.name;
+      const subEl=document.getElementById("zone-sub");
+      if(subEl) subEl.textContent = result.dest.isPlace ? "At entrance" : "Kaduna";
+    } else {
+      toast(result.error||"Travel failed");
+    }
+  });
+};
 window.sendChatMsg=function(){const i=$("chat-input");if(i&&i.value.trim()){sendChat(i.value);i.value="";}};
 
 // ---- Daily rewards ----
@@ -408,13 +523,35 @@ function frame() {
     player.pos.x += it.x * player.speed * dt; player.pos.z += it.z * player.speed * dt;
   }
   collide(player.pos, world.colliders);
+  // If we're inside a place, also collide with the place's local colliders
+  const active = getActivePlace();
+  if (active?.handle?.colliders) {
+    for (const c of active.handle.colliders) {
+      const cx = Math.max(c.minX, Math.min(player.pos.x, c.maxX));
+      const cz = Math.max(c.minZ, Math.min(player.pos.z, c.maxZ));
+      const dx = player.pos.x - cx, dz = player.pos.z - cz, d2 = dx * dx + dz * dz;
+      const r = 0.45;
+      if (d2 < r * r) {
+        if (d2 > 1e-6) { const d = Math.sqrt(d2), f = (r - d) / d; player.pos.x += dx * f; player.pos.z += dz * f; }
+        else player.pos.x = c.minX - r;
+      }
+    }
+  }
+  // Update active place (NPC animations, smoke, etc.)
+  updateActive(dt, now);
+  // Show entrance/exit prompt
+  tickEntrancePrompt(player.pos.x, player.pos.z, _gameHour());
+
   traffic.update(now);
   npcs.update(dt, now);
   hitCool -= dt;
-  for (const c of traffic.positions) {
-    if (Math.abs(player.pos.x - c.x) < c.hl + 0.4 && Math.abs(player.pos.z - c.z) < c.hw + 0.4) {
-      player.pos.z += (player.pos.z >= c.z ? 1 : -1) * 0.25; player.pos.x += c.dir * c.speed * dt * 0.8;
-      if (hitCool <= 0) { toast("Eyah! Watch the road, use the zebra"); hitCool = 2.5; }
+  // Only check traffic collisions when not inside a place
+  if (!active) {
+    for (const c of traffic.positions) {
+      if (Math.abs(player.pos.x - c.x) < c.hl + 0.4 && Math.abs(player.pos.z - c.z) < c.hw + 0.4) {
+        player.pos.z += (player.pos.z >= c.z ? 1 : -1) * 0.25; player.pos.x += c.dir * c.speed * dt * 0.8;
+        if (hitCool <= 0) { toast("Eyah! Watch the road, use the zebra"); hitCool = 2.5; }
+      }
     }
   }
   if (rig) { rig.group.position.copy(player.pos); rig.group.rotation.y = player.heading; rig.animate(dt, player.speed); }

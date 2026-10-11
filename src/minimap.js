@@ -14,7 +14,21 @@ export function createMinimap(canvas, shapes) {
   g.strokeStyle = "#fff"; g.lineWidth = 1; g.setLineDash([6, 8]);
   for (const z of [4.5, -4.5]) { g.beginPath(); g.moveTo(0, Z(z)); g.lineTo(W, Z(z)); g.stroke(); }
   g.setLineDash([]);
-  for (const b of shapes.buildings) { g.fillStyle = b.landmark ? "#2c8a63" : "#8f7a5e"; g.fillRect(X(b.x - b.w / 2), Z(b.z - b.d / 2), b.w * S, b.d * S); }
+  for (const b of shapes.buildings) {
+    if (b.place) {
+      // Place entrance marker — circle with distinct color
+      g.fillStyle = "#" + (b.placeColor || 0xc0392b).toString(16).padStart(6, "0");
+      g.beginPath();
+      g.arc(X(b.x), Z(b.z), 4.5 * S, 0, Math.PI * 2);
+      g.fill();
+      g.strokeStyle = "#fff";
+      g.lineWidth = 1.5;
+      g.stroke();
+    } else {
+      g.fillStyle = b.landmark ? "#2c8a63" : "#8f7a5e";
+      g.fillRect(X(b.x - b.w / 2), Z(b.z - b.d / 2), b.w * S, b.d * S);
+    }
+  }
   g.fillStyle = "#3f8f3a"; for (const t of shapes.trees) { g.beginPath(); g.arc(X(t.x), Z(t.z), 2.2 * S, 0, 7); g.fill(); }
   const ctx = canvas.getContext("2d");
   const size = canvas.width, range = 52; // metres visible from centre to edge
