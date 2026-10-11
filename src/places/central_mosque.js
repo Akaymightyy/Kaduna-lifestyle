@@ -239,7 +239,7 @@ export async function build(scene, ctx) {
     group,
     enter(playerState) {
       // Player enters near the south wall (entrance side)
-      playerState.pos.set(0, 0, 13);
+      playerState.pos.set(0, 0, 10.5);
       playerState.heading = Math.PI; // facing qibla (north)
       // Dress check: warn if outfit is casual (jeans/t-shirt)
       _checkDress(ctx);

@@ -90,7 +90,7 @@ const PLACE_DEFS = [
     name: "Central Mosque",
     type: "interior",
     worldX: 48, worldZ: 34,
-    entranceX: 48, entranceZ: 23,
+    entranceX: 48, entranceZ: 20.5,
     entranceFacing: Math.PI,
     minimapIcon: "🕌",
     minimapColor: 0x1f7a5a,

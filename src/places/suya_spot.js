@@ -255,14 +255,15 @@ export async function build(scene, ctx) {
 function _buildBench() {
   const g = new THREE.Group();
   const seat = box(2.5, 0.1, 0.5, 0, 0.5, 0, 0x8a6a45);
-  g.add(seat);
+  const parts = [seat];
   // Legs
   for (const sx of [-1.1, 1.1]) {
     for (const sz of [-0.2, 0.2]) {
       const leg = box(0.1, 0.5, 0.1, sx, 0.25, sz, 0x5a4a30);
-      g.add(leg);
+      parts.push(leg);
     }
   }
+  g.add(mergedMesh(parts));
   return g;
 }
 
@@ -274,7 +275,7 @@ function _buildPlasticChair(R) {
     new THREE.MeshLambertMaterial({ color: 0xf0f0e8 })
   );
   seat.position.y = 0.45;
-  g.add(seat);
+  const parts = [seat];
   // Back
   const back = new THREE.Mesh(
     new THREE.BoxGeometry(0.5, 0.5, 0.05),
@@ -290,7 +291,7 @@ function _buildPlasticChair(R) {
         new THREE.MeshLambertMaterial({ color: 0xf0f0e8 })
       );
       leg.position.set(sx, 0.22, sz);
-      g.add(leg);
+      parts.push(leg);
     }
   }
   return g;

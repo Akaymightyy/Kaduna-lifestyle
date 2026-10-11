@@ -139,12 +139,15 @@ export async function build(scene, ctx) {
 
   scene.add(group);
 
+  // perimeter walls (so the player and camera stay inside)
+  colliders.push({ minX: -30.2, maxX: 30.2, minZ: -20.2, maxZ: -19.8 }, { minX: -30.2, maxX: 30.2, minZ: 19.8, maxZ: 20.2 }, { minX: -30.2, maxX: -29.8, minZ: -20, maxZ: 20 }, { minX: 29.8, maxX: 30.2, minZ: -20, maxZ: 20 });
+
   // ---- PlaceHandle ----
   const handle = {
     group,
     enter(playerState) {
       // Position player at the entrance, facing in
-      playerState.pos.set(0, 0, 17);
+      playerState.pos.set(0, 0, 8);
       playerState.heading = Math.PI;
     },
     exit() { /* nothing to clean up beyond dispose */ },
@@ -189,7 +192,7 @@ function _buildStall(type, x, z, R) {
 
   // Backboard (where goods are displayed)
   const backboard = box(6, 1.6, 0.2, 0, 1.7, -1.2, 0xbfb088);
-  stallGroup.add(backboard);
+  stallGroup.add(mergedMesh([backboard]));
 
   // Type-specific props
   if (type === "fabric") {
