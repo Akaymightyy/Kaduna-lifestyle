@@ -1,23 +1,44 @@
 // src/places/registry.js
 // The Place Registry — every place in Kaduna Lifestyle is declared here.
-// Each place is its own module under src/places/<name>.js and is loaded
-// lazily (dynamic import) so the base game stays small.
+//
+// IMPORTANT: place modules are imported STATICALLY (not dynamic import) so
+// they get bundled correctly by Vite. Dynamic import with @vite-ignore
+// breaks in production because the relative path doesn't exist at runtime.
 //
 // Place shape:
-//   id           string   unique slug
-//   name         string   display name (e.g. "Central Market")
-//   type         "interior" | "outdoor"
-//   worldX, worldZ  number  position on the main world (for entrance trigger + minimap)
-//   entranceX, entranceZ  number  where the player should stand to enter
-//   entranceFacing number  yaw the player should face when they exit back out
-//   minimapIcon  string   emoji used on the phone map + minimap
-//   minimapColor hex
-//   hours        { open: 0-24, close: 0-24 } | null   null = always open
-//   ambientSound string | null   key into the sound registry (Phase 6)
-//   npcList      Array<{ id, name, outfit, role }>
-//   activities   Array<{ id, label, desc }>
-//   module       string   dynamic-import path (e.g. "./central_market.js")
-//   build        async (scene, ctx) => PlaceHandle  (injected by registry after first load)
+//   id, name, type, worldX/Z, entranceX/Z, entranceFacing,
+//   minimapIcon, minimapColor, hours, ambientSound, npcList, activities
+
+// ---- STATIC IMPORTS (fixes "could not load" in production) ----
+import * as central_market_mod from "./central_market.js";
+import * as suya_spot_mod from "./suya_spot.js";
+import * as central_mosque_mod from "./central_mosque.js";
+import * as kawo_park_mod from "./kawo_park.js";
+import * as university_mod from "./university.js";
+import * as mall_cinema_mod from "./mall_cinema.js";
+import * as hospital_mod from "./hospital.js";
+import * as bank_mod from "./bank.js";
+import * as stadium_mod from "./stadium.js";
+import * as river_park_mod from "./river_park.js";
+import * as church_mod from "./church.js";
+import * as barber_mod from "./barber.js";
+import * as nightclub_mod from "./nightclub.js";
+
+const MODULES = {
+  central_market: central_market_mod,
+  suya_spot: suya_spot_mod,
+  central_mosque: central_mosque_mod,
+  kawo_park: kawo_park_mod,
+  university: university_mod,
+  mall_cinema: mall_cinema_mod,
+  hospital: hospital_mod,
+  bank: bank_mod,
+  stadium: stadium_mod,
+  river_park: river_park_mod,
+  church: church_mod,
+  barber: barber_mod,
+  nightclub: nightclub_mod,
+};
 
 const PLACE_DEFS = [
   {
@@ -26,7 +47,7 @@ const PLACE_DEFS = [
     type: "interior",
     worldX: -30, worldZ: -25,
     entranceX: -28, entranceZ: -22,
-    entranceFacing: Math.PI, // facing south, looking back at road
+    entranceFacing: Math.PI,
     minimapIcon: "🛒",
     minimapColor: 0xc0392b,
     hours: { open: 7, close: 20 },
@@ -35,16 +56,13 @@ const PLACE_DEFS = [
       { id: "trader1", name: "Mama Nkechi", outfit: "ankara", role: "fabric seller" },
       { id: "trader2", name: "Alhaji Sani", outfit: "kaftan", role: "spice trader" },
       { id: "trader3", name: "Aunty Bisi", outfit: "ankara", role: "tailor" },
-      { id: "trader4", name: "Mallam Yusuf", outfit: "kaftan", role: "vegetable seller" },
-      { id: "trader5", name: "Iya Basira", outfit: "ankara", role: "food corner" },
     ],
     activities: [
       { id: "haggle", label: "Haggle for fabric", desc: "Try to get the best price from Mama Nkechi" },
       { id: "buy_spices", label: "Buy spices", desc: "Stock up on dried pepper and curry" },
       { id: "tailor", label: "Tailor an outfit", desc: "Get measured by Aunty Bisi" },
-      { id: "eat", label: "Eat at food corner", desc: "Hot tuwo and miyan kuka from Iya Basira" },
+      { id: "eat", label: "Eat at food corner", desc: "Hot tuwo and miyan kuka" },
     ],
-    module: "./central_market.js",
   },
   {
     id: "suya_spot",
@@ -55,7 +73,7 @@ const PLACE_DEFS = [
     entranceFacing: 0,
     minimapIcon: "🍢",
     minimapColor: 0xd98e2b,
-    hours: { open: 16, close: 24 }, // evening spot
+    hours: { open: 16, close: 24 },
     ambientSound: "street",
     npcList: [
       { id: "suya1", name: "Mallam Audu", outfit: "kaftan", role: "suya seller" },
@@ -66,7 +84,6 @@ const PLACE_DEFS = [
       { id: "drink_zobo", label: "Buy zobo", desc: "Chilled zobo with cucumber" },
       { id: "chat", label: "Gist with the boys", desc: "Talk football and politics" },
     ],
-    module: "./suya_spot.js",
   },
   {
     id: "central_mosque",
@@ -77,7 +94,7 @@ const PLACE_DEFS = [
     entranceFacing: Math.PI,
     minimapIcon: "🕌",
     minimapColor: 0x1f7a5a,
-    hours: null, // always open
+    hours: null,
     ambientSound: "mosque",
     npcList: [
       { id: "imam", name: "Imam Ibrahim", outfit: "kaftan", role: "Imam" },
@@ -88,12 +105,231 @@ const PLACE_DEFS = [
       { id: "listen_adhan", label: "Listen to adhan", desc: "Call to prayer at salat times" },
       { id: "read_quran", label: "Read Quran", desc: "Quiet reflection" },
     ],
-    module: "./central_mosque.js",
+  },
+  {
+    id: "kawo_park",
+    name: "Kawo Motor Park",
+    type: "outdoor",
+    worldX: -90, worldZ: -35,
+    entranceX: -88, entranceZ: -32,
+    entranceFacing: Math.PI / 2,
+    minimapIcon: "🚌",
+    minimapColor: 0xf2b134,
+    hours: { open: 5, close: 22 },
+    ambientSound: "motorpark",
+    npcList: [
+      { id: "conductor1", name: "Musa", outfit: "casual", role: "bus conductor" },
+      { id: "driver1", name: "Alhaji Tanko", outfit: "kaftan", role: "bus driver" },
+    ],
+    activities: [
+      { id: "board_bus", label: "Board bus to Zaria", desc: "Travel north — ₦800" },
+      { id: "hire_keke", label: "Hire keke", desc: "Quick ride into town — ₦200" },
+      { id: "hire_okada", label: "Hire okada", desc: "Fastest through traffic — ₦400" },
+      { id: "eat_park", label: "Eat at park vendor", desc: "Hot kunu and kosai — ₦300" },
+    ],
+  },
+  {
+    id: "university",
+    name: "Kaduna Polytechnic",
+    type: "outdoor",
+    worldX: 100, worldZ: -38,
+    entranceX: 98, entranceZ: -34,
+    entranceFacing: -Math.PI / 2,
+    minimapIcon: "🎓",
+    minimapColor: 0x1d5fa8,
+    hours: { open: 8, close: 19 },
+    ambientSound: "campus",
+    npcList: [
+      { id: "lecturer1", name: "Dr. Aminu", outfit: "kaftan", role: "lecturer" },
+      { id: "student1", name: "Fatima", outfit: "casual", role: "student" },
+    ],
+    activities: [
+      { id: "attend_lecture", label: "Attend lecture", desc: "Earn ₦500 stipend" },
+      { id: "eat_cafeteria", label: "Eat at cafeteria", desc: "Cheap student meal — ₦400" },
+      { id: "play_football", label: "Play football", desc: "Fun + social on the field" },
+      { id: "rest_hostel", label: "Rest at hostel", desc: "Restore energy" },
+    ],
+  },
+  {
+    id: "mall_cinema",
+    name: "Kaduna Mall & Cinema",
+    type: "interior",
+    worldX: 130, worldZ: 32,
+    entranceX: 130, entranceZ: 24,
+    entranceFacing: Math.PI,
+    minimapIcon: "🏬",
+    minimapColor: 0x7a3b8f,
+    hours: { open: 9, close: 23 },
+    ambientSound: "mall",
+    npcList: [
+      { id: "cashier1", name: "Glory", outfit: "casual", role: "boutique cashier" },
+      { id: "usher1", name: "Emeka", outfit: "casual", role: "cinema usher" },
+    ],
+    activities: [
+      { id: "shop_clothes", label: "Shop for clothes", desc: "Designer outfits from ₦3000" },
+      { id: "watch_movie", label: "Watch a movie", desc: "Nollywood premiere — ₦1500" },
+      { id: "eat_foodcourt", label: "Eat at food court", desc: "Continental dishes from ₦1000" },
+      { id: "browse", label: "Browse shops", desc: "Window shopping — fun +5" },
+    ],
+  },
+  {
+    id: "hospital",
+    name: "Barau Dikko Hospital",
+    type: "interior",
+    worldX: -130, worldZ: -30,
+    entranceX: -128, entranceZ: -27,
+    entranceFacing: Math.PI / 2,
+    minimapIcon: "🏥",
+    minimapColor: 0xe11d48,
+    hours: null,
+    ambientSound: "hospital",
+    npcList: [
+      { id: "doctor1", name: "Dr. Okafor", outfit: "casual", role: "doctor" },
+      { id: "nurse1", name: "Nurse Aisha", outfit: "casual", role: "nurse" },
+    ],
+    activities: [
+      { id: "treat", label: "Get treatment", desc: "Full health restore — ₦2000" },
+      { id: "checkup", label: "Health checkup", desc: "Diagnose sickness — ₦500" },
+      { id: "buy_drugs", label: "Buy drugs", desc: "Pharmacy — from ₦200" },
+      { id: "rest", label: "Rest in ward", desc: "Energy +30 — ₦1000" },
+    ],
+  },
+  {
+    id: "bank",
+    name: "First Bank Kaduna",
+    type: "interior",
+    worldX: 70, worldZ: 38,
+    entranceX: 70, entranceZ: 26,
+    entranceFacing: Math.PI,
+    minimapIcon: "🏦",
+    minimapColor: 0x1a5a3a,
+    hours: { open: 8, close: 16 },
+    ambientSound: "bank",
+    npcList: [
+      { id: "teller1", name: "Mr. Bello", outfit: "casual", role: "teller" },
+      { id: "manager1", name: "Mrs. Okon", outfit: "casual", role: "branch manager" },
+    ],
+    activities: [
+      { id: "deposit", label: "Deposit money", desc: "Safely store your cash" },
+      { id: "withdraw", label: "Withdraw money", desc: "Take out your savings" },
+      { id: "loan", label: "Apply for loan", desc: "Borrow up to ₦50,000" },
+      { id: "transfer", label: "Transfer money", desc: "Send to another player" },
+    ],
+  },
+  {
+    id: "stadium",
+    name: "Ahmadu Bello Stadium",
+    type: "outdoor",
+    worldX: -100, worldZ: 38,
+    entranceX: -100, entranceZ: 28,
+    entranceFacing: Math.PI,
+    minimapIcon: "⚽",
+    minimapColor: 0x2e7d4f,
+    hours: { open: 15, close: 22 },
+    ambientSound: "stadium",
+    npcList: [
+      { id: "coach1", name: "Coach Daniel", outfit: "casual", role: "coach" },
+      { id: "player1", name: "Ahmed", outfit: "casual", role: "footballer" },
+    ],
+    activities: [
+      { id: "watch_match", label: "Watch a match", desc: "Fun +30 — ₦500" },
+      { id: "play_match", label: "Join a match", desc: "Earn ₦1000 if you win" },
+      { id: "buy_ticket", label: "Buy season ticket", desc: "₦5000 — discounts" },
+      { id: "buy_snacks", label: "Buy snacks", desc: "Hunger +20 — ₦300" },
+    ],
+  },
+  {
+    id: "river_park",
+    name: "Kaduna River Park",
+    type: "outdoor",
+    worldX: 120, worldZ: -38,
+    entranceX: 118, entranceZ: -34,
+    entranceFacing: -Math.PI / 2,
+    minimapIcon: "🌊",
+    minimapColor: 0x0ea5e9,
+    hours: null,
+    ambientSound: "river",
+    npcList: [
+      { id: "fisher1", name: "Pa Audu", outfit: "kaftan", role: "fisherman" },
+      { id: "guard2", name: "Sergeant Idris", outfit: "casual", role: "park ranger" },
+    ],
+    activities: [
+      { id: "fish", label: "Go fishing", desc: "Catch fish — sell for ₦200-800" },
+      { id: "picnic", label: "Have a picnic", desc: "Mood +25, fun +15" },
+      { id: "boat_ride", label: "Boat ride", desc: "Romantic — ₦1000, mood +30" },
+      { id: "relax", label: "Relax by the water", desc: "Energy +20, mood +10" },
+    ],
+  },
+  {
+    id: "church",
+    name: "St. Bartholomew's Church",
+    type: "interior",
+    worldX: -70, worldZ: 38,
+    entranceX: -70, entranceZ: 26,
+    entranceFacing: Math.PI,
+    minimapIcon: "⛪",
+    minimapColor: 0xc8b890,
+    hours: { open: 6, close: 21 },
+    ambientSound: "church",
+    npcList: [
+      { id: "pastor1", name: "Pastor John", outfit: "casual", role: "pastor" },
+      { id: "usher2", name: "Sister Mary", outfit: "casual", role: "usher" },
+    ],
+    activities: [
+      { id: "pray_church", label: "Pray", desc: "Mood +25, social +10" },
+      { id: "attend_service", label: "Attend service", desc: "Sundays — mood +30" },
+      { id: "choir", label: "Join choir practice", desc: "Fun +15, social +15" },
+      { id: "donate", label: "Donate", desc: "Give ₦500 — mood +20" },
+    ],
+  },
+  {
+    id: "barber",
+    name: "Musa's Barber Shop",
+    type: "interior",
+    worldX: 30, worldZ: -38,
+    entranceX: 30, entranceZ: -30,
+    entranceFacing: -Math.PI / 2,
+    minimapIcon: "💈",
+    minimapColor: 0x1a1a2e,
+    hours: { open: 8, close: 20 },
+    ambientSound: "barber",
+    npcList: [
+      { id: "barber1", name: "Musa", outfit: "casual", role: "barber" },
+      { id: "customer1", name: "Sani", outfit: "kaftan", role: "customer" },
+    ],
+    activities: [
+      { id: "haircut", label: "Get a haircut", desc: "Hygiene +20, fun +10 — ₦500" },
+      { id: "beard_trim", label: "Trim beard", desc: "Hygiene +10 — ₦300" },
+      { id: "shave", label: "Clean shave", desc: "Hygiene +25 — ₦400" },
+      { id: "gossip", label: "Gist with Musa", desc: "Social +15, hear news" },
+    ],
+  },
+  {
+    id: "nightclub",
+    name: "Kajuru Nightclub",
+    type: "interior",
+    worldX: 0, worldZ: -38,
+    entranceX: 0, entranceZ: -30,
+    entranceFacing: -Math.PI / 2,
+    minimapIcon: "🪩",
+    minimapColor: 0x6b21a8,
+    hours: { open: 20, close: 4 },
+    ambientSound: "club",
+    npcList: [
+      { id: "dj1", name: "DJ Zee", outfit: "casual", role: "DJ" },
+      { id: "bouncer1", name: "Big Mike", outfit: "casual", role: "bouncer" },
+    ],
+    activities: [
+      { id: "dance", label: "Dance", desc: "Fun +30, energy -10 — ₦1000" },
+      { id: "buy_drink", label: "Buy a drink", desc: "Social +10 — ₦500" },
+      { id: "socialize", label: "Socialize", desc: "Meet people — social +20" },
+      { id: "vip", label: "Book VIP table", desc: "₦5000 — fun +40, social +30" },
+    ],
   },
 ];
 
 // ---- registry runtime state ----
-const _loaded = new Map(); // id -> { def, moduleExports, instance }
+const _loaded = new Map();
 const _listeners = new Set();
 
 export function listPlaces() {
@@ -105,7 +341,6 @@ export function getPlace(id) {
 }
 
 export function findPlaceAtPosition(x, z, radius = 6) {
-  // Returns the place def whose entrance is within `radius` metres of (x, z)
   for (const def of PLACE_DEFS) {
     const dx = def.entranceX - x, dz = def.entranceZ - z;
     if (dx * dx + dz * dz < radius * radius) return def;
@@ -115,22 +350,20 @@ export function findPlaceAtPosition(x, z, radius = 6) {
 
 export function isPlaceOpen(def, gameHour) {
   if (!def.hours) return true;
-  // handle overnight close (e.g. open=16, close=24 → open 16:00-24:00)
   if (def.hours.open <= def.hours.close) {
     return gameHour >= def.hours.open && gameHour < def.hours.close;
   }
   return gameHour >= def.hours.open || gameHour < def.hours.close;
 }
 
-// Lazy-load a place module and call its build(). Returns the PlaceHandle.
-// Cached: calling buildPlace() twice with the same id returns the cached instance.
+// Build a place: look up its module statically, call build(). Cached.
 export async function buildPlace(id, scene, ctx) {
   if (_loaded.has(id)) return _loaded.get(id).instance;
   const def = getPlace(id);
   if (!def) throw new Error("Unknown place: " + id);
-  const mod = await import(/* @vite-ignore */ def.module);
-  if (!mod.build || typeof mod.build !== "function") {
-    throw new Error("Place module " + def.module + " must export build(scene, ctx)");
+  const mod = MODULES[id];
+  if (!mod || !mod.build || typeof mod.build !== "function") {
+    throw new Error("Place module for " + id + " not found or has no build()");
   }
   const instance = await mod.build(scene, ctx);
   _loaded.set(id, { def, moduleExports: mod, instance });
@@ -138,7 +371,6 @@ export async function buildPlace(id, scene, ctx) {
   return instance;
 }
 
-// Free the memory of a built place. The module may be re-imported later.
 export async function disposePlace(id) {
   const entry = _loaded.get(id);
   if (!entry) return;
@@ -163,7 +395,6 @@ function _notify(type, id) {
   }
 }
 
-// Helper for UI: which places are currently enterable?
 export function enterablePlaces(gameHour, playerX, playerZ, radius = 6) {
   const out = [];
   for (const def of PLACE_DEFS) {
