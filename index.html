@@ -38,12 +38,55 @@
   #toast { position:absolute; left:50%; top:calc(150px + env(safe-area-inset-top)); transform:translateX(-50%); background:var(--green); color:#fff; padding:8px 16px; border-radius:14px; font-size:13px; font-weight:600; opacity:0; transition:opacity .25s; white-space:nowrap; z-index:30; }
   #toast.show { opacity:1; }
 
-  /* HUD: needs + money + dock */
-  #hud-dock { position:absolute; left:12px; bottom:calc(166px + env(safe-area-inset-bottom)); pointer-events:none; display:flex; flex-direction:column; gap:6px; }
-  .needs-row { display:flex; gap:4px; flex-wrap:wrap; max-width:200px; }
-  .need-item { display:flex; align-items:center; gap:3px; background:var(--cream); border-radius:10px; padding:3px 6px; font-size:10px; font-weight:600; }
-  .need-bar { width:30px; height:5px; border-radius:3px; background:#e0ddd5; overflow:hidden; }
-  .need-bar i { display:block; height:100%; border-radius:3px; transition:width .3s, background .3s; }
+  /* HUD: top pill + quest cards + bottom nav */
+  #top-pill { position:absolute; left:50%; top:calc(8px + env(safe-area-inset-top)); transform:translateX(-50%); pointer-events:auto; display:flex; align-items:center; gap:0; background:#fff; border-radius:20px; padding:4px 4px 4px 12px; box-shadow:0 2px 12px rgba(0,0,0,.15); font-size:12px; font-weight:600; white-space:nowrap; z-index:20; }
+  #top-pill .tp-clock { color:var(--ink); }
+  #top-pill .tp-mood { display:flex; align-items:center; gap:3px; padding:0 8px; border-left:1px solid #eee; margin-left:8px; color:var(--green); }
+  #top-pill .tp-money { display:flex; align-items:center; gap:4px; background:var(--green); color:#fff; border-radius:16px; padding:4px 10px; margin-left:8px; font-weight:700; }
+  #top-pill .tp-plus { background:var(--gold); color:var(--ink); border:none; border-radius:50%; width:20px; height:20px; font-size:14px; line-height:1; cursor:pointer; margin-left:4px; display:flex; align-items:center; justify-content:center; font-weight:700; }
+  #top-pill .tp-sound { background:none; border:none; cursor:pointer; font-size:14px; padding:0 4px; }
+  #top-pill .tp-clean { background:none; border:none; cursor:pointer; font-size:14px; padding:0 4px; }
+
+  /* Server stats pills (under top pill) */
+  #stats-pills { position:absolute; left:50%; top:calc(40px + env(safe-area-inset-top)); transform:translateX(-50%); display:flex; gap:6px; z-index:20; pointer-events:none; }
+  #stats-pills .sp { background:rgba(255,255,255,.9); border-radius:10px; padding:3px 8px; font-size:10px; font-weight:600; color:#666; box-shadow:0 1px 4px rgba(0,0,0,.1); }
+
+  /* Quest cards (left side) */
+  #quest-cards { position:absolute; left:12px; top:calc(80px + env(safe-area-inset-top)); display:flex; flex-direction:column; gap:6px; z-index:18; pointer-events:auto; max-width:200px; }
+  .quest-card { background:rgba(255,255,255,.95); border-radius:12px; padding:8px 10px; box-shadow:0 2px 8px rgba(0,0,0,.1); font-size:11px; line-height:1.3; display:flex; align-items:flex-start; gap:6px; }
+  .quest-card .qc-icon { font-size:16px; flex-shrink:0; }
+  .quest-card .qc-body { flex:1; }
+  .quest-card .qc-title { font-weight:700; color:var(--green); font-size:11px; }
+  .quest-card .qc-desc { color:#666; font-size:10px; margin-top:1px; }
+  .quest-card .qc-progress { font-size:10px; color:var(--gold); font-weight:600; margin-top:2px; }
+
+  /* Location label */
+  #zone-label { position:absolute; left:12px; top:calc(8px + env(safe-area-inset-top)); background:rgba(255,255,255,.92); border-radius:10px; padding:4px 10px; font-size:12px; font-weight:600; box-shadow:0 1px 4px rgba(0,0,0,.1); z-index:19; }
+
+  /* HUD: avatar + needs chip (bottom-left) */
+  #hud-dock { position:absolute; left:12px; bottom:calc(72px + env(safe-area-inset-bottom)); pointer-events:none; display:flex; align-items:center; gap:8px; z-index:18; }
+  .avatar-bubble { pointer-events:auto; width:42px; height:42px; border-radius:50%; background:var(--green); border:3px solid #2e7d4f; display:flex; align-items:center; justify-content:center; font-size:18px; cursor:pointer; color:#fff; font-weight:700; box-shadow:0 2px 8px rgba(0,0,0,.2); }
+  .needs-chip { pointer-events:auto; display:flex; align-items:center; gap:4px; background:rgba(255,255,255,.92); border-radius:12px; padding:4px 8px; box-shadow:0 2px 8px rgba(0,0,0,.1); }
+  .needs-chip .nc-bar { width:22px; height:4px; border-radius:2px; background:#e0ddd5; overflow:hidden; display:inline-block; margin-left:1px; }
+  .needs-chip .nc-bar i { display:block; height:100%; border-radius:2px; transition:width .3s, background .3s; }
+
+  /* Bottom nav pill */
+  #bottom-nav { position:absolute; left:50%; bottom:calc(8px + env(safe-area-inset-bottom)); transform:translateX(-50%); pointer-events:auto; display:flex; gap:4px; background:#fff; border-radius:20px; padding:4px; box-shadow:0 2px 12px rgba(0,0,0,.15); z-index:20; }
+  #bottom-nav .nav-btn { background:none; border:none; border-radius:16px; padding:8px 14px; cursor:pointer; font:600 11px 'Poppins',sans-serif; color:#999; display:flex; flex-direction:column; align-items:center; gap:2px; }
+  #bottom-nav .nav-btn.active { background:var(--green); color:#fff; }
+  #bottom-nav .nav-btn .nav-icon { font-size:18px; }
+  #bottom-nav .nav-btn.disabled { opacity:.4; cursor:default; }
+
+  /* Profile / Needs sheet */
+  #profile-sheet { position:fixed; left:0; right:0; bottom:0; z-index:42; background:var(--cream); border-radius:20px 20px 0 0; padding:16px; max-height:70vh; overflow-y:auto; transform:translateY(100%); transition:transform .3s ease; box-shadow:0 -4px 20px rgba(0,0,0,.2); }
+  #profile-sheet.show { transform:translateY(0); }
+  #profile-sheet .grab { width:40px; height:4px; background:#ccc; border-radius:2px; margin:0 auto 12px; }
+  .ps-tabs { display:flex; gap:4px; margin-bottom:12px; }
+  .ps-tab { flex:1; padding:8px; text-align:center; background:rgba(0,0,0,.05); border:none; border-radius:8px; cursor:pointer; font:600 12px 'Poppins',sans-serif; color:#666; }
+  .ps-tab.active { background:var(--green); color:#fff; }
+  .feeling-card { display:flex; justify-content:space-between; align-items:center; padding:8px 12px; background:#fff; border-radius:8px; margin-bottom:6px; font-size:12px; }
+  .feeling-card .fc-val { font-weight:700; }
+
   .money-chip { display:flex; align-items:center; gap:6px; background:var(--green); color:#fff; border-radius:12px; padding:6px 12px; font-size:14px; font-weight:700; }
   .rank-chip { font-size:11px; font-weight:600; opacity:.85; }
   .phone-btn { pointer-events:auto; background:var(--gold); color:var(--ink); border:2.5px solid var(--ink); border-radius:16px; width:54px; height:54px; display:flex; align-items:center; justify-content:center; font-size:24px; box-shadow:0 3px 0 var(--ink); cursor:pointer; }
@@ -74,46 +117,91 @@
 <canvas id="game"></canvas>
 
 <div id="ui">
-  <div class="top-left hideable">
-    <div class="card chip title">📍 Ahmadu Bello Way<small id="zone-sub">Kaduna</small></div>
-    <div class="card chip"><span id="sun">☀️</span><span id="clock">Sat · 9:00 AM</span></div>
-    <div class="card tip" id="tip"><b>How to move:</b> use the thumb stick. Drag the screen to look around.</div>
+  <!-- Top pill: clock + mood + money + clean -->
+  <div id="top-pill" class="hideable">
+    <span class="tp-clock" id="tp-clock">☀ 12:00 PM</span>
+    <span class="tp-mood" id="tp-mood">😊 Happy</span>
+    <button class="tp-sound" id="tp-sound" title="Sound">🔊</button>
+    <span class="tp-money">₦<span id="tp-money-val">5,000</span></span>
+    <button class="tp-plus" id="tp-plus" title="Earn money">+</button>
+    <button class="tp-clean" id="tp-clean" title="Clean screen">👁</button>
+  </div>
+
+  <!-- Server stats pills -->
+  <div id="stats-pills" class="hideable">
+    <span class="sp">👀 <span id="visits-count">0</span> visits</span>
+    <span class="sp">🟢 <span id="online-count-hud">1</span> online</span>
+  </div>
+
+  <!-- Location label (top-left) -->
+  <div id="zone-label" class="hideable">📍 <span id="zone-name">Ahmadu Bello Way</span></div>
+
+  <!-- Quest cards (left side, below location) -->
+  <div id="quest-cards" class="hideable">
+    <div class="quest-card" id="qc-main">
+      <span class="qc-icon">🎯</span>
+      <div class="qc-body">
+        <div class="qc-title">Getting Started</div>
+        <div class="qc-desc">Visit the market — Open Map → Central Market</div>
+      </div>
+    </div>
+    <div class="quest-card" id="qc-gems">
+      <span class="qc-icon">💎</span>
+      <div class="qc-body">
+        <div class="qc-title">Daily Gem Hunt</div>
+        <div class="qc-progress" id="qc-gems-progress">0 found · next prize ₦3,000</div>
+      </div>
+    </div>
   </div>
 
   <div id="minimap" class="hideable"><canvas id="mm" width="248" height="248"></canvas><span class="mm-label">Map</span></div>
 
-  <div class="right-col hideable">
+  <div class="right-col hideable" style="top:calc(100px + env(safe-area-inset-top));">
     <button class="btn" id="zin" aria-label="Zoom in">+</button>
     <button class="btn" id="zout" aria-label="Zoom out">−</button>
     <button class="btn" id="fit" aria-label="Re-centre"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4"/></svg></button>
-    <button class="btn" id="eye" aria-label="Hide UI"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
     <button class="btn" id="admin-hud-btn" aria-label="Admin dashboard" style="display:none;background:linear-gradient(135deg,#0f4d3a,#1a1a2e);color:#f2b134;border-color:#f2b134;">🔐</button>
   </div>
 
   <div id="joy" class="hideable"><i id="knob"></i></div>
-  <div class="bottom-right hideable">
+  <div class="bottom-right hideable" style="bottom:calc(70px + env(safe-area-inset-bottom));">
     <button class="btn wide" id="jog"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="14" cy="4.5" r="1.8"/><path d="M8 21l3-6 3 2v5M11 15l-1-5 4-2 2 3 3 1M10 10l-3 1"/></svg><span id="jog-t">Walk</span></button>
   </div>
 
-  <!-- HUD: needs + money + phone dock -->
+  <!-- HUD: avatar + needs chip (bottom-left) -->
   <div id="hud-dock" class="hideable">
-    <div class="money-chip">
-      <span id="money-val">₦5,000</span>
-      <span class="rank-chip" id="rank-val">Newcomer</span>
+    <div class="avatar-bubble" id="avatar-bubble">🧑</div>
+    <div class="needs-chip" id="needs-chip">
+      <span style="font-size:11px;">🍛</span><div class="nc-bar"><i id="need-hunger" style="width:80%;background:#2e7d4f;"></i></div>
+      <span style="font-size:11px;">⚡</span><div class="nc-bar"><i id="need-energy" style="width:80%;background:#2e7d4f;"></i></div>
+      <span style="font-size:11px;">🎉</span><div class="nc-bar"><i id="need-fun" style="width:70%;background:#2e7d4f;"></i></div>
+      <span style="font-size:11px;">💬</span><div class="nc-bar"><i id="need-social" style="width:60%;background:#2e7d4f;"></i></div>
+      <span style="font-size:11px;">🫧</span><div class="nc-bar"><i id="need-hygiene" style="width:75%;background:#2e7d4f;"></i></div>
+      <span style="font-size:11px;">🚽</span><div class="nc-bar"><i id="need-bladder" style="width:85%;background:#2e7d4f;"></i></div>
     </div>
-    <div class="needs-row">
-      <div class="need-item">🍛<div class="need-bar"><i id="need-hunger" style="width:80%;background:#2e7d4f;"></i></div></div>
-      <div class="need-item">⚡<div class="need-bar"><i id="need-energy" style="width:80%;background:#2e7d4f;"></i></div></div>
-      <div class="need-item">🎉<div class="need-bar"><i id="need-fun" style="width:70%;background:#2e7d4f;"></i></div></div>
-      <div class="need-item">💬<div class="need-bar"><i id="need-social" style="width:60%;background:#2e7d4f;"></i></div></div>
-      <div class="need-item">🚿<div class="need-bar"><i id="need-hygiene" style="width:75%;background:#2e7d4f;"></i></div></div>
-      <div class="need-item">🚻<div class="need-bar"><i id="need-bladder" style="width:85%;background:#2e7d4f;"></i></div></div>
-    </div>
-    <button class="phone-btn" id="phone-btn" aria-label="Open phone">📱</button>
+  </div>
+
+  <!-- Bottom nav pill -->
+  <div id="bottom-nav" class="hideable">
+    <button class="nav-btn active" data-nav="home"><span class="nav-icon">🏠</span>Home</button>
+    <button class="nav-btn disabled" data-nav="buy"><span class="nav-icon">🛋</span>Buy</button>
+    <button class="nav-btn" data-nav="map"><span class="nav-icon">🗺️</span>Map</button>
+    <button class="nav-btn" data-nav="phone"><span class="nav-icon">📱</span>Phone</button>
   </div>
 
   <button class="btn" id="eye-solo" aria-label="Show UI"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><path d="M4 4l16 16"/></svg></button>
   <div id="toast"></div>
+</div>
+
+<!-- Profile / Needs sheet -->
+<div id="profile-sheet">
+  <div class="grab"></div>
+  <div class="ps-tabs">
+    <button class="ps-tab active" data-ps="profile">Profile</button>
+    <button class="ps-tab" data-ps="needs">Needs</button>
+    <button class="ps-tab" data-ps="goals">Goals</button>
+  </div>
+  <div id="ps-content"></div>
 </div>
 
 <!-- Phone modal -->
