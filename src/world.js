@@ -363,7 +363,7 @@ export function buildWorld(scene) {
     const _placeMarkers = [
       { id: "central_market", x: -28, z: -22, name: "MARKET", icon: "🛒", color: 0xc0392b },
       { id: "suya_spot", x: -53, z: 20, name: "SUYA", icon: "🍢", color: 0xd98e2b },
-      { id: "central_mosque", x: 48, z: 23, name: "MOSQUE", icon: "🕌", color: 0x1f7a5a },
+      { id: "central_mosque", x: 48, z: 20.5, name: "MOSQUE", icon: "🕌", color: 0x1f7a5a },
       { id: "kawo_park", x: -88, z: -32, name: "KAWO PARK", icon: "🚌", color: 0xf2b134 },
       { id: "university", x: 98, z: -34, name: "POLYTECHNIC", icon: "🎓", color: 0x1d5fa8 },
       { id: "mall_cinema", x: 130, z: 24, name: "MALL", icon: "🏬", color: 0x7a3b8f },

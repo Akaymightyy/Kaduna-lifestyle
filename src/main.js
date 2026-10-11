@@ -168,6 +168,58 @@ function _renderPlaceActions(def) {
 }
 window.placeAction = (eventId) => sendUIEvent(eventId, {});
 
+// ---- Nearby-person detection for the "Talk to <name>" button ----
+// Runs every ~300ms while inside a place. Checks the active place's people
+// list for anyone within 2.2 m of the player, and shows a Talk button.
+let _talkCheckT = 0;
+let _currentTalkTarget = null;
+function _tickTalkButton(dt) {
+  _talkCheckT += dt;
+  if (_talkCheckT < 0.3) return;
+  _talkCheckT = 0;
+  const active = getActivePlace();
+  if (!active?.handle?.people) { _hideTalkButton(); return; }
+  const people = active.handle.people();
+  if (!people?.people) { _hideTalkButton(); return; }
+  const px = player.pos.x, pz = player.pos.z;
+  let nearest = null, nearestD = 2.2 * 2.2;
+  for (const p of people.people) {
+    if (!p.ready || !p.group || !p.name || p.name === "Shopper" || p.name === "Customer" || p.name === "Person") continue;
+    const dx = p.x - px, dz = p.z - pz;
+    const d = dx * dx + dz * dz;
+    if (d < nearestD) { nearestD = d; nearest = p; }
+  }
+  if (nearest) {
+    _currentTalkTarget = nearest;
+    _showTalkButton(nearest.name, nearest.id);
+  } else {
+    _currentTalkTarget = null;
+    _hideTalkButton();
+  }
+}
+function _showTalkButton(name, personId) {
+  let btn = document.getElementById("talk-btn");
+  if (!btn) {
+    btn = document.createElement("button");
+    btn.id = "talk-btn";
+    btn.style.cssText =
+      "position:fixed;left:50%;bottom:calc(180px + env(safe-area-inset-bottom));" +
+      "transform:translateX(-50%);background:#f2b134;color:#0f4d3a;border:none;" +
+      "border-radius:20px;padding:10px 20px;cursor:pointer;z-index:31;" +
+      "font:700 13px Poppins,sans-serif;box-shadow:0 3px 10px rgba(0,0,0,.3);display:none;";
+    document.body.appendChild(btn);
+    btn.addEventListener("click", () => {
+      if (_currentTalkTarget) sendUIEvent("talk", { personId: _currentTalkTarget.id });
+    });
+  }
+  btn.textContent = "💬 Talk to " + name;
+  btn.style.display = "block";
+}
+function _hideTalkButton() {
+  const btn = document.getElementById("talk-btn");
+  if (btn) btn.style.display = "none";
+}
+
 function updateHUD() {
   const s=game.state;
   $("money-val").textContent="₦"+s.money.toLocaleString();
@@ -637,9 +689,11 @@ function frame() {
     }
   }
   // Update active place (NPC animations, smoke, etc.)
-  updateActive(dt, now);
+  updateActive(dt, now, player.pos.x, player.pos.z);
   // Show entrance/exit prompt
   tickEntrancePrompt(player.pos.x, player.pos.z, _gameHour());
+  // Check for nearby named people to show Talk button
+  _tickTalkButton(dt);
 
   traffic.update(now);
   npcs.update(dt, now, player.pos.x, player.pos.z);
