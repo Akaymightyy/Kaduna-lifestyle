@@ -2,6 +2,7 @@
 import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { rng } from "../config.js";
+import { spawnPeople, getNamedDialogue, getDialogue } from "./people.js";
 
 let _built = false, _cache = null;
 const _state = { lights: [], t: 0 };
