@@ -7,9 +7,9 @@ import * as THREE from "three";
 import { createCharacter } from "./characters.js";
 import { ROAD_HALF, WORLD_HALF_X, CROSSINGS, rng } from "./config.js";
 
-const NPC_COUNT = 3;            // reduced for perf (240 meshes per character)
-const ANIM_DISTANCE = 30;       // metres — skip animation beyond this
-const DRAW_DISTANCE = 60;       // metres — hide entirely beyond this
+const NPC_COUNT = 5;            // reduced for perf (was 8, originally 14)
+const ANIM_DISTANCE = 50;       // metres — skip animation beyond this
+const DRAW_DISTANCE = 100;      // metres — hide entirely beyond this
 
 export function createNPCs(scene) {
   const R = rng(9988);
