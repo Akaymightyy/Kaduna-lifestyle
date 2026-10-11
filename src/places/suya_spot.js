@@ -223,7 +223,8 @@ export async function build(scene, ctx) {
 
   scene.add(group);
 
-  // ---- People: Mallam Audu at grill + 4 sitting on benches + 2 standing + Yaro running ----
+  let _smokeAcc = 0;
+  // ---- People: Mallam Audu at grill + 4 sitting + 2 standing + Yaro running ----
   let _people = null;
   spawnPeople(group, [
     { id: "suya1", name: "Mallam Audu", role: "suya seller", outfit: "kaftan", pose: "stand", x: 0, z: -5, ry: Math.PI, top: "#c9b38a" },
@@ -236,18 +237,18 @@ export async function build(scene, ctx) {
     { id: "stand2", name: "Bala", role: "customer", outfit: "casual", pose: "stand", x: 4, z: 0, ry: -Math.PI / 2, top: "#c0392b" },
   ]).then((p) => { _people = p; });
 
-  let _smokeAcc = 0;
   const handle = {
     group,
     enter(playerState) {
+      // Player enters near the south fence
       playerState.pos.set(0, 0, 12);
       playerState.heading = Math.PI;
     },
     exit() {},
     update(dt, now, px, pz) {
+      if (_people) _people.update(dt, now, px, pz);
       _smokeAcc += dt;
       if (_smokeAcc > 0.05) { _smokeAcc = 0; smoke.update(0.05); }
-      if (_people) _people.update(dt, now, px, pz);
     },
     dispose() {
       if (_people) _people.dispose();
@@ -257,8 +258,8 @@ export async function build(scene, ctx) {
       _cache = null;
     },
     onUIEvent(eventId, payload) {
+      if (eventId === "talk" && payload?.personId) _talk(ctx, payload.personId);
       if (eventId === "order") _orderSuya(payload?.item, ctx);
-      else if (eventId === "talk" && payload?.personId) _talk(ctx, payload.personId);
     },
     people: () => _people,
     colliders,
@@ -346,7 +347,7 @@ function _talk(ctx, personId) {
   const person = people.getPersonById?.(personId);
   if (!person) return;
   const line = getNamedDialogue(person.name) || getDialogue(person.role, person.name);
-  ctx.toast("💬 " + person.name + ': "' + line + '"');
+  ctx.toast("\u{1F4AC} " + person.name + ': "' + line + '"');
   if (ctx.game) {
     ctx.game.state.needs.social = Math.min(100, (ctx.game.state.needs.social || 0) + 1);
     ctx.game.save?.();

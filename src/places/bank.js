@@ -2,7 +2,6 @@
 import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { rng } from "../config.js";
-import { spawnPeople, getNamedDialogue, getDialogue } from "./people.js";
 
 let _built = false, _cache = null;
 
@@ -92,21 +91,4 @@ function _act(ctx, cost, msg, effects) {
   if (effects._msg === "loan") { ctx.game.state.money += 50000; ctx.toast(msg); ctx.updateHUD?.(); return; }
   if (effects._msg === "deposit" || effects._msg === "withdraw" || effects._msg === "transfer") { ctx.toast(msg); return; }
   ctx.toast(msg);
-}
-
-// ---- Talk to a person ----
-function _talk(ctx, personId) {
-  const handle = _cache;
-  if (!handle?.people) return;
-  const people = handle.people();
-  if (!people) return;
-  const person = people.getPersonById?.(personId);
-  if (!person) return;
-  const line = getNamedDialogue(person.name) || getDialogue(person.role, person.name);
-  ctx.toast("💬 " + person.name + ': "' + line + '"');
-  if (ctx.game) {
-    ctx.game.state.needs.social = Math.min(100, (ctx.game.state.needs.social || 0) + 1);
-    ctx.game.save?.();
-    ctx.updateHUD?.();
-  }
 }

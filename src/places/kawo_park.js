@@ -2,7 +2,6 @@
 import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { rng } from "../config.js";
-import { spawnPeople, getNamedDialogue, getDialogue } from "./people.js";
 
 let _built = false, _cache = null;
 
@@ -181,21 +180,4 @@ function _buildKiosk(label, color, R) {
   const sign = signMesh(label, 3, 0.7, { width: 200, height: 48, bg: "#" + color.toString(16).padStart(6, "0"), fg: "#fff", size: 24 });
   sign.position.set(0, 2.7, 0); g.add(sign);
   return g;
-}
-
-// ---- Talk to a person ----
-function _talk(ctx, personId) {
-  const handle = _cache;
-  if (!handle?.people) return;
-  const people = handle.people();
-  if (!people) return;
-  const person = people.getPersonById?.(personId);
-  if (!person) return;
-  const line = getNamedDialogue(person.name) || getDialogue(person.role, person.name);
-  ctx.toast("💬 " + person.name + ': "' + line + '"');
-  if (ctx.game) {
-    ctx.game.state.needs.social = Math.min(100, (ctx.game.state.needs.social || 0) + 1);
-    ctx.game.save?.();
-    ctx.updateHUD?.();
-  }
 }

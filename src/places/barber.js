@@ -2,7 +2,6 @@
 import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { rng } from "../config.js";
-import { spawnPeople, getNamedDialogue, getDialogue } from "./people.js";
 
 let _built = false, _cache = null;
 
@@ -128,21 +127,4 @@ function _buildBarberStation(R) {
   const clippers = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.15, 0.3), new THREE.MeshLambertMaterial({ color: 0x222222 }));
   clippers.position.set(-0.5, 1.05, -2.5); g.add(clippers);
   return g;
-}
-
-// ---- Talk to a person ----
-function _talk(ctx, personId) {
-  const handle = _cache;
-  if (!handle?.people) return;
-  const people = handle.people();
-  if (!people) return;
-  const person = people.getPersonById?.(personId);
-  if (!person) return;
-  const line = getNamedDialogue(person.name) || getDialogue(person.role, person.name);
-  ctx.toast("💬 " + person.name + ': "' + line + '"');
-  if (ctx.game) {
-    ctx.game.state.needs.social = Math.min(100, (ctx.game.state.needs.social || 0) + 1);
-    ctx.game.save?.();
-    ctx.updateHUD?.();
-  }
 }

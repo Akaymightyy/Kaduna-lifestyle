@@ -2,7 +2,6 @@
 import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { rng } from "../config.js";
-import { spawnPeople, getNamedDialogue, getDialogue } from "./people.js";
 
 let _built = false, _cache = null;
 const _state = { escalator: null };
@@ -143,21 +142,4 @@ function _buildCinema(R) {
     for (let i = 0; i < 8; i++) { g.add(mergedMesh([box(0.7, 0.5, 0.6, -3 + i * 0.85, y + 0.25, z, 0xc0392b), box(0.7, 0.6, 0.15, -3 + i * 0.85, y + 0.7, z - 0.25, 0x8a2030)])); }
   }
   return g;
-}
-
-// ---- Talk to a person ----
-function _talk(ctx, personId) {
-  const handle = _cache;
-  if (!handle?.people) return;
-  const people = handle.people();
-  if (!people) return;
-  const person = people.getPersonById?.(personId);
-  if (!person) return;
-  const line = getNamedDialogue(person.name) || getDialogue(person.role, person.name);
-  ctx.toast("💬 " + person.name + ': "' + line + '"');
-  if (ctx.game) {
-    ctx.game.state.needs.social = Math.min(100, (ctx.game.state.needs.social || 0) + 1);
-    ctx.game.save?.();
-    ctx.updateHUD?.();
-  }
 }
