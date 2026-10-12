@@ -149,6 +149,8 @@ const placeCtx = {
   game,
   toast,
   updateHUD: () => updateHUD(),
+  canvas: document.getElementById("game"),
+  camera: camera,
   onPlaceChange: (def) => {
     // Update the HUD chip + show activity buttons when inside a place
     const titleEl = document.querySelector(".chip.title");
@@ -172,24 +174,51 @@ function _gameHour() {
 }
 function _renderPlaceActions(def) {
   let bar = document.getElementById("place-actions");
-  if (!def) { if (bar) bar.style.display = "none"; return; }
+  let toggle = document.getElementById("place-actions-toggle");
+  if (!def) {
+    if (bar) bar.style.display = "none";
+    if (toggle) toggle.style.display = "none";
+    return;
+  }
+  // ---- Create the toggle button (small, bottom-right) ----
+  if (!toggle) {
+    toggle = document.createElement("div");
+    toggle.id = "place-actions-toggle";
+    toggle.style.cssText =
+      "position:fixed;right:16px;bottom:calc(120px + env(safe-area-inset-bottom));" +
+      "width:50px;height:50px;border-radius:50%;background:var(--green);color:#fff;" +
+      "display:flex;align-items:center;justify-content:center;font-size:22px;" +
+      "cursor:pointer;z-index:31;box-shadow:0 4px 12px rgba(0,0,0,.35);" +
+      "border:2px solid rgba(255,255,255,.25);user-select:none;";
+    toggle.innerHTML = "📋";
+    toggle.title = "Show actions";
+    document.body.appendChild(toggle);
+    toggle.addEventListener("click", () => {
+      const b = document.getElementById("place-actions");
+      if (!b) return;
+      b.style.display = b.style.display === "none" ? "flex" : "none";
+    });
+  }
+  // ---- Create the actions bar (hidden by default) ----
   if (!bar) {
     bar = document.createElement("div");
     bar.id = "place-actions";
     bar.style.cssText =
-      "position:fixed;left:50%;bottom:calc(120px + env(safe-area-inset-bottom));" +
+      "position:fixed;left:50%;bottom:calc(175px + env(safe-area-inset-bottom));" +
       "transform:translateX(-50%);background:rgba(15,77,58,.95);color:#fff;" +
-      "padding:8px;gap:6px;border-radius:14px;display:none;z-index:30;" +
+      "padding:8px;gap:6px;border-radius:14px;display:none;z-index:31;" +
       "border:1px solid rgba(255,255,255,.2);max-width:90vw;flex-wrap:wrap;" +
-      "justify-content:center;";
+      "justify-content:center;box-shadow:0 4px 14px rgba(0,0,0,.35);";
     document.body.appendChild(bar);
   }
   bar.innerHTML = def.activities.map(a =>
-    '<button onclick="window.placeAction(\'' + a.id + '\')" ' +
-    'style="background:#fff;color:#0f4d3a;border:none;border-radius:8px;padding:6px 10px;' +
-    'cursor:pointer;font:600 12px Poppins,sans-serif;">' + a.label + '</button>'
+    '<button onclick="window.placeAction(\'' + a.id + '\'); document.getElementById(\'place-actions\').style.display=\'none\';" ' +
+    'style="background:#fff;color:#0f4d3a;border:none;border-radius:8px;padding:8px 12px;' +
+    'cursor:pointer;font:600 12px Poppins,sans-serif;white-space:nowrap;">' + a.label + '</button>'
   ).join("");
-  bar.style.display = "flex";
+  // Show the toggle, hide the bar (user taps to expand)
+  toggle.style.display = "flex";
+  bar.style.display = "none";
 }
 window.placeAction = (eventId) => sendUIEvent(eventId, {});
 
@@ -1165,6 +1194,14 @@ initAuth((user) => {
         if (fb) game.state.look = { ...game.state.look, ...fb };
         game.state.look.created = false;
         const t = setInterval(() => { if (!rig) return; clearInterval(t); window._openCreator(); }, 400);
+      } else {
+        // Character already created (e.g. after a gender-change reload). But if
+        // origin hasn't been picked yet, show the origin screen now — otherwise
+        // a gender-change reload would skip it entirely.
+        if (fb) game.state.look = { ...game.state.look, ...fb };
+        if (!game.state.origin) {
+          const t = setInterval(() => { if (!rig) return; clearInterval(t); _showOriginScreen(); }, 400);
+        }
       }
     }
     if (!fb) { if (first) update(ref(db, "players/" + user.uid + "/look"), game.state.look); return; }

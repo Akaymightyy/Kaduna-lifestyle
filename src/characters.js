@@ -58,13 +58,21 @@ function feminize(g, H, y0, z0) {
 }
 // split beard/moustache triangles (hair-material triangles around the chin/mouth) out of a hair geometry.
 // Returns { rest, beard } index arrays; the beard triangles get painted as SKIN for women (dropping them leaves holes).
+// The detection zone is widened from the original to catch mustache (higher), sideburns (wider),
+// and chin beard (lower) — the old thresholds missed too much facial hair on female characters.
 function splitBeard(g, H, y0, z0) {
   const pos = g.attributes.position, ix = g.index.array, keep = [], beard = [];
   for (let t = 0; t < ix.length; t += 3) {
     const a = ix[t], b = ix[t + 1], c = ix[t + 2];
-    const y = (pos.getY(a) + pos.getY(b) + pos.getY(c)) / 3, z = (pos.getZ(a) + pos.getZ(b) + pos.getZ(c)) / 3;
+    const y = (pos.getY(a) + pos.getY(b) + pos.getY(c)) / 3;
+    const z = (pos.getZ(a) + pos.getZ(b) + pos.getZ(c)) / 3;
+    const x = (pos.getX(a) + pos.getX(b) + pos.getX(c)) / 3;
     const u = (y - y0) / H;
-    (u > 0.80 && u < 0.93 && z > z0 - 0.045 * H ? beard : keep).push(a, b, c);
+    // Widened Y range: 0.76 to 0.96 (was 0.80 to 0.93) — catches mustache at top + chin beard at bottom.
+    // Widened Z threshold: z0 - 0.10 * H (was 0.045 * H) — catches more of the jaw/beard area.
+    // Added X limit: |x| < 0.12 * H — only the centre of the face (beard is narrow, side hair stays).
+    const isBeard = u > 0.76 && u < 0.96 && z > z0 - 0.10 * H && Math.abs(x) < 0.12 * H;
+    (isBeard ? beard : keep).push(a, b, c);
   }
   const mk = (arr) => new THREE.BufferAttribute(new (pos.count > 65535 ? Uint32Array : Uint16Array)(arr), 1);
   return { keep: mk(keep), beard: beard.length ? mk(beard) : null };
