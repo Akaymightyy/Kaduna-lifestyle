@@ -23,6 +23,7 @@ import * as river_park_mod from "./river_park.js";
 import * as church_mod from "./church.js";
 import * as barber_mod from "./barber.js";
 import * as nightclub_mod from "./nightclub.js";
+import * as home_mod from "./home.js";
 
 const MODULES = {
   central_market: central_market_mod,
@@ -38,6 +39,7 @@ const MODULES = {
   church: church_mod,
   barber: barber_mod,
   nightclub: nightclub_mod,
+  home: home_mod,
 };
 
 const PLACE_DEFS = [
@@ -324,6 +326,26 @@ const PLACE_DEFS = [
       { id: "buy_drink", label: "Buy a drink", desc: "Social +10 — ₦500" },
       { id: "socialize", label: "Socialize", desc: "Meet people — social +20" },
       { id: "vip", label: "Book VIP table", desc: "₦5000 — fun +40, social +30" },
+    ],
+  },
+  {
+    id: "home",
+    name: "My Home",
+    type: "interior",
+    worldX: -150, worldZ: 40,
+    entranceX: -150, entranceZ: 37,
+    entranceFacing: Math.PI,
+    minimapIcon: "🏠",
+    minimapColor: 0x2e7d4f,
+    hours: null,
+    ambientSound: null,
+    npcList: [],
+    activities: [
+      { id: "sleep", label: "Sleep (energy +40)", desc: "Rest in your bed" },
+      { id: "eat_home", label: "Eat from fridge (hunger +30)", desc: "Grab food from the fridge" },
+      { id: "tv", label: "Watch TV (fun +20)", desc: "Relax and watch TV" },
+      { id: "shower", label: "Shower (hygiene +30)", desc: "Freshen up" },
+      { id: "toilet", label: "Use toilet (bladder +40)", desc: "Relieve yourself" },
     ],
   },
 ];
