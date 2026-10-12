@@ -20,6 +20,7 @@ import { openCreator } from "./creator.js";
 import { outfitsFor, BUILDS, SHOP, SLOT_KEYS } from "./outfits.js";
 import { initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, getActivePlace, enterPlace, exitPlace, sendUIEvent } from "./places/manager.js";
 import { listPlaces, getPlace } from "./places/registry.js";
+import { initMissions, getActiveMission, getAllChapters, getDailyMissions, getWeeklyMissions, checkStep, createMissionState, claimDailyReward, claimWeeklyReward } from "./missions.js";
 
 const $ = (id) => document.getElementById(id);
 const showError = (m) => { const e = $("err"); e.style.display = "flex"; e.textContent = m; };
@@ -89,6 +90,8 @@ let mmDraw = createMinimap($("mm"), world.mapShapes);
 const ctl = createControls(canvas, camera, { joy: $("joy"), knob: $("knob") });
 const game = createGameState();
 const npcs = createNPCs(scene);
+const missionState = createMissionState();
+let _activeMission = null;
 
 // ---- day/night ----
 const SKY = [[0,0x0b1230,0.0,0.25,0x8899ff],[5,0x1b2548,0.0,0.3,0x8899ff],[6.5,0xf3a56b,0.9,0.7,0xffb070],[9,0x9fd4f5,1.8,1.0,0xfff2d6],[16,0x9fd4f5,1.8,1.0,0xfff2d6],[18,0xf08a5d,1.0,0.75,0xff9a5a],[19.5,0x2a2f55,0.1,0.35,0x8899ff],[24,0x0b1230,0.0,0.25,0x8899ff]];
@@ -213,6 +216,7 @@ function _showPhoneApp(appId) {
       {id:"ride",icon:"🛺",label:"Ride"},
       {id:"chat",icon:"💬",label:"Chat"},
       {id:"map",icon:"🗺️",label:"Map"},
+      {id:"missions",icon:"🎯",label:"Missions"},
       {id:"daily",icon:"🎁",label:"Daily"},
       {id:"health",icon:"💊",label:"Health"},
       {id:"richlist",icon:"🏆",label:"Rich List"},
@@ -438,6 +442,22 @@ function _showPhoneApp(appId) {
       if(el) el.innerHTML=list.length?list.map(([uid,p])=>{const nm=(p.name||"Player").replace(/'/g,"");return '<div style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid #eee;"><div style="width:32px;height:32px;background:var(--green);color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;">'+(p.name||"?").charAt(0).toUpperCase()+'</div><div style="flex:1;"><div style="font-size:13px;font-weight:600;">'+(p.name||"Unknown")+'</div><div style="font-size:10px;color:#999;">'+(p.x||0).toFixed(0)+', '+(p.z||0).toFixed(0)+'</div></div><button onclick="window.sendMessage(\''+uid+'\',\''+nm+'\')" style="background:var(--green);color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;">Wave 👋</button></div>';}).join(""):'<div style="text-align:center;padding:20px;color:#999;">No other players online right now.</div>';
     });
     return;
+  }
+  if(appId==="missions"){
+    const chapters=getAllChapters();const dailies=getDailyMissions();const weeklies=getWeeklyMissions();
+    let h='<div style="font-size:15px;margin-bottom:10px;font-weight:700;color:#f2f2f4;">🎯 Missions</div>';
+    h+='<div style="font-size:12px;font-weight:600;margin-bottom:6px;color:#f2b134;">📖 Story Chapters</div>';
+    for(const ch of chapters){const p=ch.progress;const isDone=p.done;const sn=p.step||0;const ts=ch.steps.length;const pct=isDone?100:Math.round((sn/ts)*100);const cs=ch.currentStep;
+      h+='<div style="background:#17181b;border-radius:10px;padding:10px;margin-bottom:8px;">';
+      h+='<div style="display:flex;justify-content:space-between;align-items:center;"><span style="font-size:13px;font-weight:700;color:'+(isDone?'#4ade80':'#f2f2f4')+';">'+(isDone?'✅ ':'')+'Ch '+ch.id.slice(-1)+': '+ch.title+'</span>'+(isDone?'<span style="font-size:10px;color:#4ade80;">Claimed</span>':'<span style="font-size:10px;color:#f2b134;">'+pct+'%</span>')+'</div>';
+      if(!isDone&&cs){h+='<div style="font-size:11px;color:#9b9ba4;margin-top:4px;">Step '+(sn+1)+'/'+ts+': '+cs.text+'</div><div style="height:4px;background:#26272b;border-radius:2px;margin-top:6px;overflow:hidden;"><div style="height:100%;width:'+pct+'%;background:#f2b134;border-radius:2px;"></div></div>';}
+      h+='<div style="font-size:10px;color:#6b7280;margin-top:4px;">Reward: ₦'+ch.reward.toLocaleString()+(ch.badge?' + "'+ch.badge+'"':'')+'</div></div>';
+    }
+    h+='<div style="font-size:12px;font-weight:600;margin:12px 0 6px;color:#f2b134;">📅 Daily Missions</div>';
+    for(const d of dailies){h+='<div style="background:#17181b;border-radius:8px;padding:8px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;"><span style="font-size:11px;color:'+(d.done?'#4ade80':'#f2f2f4')+';">'+(d.done?'✅':'⬜')+' '+d.text+'</span>'+(d.done?'<span style="font-size:10px;color:#4ade80;">+₦'+d.reward.toLocaleString()+'</span>':'<button onclick="window._claimDaily(\''+d.id+'\')" style="background:#f2b134;color:#000;border:none;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:10px;font-weight:600;">Claim ₦'+d.reward.toLocaleString()+'</button>')+'</div>';}
+    h+='<div style="font-size:12px;font-weight:600;margin:12px 0 6px;color:#f2b134;">🗓️ Weekly Missions</div>';
+    for(const w of weeklies){h+='<div style="background:#17181b;border-radius:8px;padding:8px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;"><span style="font-size:11px;color:'+(w.done?'#4ade80':'#f2f2f4')+';">'+(w.done?'✅':'⬜')+' '+w.text+'</span>'+(w.done?'<span style="font-size:10px;color:#4ade80;">+₦'+w.reward.toLocaleString()+'</span>':'<button onclick="window._claimWeekly(\''+w.id+'\')" style="background:#f2b134;color:#000;border:none;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:10px;font-weight:600;">Claim ₦'+w.reward.toLocaleString()+'</button>')+'</div>';}
+    h+=backBtn;c.innerHTML=h;return;
   }
   if(appId==="settings"){
     const s=game.state;
@@ -724,11 +744,23 @@ function _renderSheet(tab){
   }
 }
 window.openPhone=openPhone;
+// ---- Mission tracker + claim functions ----
+window._claimDaily=(id)=>claimDailyReward(id);
+window._claimWeekly=(id)=>claimWeeklyReward(id);
+function _updateMissionTracker(){
+  const el=$("qc-main");if(!el)return;
+  if(!_activeMission){el.querySelector(".qc-title").textContent="All Chapters Complete!";el.querySelector(".qc-desc").textContent="You're a City Legend! 🏆";return;}
+  if(_activeMission.isComplete){el.querySelector(".qc-title").textContent="🎉 "+_activeMission.chapter.title+" Complete!";el.querySelector(".qc-desc").textContent="Reward: ₦"+_activeMission.chapter.reward.toLocaleString();return;}
+  const ch=_activeMission.chapter;const step=_activeMission.step;const pct=Math.round((_activeMission.stepIdx/ch.steps.length)*100);
+  el.querySelector(".qc-icon").textContent="🎯";el.querySelector(".qc-title").textContent="Ch "+ch.id.slice(-1)+": "+ch.title+" ("+pct+"%)";el.querySelector(".qc-desc").textContent=step?step.text:"Complete!";
+}
 setTimeout(()=>{const t=$("tip");if(t)t.style.display="none";},15000);
 
 // ---- Auth + Multiplayer + Admin ----
 wireAuthUI();
 initAuth((user) => {
+  // ---- Init missions ----
+  initMissions(user.uid, (active) => { _activeMission = active; _updateMissionTracker(); });
   initMultiplayer(scene, (count) => {
     const el=$("online-count"); if(el) el.textContent=count+" here";
     const hudEl=$("online-count-hud"); if(hudEl) hudEl.textContent=count;
@@ -832,7 +864,7 @@ onValue(ref(db, "events"), (snap) => {
 
 // ---- Main loop ----
 const clock = new THREE.Clock();
-let mmT=0, hitCool=0, hudT=0;
+let mmT=0, hitCool=0, hudT=0, _missionCheckT=0;
 // ---- Automatic speed governor: if the phone is slow, lower quality step by step ----
 let _gAcc = 0, _gN = 0, _gLevel = 0, _gWarm = 0;
 function governor(raw) {
@@ -906,6 +938,10 @@ function frame() {
   if (active) { scene.background = INTERIOR_BG; scene.fog.color.copy(INTERIOR_BG); sun.intensity = 0; hemi.intensity = 0.8; _dayApplied = false; }
   renderer.shadowMap.autoUpdate = !active;   // no shadow pass inside buildings
   game.updateNeeds(dt);
+  // ---- Mission tracking ----
+  if(player.speed>0.5){missionState.totalDistance+=player.speed*dt;}
+  missionState.money=game.state.money;
+  _missionCheckT+=dt;if(_missionCheckT>2){_missionCheckT=0;checkStep(missionState);_updateMissionTracker();}
   hudT += dt; if (hudT > 0.5) { hudT = 0; updateHUD(); }
   if (!active) savePos(dt);
   sendPosition(player.pos.x, player.pos.z, player.heading);
