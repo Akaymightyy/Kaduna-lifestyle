@@ -1,6 +1,17 @@
 // src/admin.js — Admin dashboard logic (secure, mobile-friendly)
 import { auth, db } from "./firebase.js";
-import { ref, onValue, set, update, get, remove, push } from "firebase/database";
+import { ref, onValue as _onValue, set, update, get, remove, push } from "firebase/database";
+
+// onValue that SHOWS errors (e.g. Firebase rules blocking the read) instead of loading forever
+let _errShown = false;
+function onValue(r, cb) {
+  return _onValue(r, cb, (e) => {
+    console.error("[admin] read failed:", r.key, e);
+    if (_errShown) return; _errShown = true;
+    const msg = /permission/i.test(e?.message || "") ? "Firebase rules are blocking the admin from reading \"" + r.key + "\". Publish the rules from FIREBASE_RULES.json." : "Database error: " + (e?.message || e);
+    try { const d = document.createElement("div"); d.style.cssText = "position:fixed;left:12px;right:12px;bottom:16px;z-index:99999;background:#7f1d1d;color:#fff;padding:12px 14px;border-radius:10px;font:13px sans-serif"; d.textContent = "⚠ " + msg; document.body.appendChild(d); setTimeout(() => d.remove(), 12000); } catch (_) {}
+  });
+}
 import { onAuthStateChanged } from "firebase/auth";
 
 // Real admin credentials provided by the owner
