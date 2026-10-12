@@ -73,10 +73,14 @@ export async function signupEmail(email, pass, name, username) {
       try {
         await updateProfile(cred.user, { displayName: name });
       } catch (e) {}
-      // Save username + name to Firebase
+      // Save username + name to Firebase.
+      // IMPORTANT: use update() not set() — set() would wipe any existing fields
+      // on the player node (look, origin, homeTier, etc.) and would also race with
+      // the multiplayer module's own update() call. update() only patches the fields
+      // we actually want to set here.
       const uid = cred.user.uid;
       const dbRef = ref(db, "players/" + uid);
-      await set(dbRef, { name: name, username: username || name, x: -9, z: 11, heading: Math.PI, ts: Date.now() });
+      await update(dbRef, { name: name, username: username || name, x: -9, z: 11, heading: Math.PI, ts: Date.now() });
       // Also save to economy
       await update(ref(db, "economy/" + uid), { name: name, balance: 5000 });
     }

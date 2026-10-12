@@ -20,9 +20,12 @@ import { openCreator } from "./creator.js";
 import { outfitsFor, BUILDS, SHOP, SLOT_KEYS } from "./outfits.js";
 import { initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, getActivePlace, enterPlace, exitPlace, sendUIEvent } from "./places/manager.js";
 import { listPlaces, getPlace } from "./places/registry.js";
-import { initMissions, getActiveMission, getAllChapters, getDailyMissions, getWeeklyMissions, checkStep, createMissionState, claimDailyReward, claimWeeklyReward } from "./missions.js";
+import { initMissions, getActiveMission, getAllChapters, getDailyMissions, getWeeklyMissions, checkStep, createMissionState, claimDailyReward, claimWeeklyReward, setCelebrateCallback } from "./missions.js";
 import { FURNITURE_CATALOG, CATEGORIES, getItem, calcComfort } from "./furniture.js";
 import { ORIGINS, HOUSE_TIERS, getRentInfo, payRent, checkRentDue, applyOrigin, getOriginUI } from "./origins.js";
+import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
+import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
+import { celebrate } from "./celebrate.js";
 
 const $ = (id) => document.getElementById(id);
 const showError = (m) => { const e = $("err"); e.style.display = "flex"; e.textContent = m; };
@@ -228,6 +231,7 @@ function _showPhoneApp(appId) {
       {id:"realestate",icon:"🏡",label:"Houses"},
       {id:"homestore",icon:"🛋️",label:"HomeStore"},
       {id:"storage",icon:"📦",label:"Storage"},
+      {id:"hunt",icon:"💎",label:"Hunt"},
       {id:"boutique",icon:"👕",label:"Boutique"},
       {id:"myoutfits",icon:"👜",label:"My Outfits"},
       {id:"wardrobe",icon:"👔",label:"Wardrobe"},
@@ -235,7 +239,7 @@ function _showPhoneApp(appId) {
       {id:"settings",icon:"⚙️",label:"Settings"}
     ];
     if(isAdmin()) apps.push({id:"admin",icon:"🔐",label:"Admin"});
-    const COL={food:["#f59e0b","#f97316"],jobs:["#8b5cf6","#6366f1"],bank:["#3b82f6","#2563eb"],ride:["#10b981","#059669"],chat:["#22c55e","#16a34a"],map:["#06b6d4","#0891b2"],daily:["#ec4899","#db2777"],health:["#ef4444","#dc2626"],richlist:["#f59e0b","#d97706"],profile:["#6366f1","#4f46e5"],events:["#d946ef","#c026d3"],news:["#64748b","#475569"],boutique:["#d946ef","#a855f7"],myoutfits:["#f97316","#ea580c"],wardrobe:["#14b8a6","#0d9488"],contacts:["#6366f1","#818cf8"],settings:["#64748b","#475569"],admin:["#ef4444","#b91c1c"]};
+    const COL={food:["#f59e0b","#f97316"],jobs:["#8b5cf6","#6366f1"],bank:["#3b82f6","#2563eb"],ride:["#10b981","#059669"],chat:["#22c55e","#16a34a"],map:["#06b6d4","#0891b2"],daily:["#ec4899","#db2777"],health:["#ef4444","#dc2626"],richlist:["#f59e0b","#d97706"],profile:["#6366f1","#4f46e5"],events:["#d946ef","#c026d3"],news:["#64748b","#475569"],boutique:["#d946ef","#a855f7"],myoutfits:["#f97316","#ea580c"],wardrobe:["#14b8a6","#0d9488"],contacts:["#6366f1","#818cf8"],settings:["#64748b","#475569"],admin:["#ef4444","#b91c1c"],hunt:["#f2b134","#d97706"],missions:["#dc2626","#b91c1c"],realestate:["#16a34a","#15803d"],homestore:["#ea580c","#c2410c"],storage:["#0891b2","#0e7490"]};
     const now=new Date(), hh=String(now.getHours()).padStart(2,"0"), mm=String(now.getMinutes()).padStart(2,"0");
     const dateTxt=now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})+" · Kaduna";
     c.innerHTML='<div class="ph-home-clock">'+hh+':'+mm+'</div><div class="ph-home-date">'+dateTxt+'</div><div class="ph-home-bal"><span>₦'+(game.state.money||0).toLocaleString()+'</span></div>'+
@@ -534,6 +538,63 @@ function _showPhoneApp(appId) {
     }
     return;
   }
+  if(appId==="hunt"){
+    const stats = getHuntStats();
+    const spots = getAllSpotsWithState();
+    const myPos = player.pos;
+    // Sort spots by distance from the player so the nearest hints show first.
+    const withDist = spots.map((s) => {
+      const dx = s.x - myPos.x, dz = s.z - myPos.z;
+      return { ...s, dist: Math.sqrt(dx * dx + dz * dz) };
+    });
+    withDist.sort((a, b) => a.dist - b.dist);
+    let h = '<div style="font-size:15px;margin-bottom:8px;font-weight:700;color:#f2f2f4;">💎 Money Hunt</div>';
+    // Stats summary card
+    h += '<div style="background:#17181b;border-radius:10px;padding:10px;margin-bottom:10px;">';
+    h += '<div style="display:flex;justify-content:space-between;font-size:11px;color:#9b9ba4;margin-bottom:6px;"><span>Today</span><span><b style="color:#f2b134;">' + (stats.dayClaimCount || 0) + '</b>/' + stats.dayCap + '</span></div>';
+    h += '<div style="display:flex;justify-content:space-between;font-size:11px;color:#9b9ba4;margin-bottom:6px;"><span>Total found</span><span style="color:#f2f2f4;font-weight:600;">' + (stats.totalClaims || 0) + '</span></div>';
+    h += '<div style="display:flex;justify-content:space-between;font-size:11px;color:#9b9ba4;margin-bottom:6px;"><span>Rare finds</span><span style="color:#60a5fa;font-weight:600;">' + (stats.rareClaims || 0) + '</span></div>';
+    h += '<div style="display:flex;justify-content:space-between;font-size:11px;color:#9b9ba4;"><span>Jackpots</span><span style="color:#f2b134;font-weight:600;">' + (stats.jackpotClaims || 0) + '</span></div>';
+    h += '</div>';
+    // Achievements row
+    h += '<div style="font-size:12px;font-weight:600;margin:10px 0 6px;color:#f2b134;">🏅 Achievements</div>';
+    h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">';
+    for (const a of HUNT_ACHIEVEMENTS) {
+      const unlocked = !!stats["ach_" + a.id];
+      h += '<div title="' + a.desc + '" style="flex:1;min-width:80px;background:' + (unlocked ? '#1a2a1a' : '#17181b') + ';border:1px solid ' + (unlocked ? '#4ade80' : '#26272b') + ';border-radius:8px;padding:8px;text-align:center;">';
+      h += '<div style="font-size:20px;filter:' + (unlocked ? 'none' : 'grayscale(1)') + ';">' + a.icon + '</div>';
+      h += '<div style="font-size:10px;color:' + (unlocked ? '#4ade80' : '#6b7280') + ';margin-top:2px;font-weight:600;">' + a.name + '</div>';
+      h += '</div>';
+    }
+    h += '</div>';
+    // Hints list — only show hint for spots the player is close to (within 60m);
+    // the rest are shown as "???" so the hunt still requires exploration.
+    h += '<div style="font-size:12px;font-weight:600;margin:10px 0 6px;color:#f2b134;">🗺️ Hints (nearest first)</div>';
+    for (const s of withDist.slice(0, 8)) {
+      const r = RARITY[s.rarity];
+      const inRange = s.dist < 60;
+      const claimableNow = s.claimable;
+      const respawnMins = s.nextRespawnMs ? Math.ceil(s.nextRespawnMs / 60000) : 0;
+      h += '<div style="background:#17181b;border-left:3px solid #' + r.color.toString(16).padStart(6, '0') + ';border-radius:8px;padding:8px 10px;margin-bottom:6px;">';
+      h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">';
+      h += '<span style="font-size:11px;font-weight:600;color:#f2f2f4;">' + r.glyph + ' ' + (inRange ? s.area : '???') + '</span>';
+      h += '<span style="font-size:10px;color:#9b9ba4;">' + Math.round(s.dist) + 'm' + (claimableNow ? '' : ' · ⏳ ' + respawnMins + 'm') + '</span>';
+      h += '</div>';
+      if (inRange) {
+        h += '<div style="font-size:11px;color:#9b9ba4;font-style:italic;line-height:1.3;">"' + s.hint + '"</div>';
+        if (claimableNow && s.dist < 8) {
+          h += '<button onclick="window._claimSpot(\'' + s.id + '\')" style="margin-top:6px;width:100%;background:#f2b134;color:#000;border:none;border-radius:6px;padding:6px;cursor:pointer;font-size:11px;font-weight:600;">Claim ' + r.glyph + '</button>';
+        }
+      } else {
+        h += '<div style="font-size:11px;color:#6b7280;font-style:italic;">Walk closer to reveal the hint. Range: ' + Math.round(s.dist) + 'm away.</div>';
+      }
+      h += '</div>';
+    }
+    h += '<div style="font-size:10px;color:#6b7280;margin-top:10px;text-align:center;line-height:1.4;">💡 Listen for the beep — it speeds up as you get closer. Press <b>E</b> when you see the prompt to claim.</div>';
+    h += backBtn;
+    c.innerHTML = h;
+    return;
+  }
   if(appId==="missions"){
     const chapters=getAllChapters();const dailies=getDailyMissions();const weeklies=getWeeklyMissions();
     let h='<div style="font-size:15px;margin-bottom:10px;font-weight:700;color:#f2f2f4;">🎯 Missions</div>';
@@ -701,9 +762,9 @@ window._buyFurniture = async (itemId) => {
   if (game.state.money < it.price) { toast("Not enough money for " + it.name); return; }
   game.state.money -= it.price;
   game.save?.();
-  // Save money to Firebase
+  // Save money to Firebase — update() requires an object, not a number.
   const uid = getMyUid();
-  if (uid) update(ref(db, "economy/" + uid + "/balance"), game.state.money);
+  if (uid) update(ref(db, "economy/" + uid), { balance: game.state.money });
   // Add to storage in Firebase
   if (uid) {
     import("firebase/database").then(({ ref, get, set }) => {
@@ -729,12 +790,14 @@ window._buyHouse = async (tier, price, name) => {
   game.save?.();
   const uid = getMyUid();
   if (uid) {
-    update(ref(db, "economy/" + uid + "/balance"), game.state.money);
+    // update() requires an object, not a number — wrap balance in an object.
+    update(ref(db, "economy/" + uid), { balance: game.state.money });
     update(ref(db, "players/" + uid), { homeTier: tier });
   }
   missionState.lastAction = "buyHouse";
   updateHUD();
   toast("🎉 Bought " + name + "! Walk to 🏠 My Home to enter.");
+  celebrate("🏠 " + name, "Welcome to your new home!");
   showPhoneApp("realestate");
 };
 // ---- Pay rent ----
@@ -747,11 +810,19 @@ window._payRent = async () => {
 };
 // ---- Origin selection ----
 window._pickOrigin = (originId) => {
-  const r = applyOrigin(game.state, originId);
-  if (r.ok) {
+  // Wrap everything in try/finally so the sheet is ALWAYS dismissed even if a
+  // Firebase write throws synchronously (which was the previous bug: an invalid
+  // update() call aborted the function before the sheet could be removed).
+  try {
+    const r = applyOrigin(game.state, originId);
+    if (!r.ok) { toast(r.error || "Could not pick origin"); return; }
     const uid = getMyUid();
     if (uid) {
-      update(ref(db, "economy/" + uid + "/balance"), game.state.money);
+      // BUGFIX: previously this was `update(ref(db,"economy/"+uid+"/balance"), game.state.money)`
+      // — passing a NUMBER as the second arg to update(). update() requires an OBJECT,
+      // so it threw "values argument must be an object containing the children to replace"
+      // and the origin sheet never got removed. Wrap the value in an object.
+      update(ref(db, "economy/" + uid), { balance: game.state.money });
       update(ref(db, "players/" + uid), { homeTier: game.state.homeTier, origin: game.state.origin, lastRentPaid: game.state.lastRentPaid });
       if (r.origin.starterFurniture.length) {
         import("firebase/database").then(({ ref, get, set }) => {
@@ -762,24 +833,30 @@ window._pickOrigin = (originId) => {
               if (it) storage.push({ id: fid, color: it.colors[0] });
             }
             set(ref(db, "players/"+uid+"/storage"), storage);
-          });
-        });
+          }).catch((e) => console.warn("[origin] storage fetch failed", e));
+        }).catch((e) => console.warn("[origin] firebase import failed", e));
       }
     }
     toast("🎉 You chose " + r.origin.name + "! Check your Storage for starter items.");
-    updateHUD();
+    try { updateHUD(); } catch (e) { console.warn("[origin] updateHUD failed", e); }
+  } catch (e) {
+    console.error("[origin] _pickOrigin failed", e);
+    toast("Could not save your origin — try again.");
+  } finally {
+    // No matter what went wrong above, the sheet must close so the player can continue.
     document.getElementById("origin-sheet")?.remove();
-  } else {
-    toast(r.error);
   }
 };
 function _showOriginScreen() {
+  // Guard: if origin is already chosen (e.g. loaded from Firebase/localStorage
+  // after the creator's onDone scheduled this call), do not show the picker again.
+  if (game.state.origin) return;
   let el = document.getElementById("origin-sheet");
   if (el) el.remove();
   el = document.createElement("div");
   el.id = "origin-sheet";
   el.style.cssText = "position:fixed;inset:0;z-index:65;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;padding:16px;";
-  let h = '<div style="background:#0b0b0c;border-radius:20px;padding:24px;width:min(400px,92vw);max-height:80vh;overflow-y:auto;color:#f2f2f4;">';
+  let h = '<div style="background:#0b0b0c;border-radius:20px;padding:24px;width:min(400px,92vw);max-height:80vh;overflow-y:auto;color:#f2f2f4;position:relative;">';
   h += '<div style="font-size:20px;font-weight:800;text-align:center;margin-bottom:6px;">🌍 Choose Your Origin</div>';
   h += '<div style="font-size:12px;color:#9b9ba4;text-align:center;margin-bottom:16px;">Your origin determines your starting money, home, and playstyle. Choose wisely — this is permanent!</div>';
   for (const o of ORIGINS) {
@@ -797,6 +874,26 @@ function _showOriginScreen() {
   el.innerHTML = h;
   document.body.appendChild(el);
 }
+// ---- Money Hunt HUD update (called by moneyhunt.js after a successful claim) ----
+function _updateHuntHud() {
+  const stats = getHuntStats();
+  const gemCard = $("qc-gems");
+  if (gemCard) {
+    const title = gemCard.querySelector(".qc-title");
+    const desc = gemCard.querySelector(".qc-progress");
+    if (title) title.textContent = "💎 Money Hunt";
+    if (desc) {
+      const todayCount = stats.dayClaimCount || 0;
+      const total = stats.totalClaims || 0;
+      desc.textContent = `${todayCount}/${stats.dayCap} today · ${total} total found`;
+    }
+  }
+}
+window._triggerMoneyRain = triggerMoneyRain;
+window._claimSpot = (id) => {
+  const spot = SPOTS.find((s) => s.id === id);
+  if (spot) claimSpot(spot);
+};
 // ---- Check rent every 60 seconds ----
 let _rentCheckT = 0;
 function _tickRent(dt) {
@@ -1001,6 +1098,19 @@ wireAuthUI();
 initAuth((user) => {
   // ---- Init missions ----
   initMissions(user.uid, (active) => { _activeMission = active; _updateMissionTracker(); });
+  // Wire celebration overlay for chapter rewards.
+  setCelebrateCallback(celebrate);
+  // ---- Init Money Hunt (instanced meshes + Firebase spot listeners) ----
+  initMoneyHunt({
+    scene,
+    player: player.pos,   // Vector3 — moneyhunt reads .x / .z live
+    uid: user.uid,
+    toast,
+    updateHud: _updateHuntHud,
+    celebrate,
+  });
+  // Initial HUD refresh so the gem card shows real hunt stats right away.
+  _updateHuntHud();
   initMultiplayer(scene, (count) => {
     const el=$("online-count"); if(el) el.textContent=count+" here";
     const hudEl=$("online-count-hud"); if(hudEl) hudEl.textContent=count;
@@ -1062,6 +1172,21 @@ initAuth((user) => {
     game.state.look = { ...game.state.look, ...fb };
     game.save?.();
     if (rig?.recolor) rig.recolor(game.state.look);
+  });
+  // ---- Sync origin / housing / rent state from Firebase so a refresh on a new
+  // device (or after clearing localStorage) still remembers the player's chosen
+  // origin. Without this, the origin selector could reappear even after the
+  // player already picked one.
+  onValue(ref(db, "players/" + user.uid), (snap) => {
+    const p = snap.val() || {};
+    let changed = false;
+    if (p.origin && p.origin !== game.state.origin) { game.state.origin = p.origin; changed = true; }
+    if (p.homeTier != null && p.homeTier !== game.state.homeTier) { game.state.homeTier = p.homeTier; changed = true; }
+    if (p.lastRentPaid != null && p.lastRentPaid !== game.state.lastRentPaid) { game.state.lastRentPaid = p.lastRentPaid; changed = true; }
+    if (p.missedRent != null && p.missedRent !== game.state.missedRent) { game.state.missedRent = p.missedRent; changed = true; }
+    if (p.skillBonus != null && p.skillBonus !== game.state.skillBonus) { game.state.skillBonus = p.skillBonus; changed = true; }
+    if (p.weeklyDebt != null && p.weeklyDebt !== game.state.weeklyDebt) { game.state.weeklyDebt = p.weeklyDebt; changed = true; }
+    if (changed) { game.save?.(); updateHUD(); }
   });
 });
 initAdmin((user) => {
@@ -1184,6 +1309,8 @@ function frame() {
   _missionCheckT+=dt;if(_missionCheckT>2){_missionCheckT=0;checkStep(missionState);_updateMissionTracker();}
   _tickRent(dt);
   hudT += dt; if (hudT > 0.5) { hudT = 0; updateHUD(); }
+  // ---- Money Hunt tick: update instance positions + claim prompt ----
+  tickMoneyHunt(Date.now());
   if (!active) savePos(dt);
   sendPosition(player.pos.x, player.pos.z, player.heading);
   setMyPosition(player.pos.x, player.pos.z);

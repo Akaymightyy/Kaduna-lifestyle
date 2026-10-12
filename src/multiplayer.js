@@ -32,8 +32,13 @@ export function initMultiplayer(scene, onCount, onChat) {
     _uid=user.uid;
     _name=user.displayName||user.email?.split("@")[0]||("Guest"+Math.floor(Math.random()*9999));
     const pRef=ref(db,"players/"+_uid);
-    set(pRef,{name:_name,x:-9,z:11,heading:Math.PI,ts:serverTimestamp()});
-    onDisconnect(pRef).remove();
+    // IMPORTANT: use update() not set() — set() wipes the entire player node, deleting
+    // the saved look / origin / homeTier that other modules wrote. update() only patches
+    // the presence / position fields we actually own here.
+    update(pRef,{name:_name,x:-9,z:11,heading:Math.PI,ts:serverTimestamp(),online:true});
+    // Only clear the "online" flag on disconnect — do NOT remove the whole player node,
+    // otherwise look/origin/homeTier are lost between sessions.
+    onDisconnect(pRef).update({online:false,ts:serverTimestamp()});
     onValue(ref(db,"players"),(s)=>{ _players=s.val()||{}; delete _players[_uid]; updateAvatars(); _onCount?.(Object.keys(_players).length+1); });
     onValue(ref(db,"chat"),(s)=>{ const m=s.val()||{}; const a=Object.values(m).sort((x,y)=>(x.ts||0)-(y.ts||0)); if(a.length&&_onChat) _onChat(a[a.length-1],a.length); });
   });

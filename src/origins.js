@@ -92,7 +92,8 @@ export async function payRent(uid, state) {
   state.save?.();
   // Save to Firebase
   if (uid) {
-    update(ref(db, "economy/" + uid + "/balance"), state.money);
+    // update() requires an OBJECT, not a number — wrap balance in an object.
+    update(ref(db, "economy/" + uid), { balance: state.money });
     update(ref(db, "players/" + uid), { lastRentPaid: state.lastRentPaid, missedRent: 0 });
   }
   return { ok: true, msg: "✅ Rent paid: ₦" + info.amount.toLocaleString() + " for " + info.tier.name };

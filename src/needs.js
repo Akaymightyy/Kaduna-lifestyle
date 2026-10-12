@@ -34,7 +34,27 @@ export function createGameState() {
   }
 
   function save() {
-    try { localStorage.setItem(_storageKey(), JSON.stringify({ money: state.money, needs: state.needs, rank: state.rank, jobCooldown: state.jobCooldown, posX: state.posX, posZ: state.posZ, heading: state.heading, look: state.look })); } catch (e) {}
+    try {
+      localStorage.setItem(_storageKey(), JSON.stringify({
+        money: state.money,
+        needs: state.needs,
+        rank: state.rank,
+        jobCooldown: state.jobCooldown,
+        posX: state.posX,
+        posZ: state.posZ,
+        heading: state.heading,
+        look: state.look,
+        // Persist origin-related fields too so a page refresh keeps the player's
+        // chosen origin, housing tier, rent state, and skill bonuses. Without these,
+        // every refresh would forget the origin and re-prompt the origin selector.
+        origin: state.origin,
+        homeTier: state.homeTier,
+        lastRentPaid: state.lastRentPaid,
+        missedRent: state.missedRent,
+        skillBonus: state.skillBonus,
+        weeklyDebt: state.weeklyDebt,
+      }));
+    } catch (e) {}
   }
 
   // Called when Firebase sends us the real balance/look — overrides localStorage

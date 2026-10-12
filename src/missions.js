@@ -4,7 +4,7 @@
 // Saves to Firebase: players/{uid}/missions/{missionId} = { step, done, ts }
 
 import { db } from "./firebase.js";
-import { ref, get, set, update, onValue } from "firebase/database";
+import { ref, get, set, update, onValue, runTransaction } from "firebase/database";
 
 // ---- CHAPTER DEFINITIONS ----
 export const CHAPTERS = [
@@ -189,13 +189,24 @@ export function checkStep(gameState) {
 }
 
 async function claimChapterReward(ch) {
-  // Add reward money to Firebase
+  // Add reward money to Firebase via transaction (safer than get/set when two
+  // devices claim at the same time, or when an admin credits the same account).
   const balRef = ref(db, "economy/" + _uid + "/balance");
-  const snap = await get(balRef);
-  const cur = snap.val() || 0;
-  await set(balRef, cur + ch.reward);
+  try {
+    await runTransaction(balRef, (cur) => (cur || 0) + ch.reward);
+  } catch (e) {
+    console.warn("[missions] chapter reward balance update failed", e);
+  }
   toast(`🎉 ${ch.title} reward: ₦${ch.reward.toLocaleString()} + "${ch.badge}" badge!`);
+  // Fire the celebration overlay (if main.js wired it up).
+  if (typeof _celebrate === "function") _celebrate("🎉 " + ch.badge + "!", `Chapter "${ch.title}" complete · +₦${ch.reward.toLocaleString()}`);
 }
+
+// Optional celebration callback — main.js can set this so mission rewards trigger
+// the confetti overlay. Kept as a module-level let so missions.js has no hard
+// dependency on celebrate.js.
+let _celebrate = null;
+export function setCelebrateCallback(fn) { _celebrate = fn; }
 
 // Mark a daily/weekly mission as done
 export async function claimDailyReward(missionId) {
@@ -206,11 +217,10 @@ export async function claimDailyReward(missionId) {
   if (!mission) return;
   _missions[key] = { done: true, ts: Date.now() };
   await set(ref(db, "players/" + _uid + "/missions/" + key), _missions[key]);
-  // Add reward
-  const balRef = ref(db, "economy/" + _uid + "/balance");
-  const snap = await get(balRef);
-  const cur = snap.val() || 0;
-  await set(balRef, cur + mission.reward);
+  // Add reward via transaction (safe against concurrent claims/admin credits).
+  try {
+    await runTransaction(ref(db, "economy/" + _uid + "/balance"), (cur) => (cur || 0) + mission.reward);
+  } catch (e) { console.warn("[missions] daily reward balance update failed", e); }
   toast(`💰 Daily mission reward: ₦${mission.reward.toLocaleString()}`);
 }
 
@@ -222,10 +232,9 @@ export async function claimWeeklyReward(missionId) {
   if (!mission) return;
   _missions[key] = { done: true, ts: Date.now() };
   await set(ref(db, "players/" + _uid + "/missions/" + key), _missions[key]);
-  const balRef = ref(db, "economy/" + _uid + "/balance");
-  const snap = await get(balRef);
-  const cur = snap.val() || 0;
-  await set(balRef, cur + mission.reward);
+  try {
+    await runTransaction(ref(db, "economy/" + _uid + "/balance"), (cur) => (cur || 0) + mission.reward);
+  } catch (e) { console.warn("[missions] weekly reward balance update failed", e); }
   toast(`💰 Weekly mission reward: ₦${mission.reward.toLocaleString()}`);
 }
 
