@@ -214,6 +214,7 @@ function _showPhoneApp(appId) {
       {id:"jobs",icon:"💼",label:"Hustle"},
       {id:"bank",icon:"🏦",label:"Bank"},
       {id:"ride",icon:"🛺",label:"Ride"},
+      {id:"messages",icon:"✉️",label:"Messages"},
       {id:"chat",icon:"💬",label:"Chat"},
       {id:"map",icon:"🗺️",label:"Map"},
       {id:"missions",icon:"🎯",label:"Missions"},
@@ -432,6 +433,52 @@ function _showPhoneApp(appId) {
       backBtn;
     return;
   }
+  if(appId==="messages"){
+    // Messages app with Chats/Groups tabs
+    const myUid = getMyUid();
+    let h = '<div style="font-size:15px;margin-bottom:8px;font-weight:700;color:#f2f2f4;">✉️ Messages</div>';
+    h += '<div style="display:flex;gap:4px;margin-bottom:10px;"><button class="ph-tab-active" id="msg-tab-chats" style="flex:1;padding:8px;border:none;border-radius:8px;background:#f2b134;color:#000;font:600 12px Poppins,sans-serif;cursor:pointer;">Chats</button><button id="msg-tab-groups" style="flex:1;padding:8px;border:none;border-radius:8px;background:#17181b;color:#9b9ba4;font:600 12px Poppins,sans-serif;cursor:pointer;">Groups</button></div>';
+    h += '<div id="msg-list" style="font-size:12px;">Loading...</div>';
+    h += backBtn;
+    c.innerHTML = h;
+    // Load chats (DM list from Firebase)
+    onValue(ref(db, "players"), (snap) => {
+      const data = snap.val() || {};
+      const list = Object.entries(data).filter(([uid]) => uid !== myUid).slice(0, 30);
+      const el = document.getElementById("msg-list");
+      if (el) {
+        el.innerHTML = list.length ? list.map(([uid, p]) => {
+          const nm = (p.name || "Player").replace(/'/g, "");
+          return '<div onclick="window._openDM(\'' + uid + '\',\'' + nm + '\')" style="display:flex;align-items:center;gap:8px;padding:10px;background:#17181b;border-radius:10px;margin-bottom:4px;cursor:pointer;"><div style="width:36px;height:36px;background:#f2b134;color:#000;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;">' + (p.name || "?").charAt(0).toUpperCase() + '</div><div style="flex:1;"><div style="font-size:13px;font-weight:600;color:#f2f2f4;">' + (p.name || "Unknown") + '</div><div style="font-size:10px;color:#6b7280;">Tap to chat</div></div></div>';
+        }).join("") : '<div style="text-align:center;padding:20px;color:#6b7280;">No players online. Be the first!</div>';
+      }
+    });
+    // Tab switching
+    document.getElementById("msg-tab-chats").onclick = () => {
+      document.getElementById("msg-tab-chats").style.background = "#f2b134";
+      document.getElementById("msg-tab-chats").style.color = "#000";
+      document.getElementById("msg-tab-groups").style.background = "#17181b";
+      document.getElementById("msg-tab-groups").style.color = "#9b9ba4";
+      document.getElementById("msg-list").innerHTML = '<div style="text-align:center;padding:20px;color:#6b7280;">Loading chats...</div>';
+      onValue(ref(db, "players"), (snap) => {
+        const data = snap.val() || {};
+        const list = Object.entries(data).filter(([uid]) => uid !== myUid).slice(0, 30);
+        const el = document.getElementById("msg-list");
+        if (el) el.innerHTML = list.length ? list.map(([uid, p]) => {
+          const nm = (p.name || "Player").replace(/'/g, "");
+          return '<div onclick="window._openDM(\'' + uid + '\',\'' + nm + '\')" style="display:flex;align-items:center;gap:8px;padding:10px;background:#17181b;border-radius:10px;margin-bottom:4px;cursor:pointer;"><div style="width:36px;height:36px;background:#f2b134;color:#000;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;">' + (p.name || "?").charAt(0).toUpperCase() + '</div><div style="flex:1;"><div style="font-size:13px;font-weight:600;color:#f2f2f4;">' + (p.name || "Unknown") + '</div><div style="font-size:10px;color:#6b7280;">Tap to chat</div></div></div>';
+        }).join("") : '<div style="text-align:center;padding:20px;color:#6b7280;">No players online.</div>';
+      });
+    };
+    document.getElementById("msg-tab-groups").onclick = () => {
+      document.getElementById("msg-tab-groups").style.background = "#f2b134";
+      document.getElementById("msg-tab-groups").style.color = "#000";
+      document.getElementById("msg-tab-chats").style.background = "#17181b";
+      document.getElementById("msg-tab-chats").style.color = "#9b9ba4";
+      document.getElementById("msg-list").innerHTML = '<div style="text-align:center;padding:20px;color:#6b7280;">📋 Group chats coming soon! For now, use the global Chat app.</div>';
+    };
+    return;
+  }
   if(appId==="contacts"){
     c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">📲 Contacts</div><div id="contacts-list" style="font-size:12px;">Loading players...</div>'+backBtn;
     onValue(ref(db,"players"),(snap)=>{
@@ -549,8 +596,10 @@ window._openCreator = () => {
     onDone: async (L) => {
       game.state.look = L; game.save?.();
       const uid = getMyUid();
-      try { if (uid) await update(ref(db, "players/" + uid + "/look"), L); } catch (e) {}
-      if ((L.gender || "male") !== _loadedGender) location.reload(); // swap to the other body model
+      // Set localStorage flag so creator NEVER pops on refresh
+      if (uid) localStorage.setItem("kaduna-creator-done-" + uid, "1");
+      try { if (uid) await update(ref(db, "players/" + uid + "/look"), { ...L, created: true }); } catch (e) {}
+      if ((L.gender || "male") !== _loadedGender) location.reload();
       else toast("Welcome to Kaduna! 🎉");
     },
   });
@@ -598,6 +647,38 @@ window.travelToPlace=(placeId)=>{
 window.sendMessage=(uid,name)=>{
   sendChat("👋 Hi "+name+"!");
   toast("Waved at "+name);
+};
+// ---- Direct Messages (DM) ----
+window._openDM = (otherUid, otherName) => {
+  const c = $("phone-content");
+  const myUid = getMyUid();
+  const chatId = [myUid, otherUid].sort().join("_");
+  const backBtn = '<button class="ph-back" onclick="window.showApp(\'messages\')">← Back</button>';
+  c.innerHTML = backBtn + '<div style="font-size:15px;margin-bottom:8px;font-weight:700;color:#f2f2f4;">💬 ' + otherName + '</div><div id="dm-log" style="height:300px;overflow-y:auto;font-size:12px;margin-bottom:8px;border:1px solid #26272b;border-radius:8px;padding:8px;background:#0b0b0c;"></div><div style="display:flex;gap:4px;"><input id="dm-input" type="text" placeholder="Type message..." style="flex:1;padding:10px;background:#17181b;color:#f2f2f4;border:1.5px solid #2c2d32;border-radius:12px;font-family:inherit;font-size:13px;" /><button onclick="window._sendDM(\'' + otherUid + '\',\'' + chatId + '\')" style="background:#f2b134;color:#000;border:none;border-radius:12px;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;">Send</button></div>';
+  // Listen for DM messages
+  import("firebase/database").then(({ ref, onValue, push }) => {
+    onValue(ref(db, "dms/" + chatId), (snap) => {
+      const msgs = snap.val() || {};
+      const sorted = Object.values(msgs).sort((a, b) => (a.ts || 0) - (b.ts || 0));
+      const log = document.getElementById("dm-log");
+      if (log) {
+        log.innerHTML = sorted.length ? sorted.map(m => {
+          const isMe = m.uid === myUid;
+          return '<div style="padding:6px;margin-bottom:4px;background:' + (isMe ? "#1a3a2a" : "#1a1a2e") + ';border-radius:8px;max-width:80%;' + (isMe ? "margin-left:auto;" : "") + '"><b style="color:' + (isMe ? "#4ade80" : "#f2b134") + ';">' + m.name + ':</b> ' + m.text + '</div>';
+        }).join("") : '<div style="text-align:center;padding:20px;color:#6b7280;">No messages yet. Say hi!</div>';
+        log.scrollTop = log.scrollHeight;
+      }
+    });
+  });
+};
+window._sendDM = (otherUid, chatId) => {
+  const input = document.getElementById("dm-input");
+  if (!input || !input.value.trim()) return;
+  const text = input.value.trim().slice(0, 200);
+  input.value = "";
+  import("firebase/database").then(({ ref, push }) => {
+    push(ref(db, "dms/" + chatId), { uid: getMyUid(), name: getMyName() || "You", text, ts: Date.now() });
+  });
 };
 window.saveGame=()=>{game.save?.();toast("Game saved!");};
 window.logout=async()=>{ if(confirm("Log out of Kaduna Lifestyle?")){ await logout(); } };
@@ -803,21 +884,23 @@ initAuth((user) => {
   // ---- Also write player's name to economy node so admin shows it ----
   const playerName = user.displayName || user.email?.split("@")[0] || "Player";
   update(ref(db, "economy/" + user.uid), { name: playerName, balance: game.state.money });
-  // ---- Sync look across devices: the account's saved outfit in Firebase WINS over this device's local copy ----
+  // ---- Sync look across devices ----
+  // FIX: Use BOTH Firebase AND localStorage flag so creator NEVER pops on refresh.
+  // The creator should only show on FIRST sign-up, not every refresh.
   let _lookFirst = true;
+  const _creatorDone = localStorage.getItem("kaduna-creator-done-" + user.uid) === "1";
   onValue(ref(db, "players/" + user.uid + "/look"), (snap) => {
     const fb = snap.val();
     const first = _lookFirst; _lookFirst = false;
     if (first) {
-      // new account (no saved character yet) -> character creator after the world has loaded
-      const needCreate = !(fb && fb.created);
+      // Only open creator if: no localStorage flag AND no Firebase look.created
+      const needCreate = !_creatorDone && !(fb && fb.created);
       if (needCreate) {
         if (fb) game.state.look = { ...game.state.look, ...fb };
-        game.state.look.created = false;
         const t = setInterval(() => { if (!rig) return; clearInterval(t); window._openCreator(); }, 400);
       }
     }
-    if (!fb) { if (first) update(ref(db, "players/" + user.uid + "/look"), game.state.look); return; }
+    if (!fb) return;
     if (JSON.stringify(fb) === JSON.stringify(game.state.look)) return;
     game.state.look = { ...game.state.look, ...fb };
     game.save?.();
