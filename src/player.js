@@ -7,7 +7,7 @@ const _q = new THREE.Quaternion(), _ax = new THREE.Vector3();
 
 export async function loadPlayer(manager, scene, look) {
   // The player uses the same character as everybody else, with the saved look.
-  await loadCharacterBase(manager);
+  await loadCharacterBase(manager, look && look.gender);
   const ch = await createCharacter({ seed: 1, height: 1.8, look: look || {} });
   ch.group.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = true; } });
   scene.add(ch.group);

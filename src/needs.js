@@ -18,7 +18,7 @@ export function createGameState() {
     rank: "newcomer",
     jobCooldown: 0,
     lastUpdate: Date.now(),
-    look: { top: "#1f7a5a", bottom: "#2b3a55", skin: "#8a5a3c", hair: "#111111", shoes: "#222222", topStyle: "casual", bottomStyle: "trousers" },
+    look: { top: "#1f7a5a", bottom: "#2b3a55", skin: "#8a5a3c", hair: "#111111", shoes: "#222222", topStyle: "casual", bottomStyle: "trousers", gender: "male", build: "normal" },
   };
   // Load from UID-keyed localStorage (NOT shared between accounts)
   _loadFromStorage(state);

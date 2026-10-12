@@ -16,6 +16,8 @@ import { createNPCs } from "./npcs.js";
 import { initAdmin, showAdminDashboard, hideAdminDashboard, isAdmin, adminTab } from "./admin.js";
 import { checkDailyReward, getDailyStatus, claimQuestReward } from "./daily.js";
 import { ref, onValue, update } from "firebase/database";
+import { openCreator } from "./creator.js";
+import { outfitsFor, BUILDS } from "./outfits.js";
 import { initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, getActivePlace, enterPlace, exitPlace, sendUIEvent } from "./places/manager.js";
 import { listPlaces, getPlace } from "./places/registry.js";
 
@@ -402,7 +404,11 @@ function showPhoneApp(appId) {
     const shoeColours = ["#f2f2ee","#222222","#8a5a3c","#c0392b"];
     const swatch = (col, current, key) => '<div onclick="window._setLook(\''+key+'\',\''+col+'\')" style="width:28px;height:28px;border-radius:50%;background:'+col+';cursor:pointer;border:'+(current===col?'3px solid var(--green)':'1px solid #ddd')+';display:inline-block;margin:2px;"></div>';
     const styleCard = (label, val, key) => '<div onclick="window._setLook(\''+key+'\',\''+val+'\')" style="padding:6px 12px;background:'+(look[key]===val?'var(--green)':'var(--cream)')+';color:'+(look[key]===val?'#fff':'var(--green)')+';border-radius:8px;cursor:pointer;font-size:11px;font-weight:600;margin:2px;display:inline-block;">'+label+'</div>';
+    const gOn=(look.gender==="female")?"female":"male";
+    const pill=(label,on,fn)=>'<div onclick="'+fn+'" style="padding:6px 12px;background:'+(on?'var(--green)':'var(--cream)')+';color:'+(on?'#fff':'var(--green)')+';border-radius:8px;cursor:pointer;font-size:11px;font-weight:600;margin:2px;display:inline-block;">'+label+'</div>';
     c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">👕 Wardrobe</div>'+
+      '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">🧍 Character</div>'+pill("👦 Man",gOn==="male","window._setGender(\'male\')")+pill("👧 Woman",gOn==="female","window._setGender(\'female\')")+' '+BUILDS.map(b=>pill(b.label,(look.build||"normal")===b.id,"window._setLook(\'build\',\'"+b.id+"\')")).join("")+'</div>'+
+      '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">'+(gOn==="female"?"👗 Women\'s outfits":"👔 Men\'s outfits")+'</div>'+outfitsFor(gOn).map(o=>pill(o.name,look.outfitId===o.id,"window._setOutfit(\'"+o.id+"\')")).join("")+'</div>'+
       '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">🎨 Top Colour</div><div style="display:flex;flex-wrap:wrap;">'+colours.map(c=>swatch(c,look.top,"top")).join("")+'</div></div>'+
       '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">👖 Bottom Colour</div><div style="display:flex;flex-wrap:wrap;">'+colours.map(c=>swatch(c,look.bottom,"bottom")).join("")+'</div></div>'+
       '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">🧦 Shoes</div><div style="display:flex;flex-wrap:wrap;">'+shoeColours.map(c=>swatch(c,look.shoes,"shoes")).join("")+'</div></div>'+
@@ -474,6 +480,34 @@ window.buyClothing=(id,price,name)=>{
   game.state.needs.social=Math.min(100,(game.state.needs.social||0)+10);
   game.save?.(); updateHUD(); toast(name+" purchased! You look sharp.");
   showPhoneApp("boutique");
+};
+// ---- Character creator (after sign-up) + gender/build/outfit presets ----
+const _loadedGender = game.state.look.gender || "male";
+window._openCreator = () => {
+  window.closeSheet?.();
+  openCreator({
+    look: game.state.look,
+    onChange: (L) => { game.state.look = L; game.save?.(); if (rig?.recolor) rig.recolor(L); },
+    onDone: async (L) => {
+      game.state.look = L; game.save?.();
+      const uid = getMyUid();
+      try { if (uid) await update(ref(db, "players/" + uid + "/look"), L); } catch (e) {}
+      if ((L.gender || "male") !== _loadedGender) location.reload(); // swap to the other body model
+      else toast("Welcome to Kaduna! 🎉");
+    },
+  });
+};
+window._setOutfit = (id) => {
+  const o = outfitsFor(game.state.look.gender).find((x) => x.id === id); if (!o) return;
+  Object.assign(game.state.look, o, { outfitId: id });
+  window._setLook("outfitId", id);
+};
+window._setGender = async (g) => {
+  const l = game.state.look; if ((l.gender || "male") === g) return;
+  Object.assign(l, outfitsFor(g)[0], { gender: g, outfitId: outfitsFor(g)[0].id });
+  game.save?.();
+  const uid = getMyUid(); try { if (uid) await update(ref(db, "players/" + uid + "/look"), l); } catch (e) {}
+  location.reload();
 };
 // ---- Wardrobe: live colour/style change ----
 window._setLook=(key,val)=>{
@@ -703,8 +737,17 @@ initAuth((user) => {
   let _lookFirst = true;
   onValue(ref(db, "players/" + user.uid + "/look"), (snap) => {
     const fb = snap.val();
-    if (!fb) { if (_lookFirst) update(ref(db, "players/" + user.uid + "/look"), game.state.look); _lookFirst = false; return; }
-    _lookFirst = false;
+    const first = _lookFirst; _lookFirst = false;
+    if (first) {
+      // new account (no saved character yet) -> character creator after the world has loaded
+      const needCreate = !(fb && fb.created);
+      if (needCreate) {
+        if (fb) game.state.look = { ...game.state.look, ...fb };
+        game.state.look.created = false;
+        const t = setInterval(() => { if (!rig) return; clearInterval(t); window._openCreator(); }, 400);
+      }
+    }
+    if (!fb) { if (first) update(ref(db, "players/" + user.uid + "/look"), game.state.look); return; }
     if (JSON.stringify(fb) === JSON.stringify(game.state.look)) return;
     game.state.look = { ...game.state.look, ...fb };
     game.save?.();

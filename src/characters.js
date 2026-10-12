@@ -75,18 +75,36 @@ function mergeSkinned(model) {
   for (const m of made) parent.add(m);
 }
 
-export function loadCharacterBase(manager) {
-  if (!basePromise) {
-    basePromise = new GLTFLoader(manager).loadAsync("/models/male.glb").then((g) => {
-      const model = g.scene;
-      const box = new THREE.Box3().setFromObject(model);
-      const size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
-      baseInfo = { box, size, center };
-      try { mergeSkinned(model); } catch (e) { console.warn("character merge failed", e); }
-      return model;
-    });
+function loadOne(manager, url) {
+  return new GLTFLoader(manager).loadAsync(url).then((g) => {
+    const model = g.scene;
+    const box = new THREE.Box3().setFromObject(model);
+    const size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
+    model.userData.info = { box, size, center };
+    try { mergeSkinned(model); } catch (e) { console.warn("character merge failed", e); }
+    return model;
+  });
+}
+// gender "male" -> /models/male.glb. gender "female" -> /models/female.glb if you add one,
+// otherwise the male rig is reused with a slimmer build (src.userData.fallback = true).
+const _bases = {};
+export function loadCharacterBase(manager, gender = "male") {
+  const g = gender === "female" ? "female" : "male";
+  if (!_bases[g]) {
+    if (g === "female") {
+      _bases[g] = loadOne(manager, "/models/female.glb").catch(() => loadCharacterBase(manager, "male").then((m) => { m.userData.fallback = true; return m; }));
+    } else _bases[g] = loadOne(manager, "/models/male.glb");
   }
-  return basePromise;
+  return _bases[g];
+}
+
+// body build: slim / normal / big (applies to the model scale; the name tag is not affected)
+const BUILD = { slim: [0.9, 1.0], normal: [1.0, 1.0], big: [1.3, 1.0] };
+function applyBuild(model, look) {
+  const k = model.userData._k; if (!k) return;
+  const [w, h] = BUILD[look.build] || BUILD.normal;
+  const f = look.gender === "female" ? 0.93 : 1;
+  model.scale.set(k * w * f, k * h, k * w * f);
 }
 
 const _q = new THREE.Quaternion(), _ax = new THREE.Vector3(1, 0, 0);
@@ -157,7 +175,9 @@ function makeRig(group, model, baseY, pose = "stand") {
 /** Make one character. opts: { seed, height, outfit, pose, look } or individual colours.
  *  look = { top, bottom, skin, hair, shoes, topStyle, bottomStyle } */
 export async function createCharacter(opts = {}) {
-  const src = await loadCharacterBase();
+  const lk0 = (opts.look && opts.look.gender) || opts.gender || "male";
+  const src = await loadCharacterBase(null, lk0);
+  const info = src.userData.info;
   const R = rng((opts.seed ?? 1) * 7919 + 13);
   const pick = (arr) => arr[Math.floor(R() * arr.length)];
   const outfit = opts.outfit || (R() < 0.3 ? "kaftan" : "casual");
@@ -167,17 +187,18 @@ export async function createCharacter(opts = {}) {
   const skin = lk.skin || opts.skin || pick(SKINS);
   const hair = lk.hair || opts.hair || pick(HAIRS);
   const shoes = lk.shoes || opts.shoes || (R() < 0.5 ? "#f2f2ee" : "#222222");
-  const fullLook = { top, bottom, skin, hair, shoes, topStyle: lk.topStyle || outfit, bottomStyle: lk.bottomStyle || "trousers" };
+  const fullLook = { top, bottom, skin, hair, shoes, topStyle: lk.topStyle || outfit, bottomStyle: lk.bottomStyle || "trousers", gender: lk0, build: lk.build || "normal", created: !!lk.created };
 
   const model = cloneSkinned(src);
   const height = opts.height || 1.75;
-  const k = height / baseInfo.size.y;
-  model.scale.setScalar(k);
-  const baseY = -baseInfo.box.min.y * k;
-  model.position.set(-baseInfo.center.x * k, baseY, -baseInfo.center.z * k);
+  const k = height / info.size.y;
+  model.userData._k = k;
+  const baseY = -info.box.min.y * k;
+  model.position.set(-info.center.x * k, baseY, -info.center.z * k);
 
   model.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.frustumCulled = true; } });
   _applyLook(model, fullLook);
+  applyBuild(model, fullLook);
   const group = new THREE.Group();
   group.add(model);
   group.userData.look = fullLook;
@@ -189,6 +210,7 @@ export async function createCharacter(opts = {}) {
 export function recolorCharacter(ch, look) {
   if (!ch?.model) return;
   _applyLook(ch.model, look);
+  applyBuild(ch.model, look);
   if (ch.group) ch.group.userData.look = look;
 }
 
