@@ -18,18 +18,81 @@ const PART = { clothing: 0, skin: 2, hair: 3, shoes: 4 };
 // male.glb is split into ~240 tiny skinned meshes. Drawing 9 people = 2000+ draw calls (the lag).
 // Here they are merged ONCE into a handful of meshes: one "paintable" mesh (clothes/skin/hair/shoes
 // coloured per vertex) + one mesh per remaining material (eyes, brows...).
-function mergeSkinned(model) {
+// Drop vertices no triangle uses. The GLB shares ONE 11,862-vertex buffer between all 242 pieces, so merging
+// them without this made a 2,194,782-vertex mesh (26 MB of colours PER CHARACTER). After: ~10k vertices.
+function compactGeometry(g) {
+  const old = g.index.array, map = new Int32Array(g.attributes.position.count).fill(-1);
+  let n = 0;
+  for (let i = 0; i < old.length; i++) if (map[old[i]] < 0) map[old[i]] = n++;
+  const ng = new THREE.BufferGeometry();
+  for (const k of Object.keys(g.attributes)) {
+    const a = g.attributes[k], arr = new a.array.constructor(n * a.itemSize), sz = a.itemSize;
+    for (let v = 0; v < map.length; v++) { const t = map[v]; if (t >= 0) for (let c = 0; c < sz; c++) arr[t * sz + c] = a.array[v * sz + c]; }
+    ng.setAttribute(k, new THREE.BufferAttribute(arr, sz, a.normalized));
+  }
+  const ni = new (n > 65535 ? Uint32Array : Uint16Array)(old.length);
+  for (let i = 0; i < old.length; i++) ni[i] = map[old[i]];
+  ng.setIndex(new THREE.BufferAttribute(ni, 1));
+  return ng;
+}
+const _sm = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+const _gs = (x, c, w) => Math.exp(-(((x - c) / w) ** 2));
+// Feminine shape (waist, hips, bust, rear) applied to the bind-pose vertices. H = body height, y0 = feet, z0 = body centre.
+function feminize(g, H, y0, z0) {
+  const pos = g.attributes.position, nor = g.attributes.normal;
+  for (let i = 0; i < pos.count; i++) {
+    let x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const u = (y - y0) / H, ax = Math.abs(x) / H;
+    const torso = _sm(0.2, 0.13, ax);                       // only the trunk, not the arms
+    const waist = _gs(u, 0.615, 0.05) * torso, hips = _gs(u, 0.5, 0.065);
+    x *= 1 - 0.22 * waist + 0.2 * hips;                     // narrow waist, wide hips
+    z = z0 + (z - z0) * (1 - 0.1 * waist);
+    x *= 1 - 0.07 * _gs(u, 0.81, 0.05) * torso;             // slightly narrower shoulders
+    const dz = z - z0;
+    const bust = _gs(u, 0.715, 0.036) * _gs(Math.abs(x) / H, 0.05, 0.04) * _sm(0, 0.02 * H, dz);
+    const rear = _gs(u, 0.49, 0.042) * _gs(Math.abs(x) / H, 0.047, 0.045) * _sm(0, 0.02 * H, -dz);
+    z += bust * 0.058 * H - rear * 0.062 * H;
+    pos.setXYZ(i, x, y, z);
+    if (nor) { const nz = nor.getZ(i); nor.setZ(i, nz + (bust * 0.5 - rear * 0.5) * Math.sign(dz || 1) * 0); }
+  }
+}
+// split beard/moustache triangles (hair-material triangles around the chin/mouth) out of a hair geometry.
+// Returns { rest, beard } index arrays; the beard triangles get painted as SKIN for women (dropping them leaves holes).
+function splitBeard(g, H, y0, z0) {
+  const pos = g.attributes.position, ix = g.index.array, keep = [], beard = [];
+  for (let t = 0; t < ix.length; t += 3) {
+    const a = ix[t], b = ix[t + 1], c = ix[t + 2];
+    const y = (pos.getY(a) + pos.getY(b) + pos.getY(c)) / 3, z = (pos.getZ(a) + pos.getZ(b) + pos.getZ(c)) / 3;
+    const u = (y - y0) / H;
+    (u > 0.80 && u < 0.93 && z > z0 - 0.045 * H ? beard : keep).push(a, b, c);
+  }
+  const mk = (arr) => new THREE.BufferAttribute(new (pos.count > 65535 ? Uint32Array : Uint16Array)(arr), 1);
+  return { keep: mk(keep), beard: beard.length ? mk(beard) : null };
+}
+
+function mergeSkinned(model, opts = {}) {
   const skinned = [];
   model.traverse((o) => { if (o.isSkinnedMesh) skinned.push(o); });
   if (skinned.length < 2) return;
   // the main body mesh owns the OUTERMOST copy of the skeleton (the one the posing code moves)
   const ref = skinned.reduce((a, m) => (m.geometry.attributes.position.count > a.geometry.attributes.position.count ? m : a), skinned[0]), refBones = ref.skeleton.bones;
   const idx = new Map(refBones.map((b, i) => [b.name, i]));
-  const paint = [], others = new Map();
+  const paint = [], others = new Map(), skinFill = [];
+  ref.geometry.computeBoundingBox();
+  const RB = ref.geometry.boundingBox, BY0 = RB.min.y, BH = Math.max(1e-6, RB.max.y - RB.min.y), BZ0 = (RB.min.z + RB.max.z) / 2;
   for (const m of skinned) {
-    const g = m.geometry.clone();
+    let g = m.geometry.clone();
     g.morphAttributes = {}; g.morphTargetsRelative = false;
     if (!g.index) { const c = g.attributes.position.count, ix = new (c > 65535 ? Uint32Array : Uint16Array)(c); for (let i = 0; i < c; i++) ix[i] = i; g.setIndex(new THREE.BufferAttribute(ix, 1)); }
+    g = compactGeometry(g);
+    if (opts.female) {
+      feminize(g, BH, BY0, BZ0);
+      if (((Array.isArray(m.material) ? m.material[0] : m.material).name || "").toLowerCase().includes("hair")) {
+        const sp = splitBeard(g, BH, BY0, BZ0);
+        if (sp.beard) { const bg = g.clone(); bg.setIndex(sp.beard); skinFill.push(compactGeometry(bg)); }
+        g.setIndex(sp.keep);
+      }
+    }
     // remap bone indices into the reference skeleton (matched by bone name)
     if (m.skeleton !== ref.skeleton) {
       const map = m.skeleton.bones.map((b) => idx.get(b.name) ?? 0);
@@ -40,18 +103,25 @@ function mergeSkinned(model) {
     const n = (mats[0].name || "").toLowerCase();
     const part = Object.keys(PART).find((k) => n.includes(k));
     if (part && mats.length === 1) {
-      g.computeBoundingBox();
-      const y0 = g.boundingBox.min.y, y1 = g.boundingBox.max.y, pos = g.attributes.position;
+      const y0 = BY0, y1 = BY0 + BH, pos = g.attributes.position;
       const hy = new Float32Array(pos.count), pt = new Float32Array(pos.count);
       for (let i = 0; i < pos.count; i++) { hy[i] = (pos.getY(i) - y0) / Math.max(1e-6, y1 - y0); pt[i] = PART[part]; }
       g.setAttribute("hy", new THREE.BufferAttribute(hy, 1)); g.setAttribute("part", new THREE.BufferAttribute(pt, 1));
       for (const k of Object.keys(g.attributes)) if (!["position", "normal", "skinIndex", "skinWeight", "hy", "part"].includes(k)) g.deleteAttribute(k);
       paint.push(g);
     } else {
-      const key = mats[0].uuid;
-      if (!others.has(key)) others.set(key, { mat: mats[0], geos: [] });
+      let key = mats[0].uuid, om = mats[0];
+      if (opts.female && n.includes("lips")) { key = "lips-f"; om = om.clone(); om.color = new THREE.Color("#8f3a47"); }   // lips are near-black on the male model
+      if (!others.has(key)) others.set(key, { mat: om, geos: [] });
       others.get(key).geos.push(g);
     }
+  }
+  for (const bg of skinFill) {                         // women: former beard area becomes skin
+    const pos = bg.attributes.position, hy = new Float32Array(pos.count), pt = new Float32Array(pos.count).fill(PART.skin);
+    for (let i = 0; i < pos.count; i++) hy[i] = (pos.getY(i) - BY0) / BH;
+    bg.setAttribute("hy", new THREE.BufferAttribute(hy, 1)); bg.setAttribute("part", new THREE.BufferAttribute(pt, 1));
+    for (const k of Object.keys(bg.attributes)) if (!["position", "normal", "skinIndex", "skinWeight", "hy", "part"].includes(k)) bg.deleteAttribute(k);
+    paint.push(bg);
   }
   const parent = ref.parent || model;
   const add = (geos, mat, name) => {
@@ -75,13 +145,13 @@ function mergeSkinned(model) {
   for (const m of made) parent.add(m);
 }
 
-function loadOne(manager, url) {
+function loadOne(manager, url, opts = {}) {
   return new GLTFLoader(manager).loadAsync(url).then((g) => {
     const model = g.scene;
     const box = new THREE.Box3().setFromObject(model);
     const size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
     model.userData.info = { box, size, center };
-    try { mergeSkinned(model); } catch (e) { console.warn("character merge failed", e); }
+    try { mergeSkinned(model, opts); } catch (e) { console.warn("character merge failed", e); }
     return model;
   });
 }
@@ -92,7 +162,7 @@ export function loadCharacterBase(manager, gender = "male") {
   const g = gender === "female" ? "female" : "male";
   if (!_bases[g]) {
     if (g === "female") {
-      _bases[g] = loadOne(manager, "/models/female.glb").catch(() => loadCharacterBase(manager, "male").then((m) => { m.userData.fallback = true; return m; }));
+      _bases[g] = loadOne(manager, "/models/female.glb").catch(() => loadOne(manager, "/models/male.glb", { female: true }).then((m) => { m.userData.fallback = true; return m; }));
     } else _bases[g] = loadOne(manager, "/models/male.glb");
   }
   return _bases[g];
@@ -119,6 +189,20 @@ function applyAccessories(model, look) {
     mesh.scale.setScalar(1 / sc); mesh.position.set(0, offY / sc, 0); if (rotX) mesh.rotation.x = rotX;
     bone.add(mesh);
   };
+  const bs = look.bottomStyle;
+  if (bs === "skirt" || bs === "gown") {            // skirt to the knee, gown almost to the floor (attached to the hips)
+    const long = bs === "gown", hem = long ? 0.82 : 0.5, r1 = long ? 0.38 : 0.31;
+    const pts = [[0.17, 0.12], [0.185, 0.02], [0.23, -0.22], [r1 * 0.85, -hem * 0.7], [r1, -hem]].map(([x, y]) => new THREE.Vector2(x, y));
+    const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(long ? look.top : look.bottom), roughness: 0.85, side: THREE.DoubleSide });
+    attach("Hips", new THREE.Mesh(new THREE.LatheGeometry(pts, 24), mat), 0.0, 0);
+  }
+  if (look.gender === "female" && w.head !== "kufi") {  // long hair
+    const hm = new THREE.MeshStandardMaterial({ color: new THREE.Color(look.hair || "#111111"), roughness: 0.9 });
+    const cg = new THREE.SphereGeometry(1, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2); cg.scale(0.116, 0.12, 0.122); cg.translate(0, 0.15, -0.012);
+    const bg = new THREE.SphereGeometry(1, 14, 10); bg.scale(0.112, 0.2, 0.05); bg.translate(0, 0.02, -0.092);
+    attach("Head", new THREE.Mesh(cg, hm), 0, 0);
+    attach("Head", new THREE.Mesh(bg, hm), 0, 0);
+  }
   if (w.head === "kufi") {
     const g = new THREE.CylinderGeometry(0.088, 0.1, 0.085, 20);
     attach("Head", new THREE.Mesh(g, ACC_MAT.kufi), 0.215, 0);
@@ -132,7 +216,7 @@ function applyAccessories(model, look) {
 function applyBuild(model, look) {
   const k = model.userData._k; if (!k) return;
   const [w, h] = BUILD[look.build] || BUILD.normal;
-  const f = look.gender === "female" ? 0.93 : 1;
+  const f = look.gender === "female" ? 0.97 : 1;
   model.scale.set(k * w * f, k * h, k * w * f);
 }
 
@@ -250,6 +334,8 @@ function _applyLook(model, look) {
   const skin = new THREE.Color(look.skin || "#8a5a3c"), hair = new THREE.Color(look.hair || "#111111");
   const shoes = new THREE.Color(look.shoes || "#222222");
   const kaftan = look.topStyle === "kaftan";
+  if (look.bottomStyle === "skirt") bottom.copy(skin);      // bare legs under a skirt
+  if (look.bottomStyle === "gown") bottom.copy(top);        // long gown covers the legs
   const hipFrac = kaftan ? 0.32 : 0.5;
   const cols = [top, bottom, null, hair, shoes];
   model.traverse((o) => {
