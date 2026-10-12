@@ -1,5 +1,5 @@
 // src/auth.js — Firebase Auth (Guest, Google, Email/Password) + Admin quick-login
-import { auth, authPersistReady } from "./firebase.js";
+import { auth, authPersistReady, db } from "./firebase.js";
 import {
   signInAnonymously,
   signInWithPopup,
@@ -8,7 +8,9 @@ import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
   signOut,
+  updateProfile,
 } from "firebase/auth";
+import { ref, set, update } from "firebase/database";
 
 let _onAuth = null;
 
@@ -63,9 +65,21 @@ export async function loginEmail(email, pass) {
   }
 }
 
-export async function signupEmail(email, pass) {
+export async function signupEmail(email, pass, name, username) {
   try {
-    await createUserWithEmailAndPassword(auth, email, pass);
+    const cred = await createUserWithEmailAndPassword(auth, email, pass);
+    // Update the user's display name with their chosen name
+    if (name && cred.user) {
+      try {
+        await updateProfile(cred.user, { displayName: name });
+      } catch (e) {}
+      // Save username + name to Firebase
+      const uid = cred.user.uid;
+      const dbRef = ref(db, "players/" + uid);
+      await set(dbRef, { name: name, username: username || name, x: -9, z: 11, heading: Math.PI, ts: Date.now() });
+      // Also save to economy
+      await update(ref(db, "economy/" + uid), { name: name, balance: 5000 });
+    }
   } catch (e) {
     toast(friendly(e, "Could not create account"));
   }
@@ -107,22 +121,49 @@ function toast(msg) {
 
 export function wireAuthUI() {
   document.getElementById("auth-google")?.addEventListener("click", loginGoogle);
-  document.getElementById("auth-login-btn")?.addEventListener("click", () => {
+
+  // Mode toggle: "login" or "signup"
+  let _mode = "login";
+  const nameField = document.getElementById("auth-name");
+  const usernameField = document.getElementById("auth-username");
+  const loginBtn = document.getElementById("auth-login-btn");
+  const signupBtn = document.getElementById("auth-signup-btn");
+
+  function setMode(m) {
+    _mode = m;
+    if (m === "signup") {
+      if (nameField) nameField.style.display = "block";
+      if (usernameField) usernameField.style.display = "block";
+      if (signupBtn) { signupBtn.classList.add("on"); loginBtn.classList.remove("on"); }
+    } else {
+      if (nameField) nameField.style.display = "none";
+      if (usernameField) usernameField.style.display = "none";
+      if (signupBtn) { signupBtn.classList.remove("on"); loginBtn.classList.add("on"); }
+    }
+  }
+
+  loginBtn?.addEventListener("click", () => {
+    if (_mode !== "login") { setMode("login"); return; }
     const e = document.getElementById("auth-email")?.value;
     const p = document.getElementById("auth-pass")?.value;
     if (e && p) loginEmail(e, p);
   });
-  document.getElementById("auth-signup-btn")?.addEventListener("click", () => {
+  signupBtn?.addEventListener("click", () => {
+    if (_mode !== "signup") { setMode("signup"); return; }
     const e = document.getElementById("auth-email")?.value;
     const p = document.getElementById("auth-pass")?.value;
-    if (e && p) signupEmail(e, p);
+    const n = document.getElementById("auth-name")?.value;
+    const u = document.getElementById("auth-username")?.value;
+    if (!n || !n.trim()) { toast("Enter your name"); return; }
+    if (!u || !u.trim()) { toast("Enter a username"); return; }
+    if (e && p && n) signupEmail(e, p, n.trim(), u.trim());
   });
-  // Enter key on password field triggers login
   document.getElementById("auth-pass")?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       const em = document.getElementById("auth-email")?.value;
       const pw = document.getElementById("auth-pass")?.value;
-      if (em && pw) loginEmail(em, pw);
+      if (_mode === "login" && em && pw) loginEmail(em, pw);
+      else if (_mode === "signup") { signupBtn?.click(); }
     }
   });
 }

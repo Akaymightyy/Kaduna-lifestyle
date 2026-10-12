@@ -523,8 +523,10 @@ function _showPhoneApp(appId) {
           el.innerHTML = storage.map((s, i) => {
             const it = getItem(s.id);
             if (!it) return '';
-            return '<div style="display:flex;align-items:center;gap:8px;padding:10px;background:#17181b;border-radius:10px;margin-bottom:6px;"><span style="font-size:24px;">'+it.emoji+'</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;color:#f2f2f4;">'+it.name+'</div><div style="font-size:10px;color:#9b9ba4;">Comfort +'+it.comfort+' · '+it.w+'×'+it.d+'</div></div><span style="width:16px;height:16px;border-radius:50%;background:'+(s.color||it.colors[0])+';border:1px solid #333;"></span></div>';
+            return '<div style="display:flex;align-items:center;gap:8px;padding:10px;background:#17181b;border-radius:10px;margin-bottom:6px;"><span style="font-size:24px;">'+it.emoji+'</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;color:#f2f2f4;">'+it.name+'</div><div style="font-size:10px;color:#9b9ba4;">Comfort +'+it.comfort+' · '+it.w+'×'+it.d+'</div></div><button onclick="window._placeInRoom('+i+')" style="background:#f2b134;color:#000;border:none;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:11px;font-weight:600;">📍 Place</button></div>';
           }).join("");
+          // Store storage globally for place function
+          window._storageCache = storage;
         });
       });
     }
@@ -730,6 +732,40 @@ window._buyHouse = async (tier, price, name) => {
   updateHUD();
   toast("🎉 Bought " + name + "! Walk to 🏠 My Home to enter.");
   showPhoneApp("realestate");
+};
+// ---- Place furniture from storage into home ----
+window._placeInRoom = (storageIdx) => {
+  const storage = window._storageCache || [];
+  const item = storage[storageIdx];
+  if (!item) return;
+  const it = getItem(item.id);
+  if (!it) return;
+  // Close phone, enter home if not already inside
+  closePhone();
+  const active = getActivePlace();
+  if (!active || active.id !== "home") {
+    toast("Go to your home first, then place furniture!");
+    // Travel to home entrance
+    const homeDef = getPlace("home");
+    if (homeDef) {
+      player.pos.set(homeDef.entranceX, 0, homeDef.entranceZ);
+      player.heading = homeDef.entranceFacing;
+      toast("Walked to your home. Press E to enter, then place furniture.");
+    }
+    return;
+  }
+  // Send place event to the home
+  sendUIEvent("place_furniture", { id: item.id, color: item.color || it.colors[0], x: 0, z: 0, rot: 0 });
+  // Remove from storage
+  storage.splice(storageIdx, 1);
+  window._storageCache = storage;
+  const uid = getMyUid();
+  if (uid) {
+    import("firebase/database").then(({ ref, set }) => {
+      set(ref(db, "players/"+uid+"/storage"), storage);
+    });
+  }
+  toast("📍 " + it.name + " placed in your room! Walk around to see it.");
 };
 window.logout=async()=>{ if(confirm("Log out of Kaduna Lifestyle?")){ await logout(); } };
 window.resetGame=()=>{
