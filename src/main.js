@@ -202,7 +202,7 @@ function openPhone(){$("phone-modal").classList.add("show");showPhoneApp("home")
 function closePhone(){$("phone-modal").classList.remove("show");}
 window.closePhone=closePhone;
 
-function showPhoneApp(appId) {
+function _showPhoneApp(appId) {
   const c=$("phone-content");
   const backBtn='<button onclick="window.showApp(\'home\')" style="margin-top:14px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;font-weight:600;">← Back to Phone</button>';
   if(appId==="home"){
@@ -226,9 +226,12 @@ function showPhoneApp(appId) {
       {id:"settings",icon:"⚙️",label:"Settings"}
     ];
     if(isAdmin()) apps.push({id:"admin",icon:"🔐",label:"Admin"});
-    // header
-    const head='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid #ddd;"><div><div style="font-size:11px;color:#666;">Welcome back,</div><div style="font-size:14px;font-weight:700;color:var(--green);">'+(getMyName()||"Player")+'</div></div><div style="text-align:right;"><div style="font-size:11px;color:#666;">Balance</div><div style="font-size:14px;font-weight:700;color:var(--green);">₦'+game.state.money.toLocaleString()+'</div></div></div>';
-    c.innerHTML=head+'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">'+apps.map(a=>'<button onclick="window.showApp(\''+a.id+'\')" style="background:var(--cream);border:2px solid var(--green);border-radius:12px;padding:14px 6px;cursor:pointer;font-family:inherit;"><div style="font-size:26px;">'+a.icon+'</div><div style="font-size:11px;color:var(--green);font-weight:600;margin-top:4px;">'+a.label+'</div></button>').join("")+'</div>';
+    const COL={food:["#f59e0b","#f97316"],jobs:["#8b5cf6","#6366f1"],bank:["#3b82f6","#2563eb"],ride:["#10b981","#059669"],chat:["#22c55e","#16a34a"],map:["#06b6d4","#0891b2"],daily:["#ec4899","#db2777"],health:["#ef4444","#dc2626"],richlist:["#f59e0b","#d97706"],profile:["#6366f1","#4f46e5"],events:["#d946ef","#c026d3"],news:["#64748b","#475569"],boutique:["#d946ef","#a855f7"],myoutfits:["#f97316","#ea580c"],wardrobe:["#14b8a6","#0d9488"],contacts:["#6366f1","#818cf8"],settings:["#64748b","#475569"],admin:["#ef4444","#b91c1c"]};
+    const now=new Date(), hh=String(now.getHours()).padStart(2,"0"), mm=String(now.getMinutes()).padStart(2,"0");
+    const dateTxt=now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})+" · Kaduna";
+    c.innerHTML='<div class="ph-home-clock">'+hh+':'+mm+'</div><div class="ph-home-date">'+dateTxt+'</div><div class="ph-home-bal"><span>₦'+(game.state.money||0).toLocaleString()+'</span></div>'+
+      '<div class="ph-grid">'+apps.map(a=>{const k=COL[a.id]||["#64748b","#475569"];return '<button class="ph-app" onclick="window.showApp(\''+a.id+'\')"><div class="ph-ic" style="background:linear-gradient(145deg,'+k[0]+','+k[1]+')">'+a.icon+'</div>'+a.label+'</button>';}).join("")+'</div>';
+    const pt=$("phone-time"); if(pt) pt.textContent=hh+':'+mm;
     return;
   }
   if(appId==="food"){
@@ -463,6 +466,12 @@ function showPhoneApp(appId) {
   }
   // fallback (shouldn't reach here)
   c.innerHTML='<div style="padding:20px;text-align:center;color:#666;font-size:13px;">App "'+appId+'" not found.</div>'+backBtn;
+}
+function showPhoneApp(appId){
+  _showPhoneApp(appId);
+  const c=$("phone-content"); if(!c) return;
+  if(appId!=="home" && !c.querySelector(".ph-back")) c.insertAdjacentHTML("afterbegin",'<button class="ph-back" onclick="window.showApp(\'home\')">← Back</button>');
+  c.scrollTop=0;
 }
 window.showApp=showPhoneApp;
 window.buyFood=(id)=>{const r=game.eat(id);toast(r.msg||r.error);updateHUD();if(r.ok)showPhoneApp("food");};
