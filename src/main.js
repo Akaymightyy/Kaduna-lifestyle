@@ -479,6 +479,8 @@ window.buyClothing=(id,price,name)=>{
 window._setLook=(key,val)=>{
   game.state.look[key]=val;
   game.save?.();
+  // push to the account right away so your other devices follow
+  clearTimeout(window._lookT); window._lookT=setTimeout(()=>{const u=getMyUid(); if(u) update(ref(db,"players/"+u+"/look"),game.state.look).catch(()=>{});},400);
   // Apply live to player model (no reload)
   if(rig?.recolor) rig.recolor(game.state.look);
   // Refresh the wardrobe UI to highlight the new selection
@@ -697,8 +699,17 @@ initAuth((user) => {
   // ---- Also write player's name to economy node so admin shows it ----
   const playerName = user.displayName || user.email?.split("@")[0] || "Player";
   update(ref(db, "economy/" + user.uid), { name: playerName, balance: game.state.money });
-  // ---- Sync look: save to Firebase so other players see it ----
-  update(ref(db, "players/" + user.uid + "/look"), game.state.look);
+  // ---- Sync look across devices: the account's saved outfit in Firebase WINS over this device's local copy ----
+  let _lookFirst = true;
+  onValue(ref(db, "players/" + user.uid + "/look"), (snap) => {
+    const fb = snap.val();
+    if (!fb) { if (_lookFirst) update(ref(db, "players/" + user.uid + "/look"), game.state.look); _lookFirst = false; return; }
+    _lookFirst = false;
+    if (JSON.stringify(fb) === JSON.stringify(game.state.look)) return;
+    game.state.look = { ...game.state.look, ...fb };
+    game.save?.();
+    if (rig?.recolor) rig.recolor(game.state.look);
+  });
 });
 initAdmin((user) => {
   toast("Admin access detected — welcome, " + (user.email || "Admin"));
@@ -826,6 +837,7 @@ function frame() {
 Promise.all([loadPlayer(manager, scene, game.state.look), addCity(scene, world, manager)]).then(([r]) => {
   mmDraw = createMinimap($("mm"), world.mapShapes);
   rig = r; rig.group.castShadow = true;
+  if (rig.recolor) rig.recolor(game.state.look); // in case the account outfit arrived while loading
   setProgress(1);
   ctl.yaw = player.heading + Math.PI;
   updateHUD();
