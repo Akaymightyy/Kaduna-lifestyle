@@ -100,6 +100,35 @@ export function loadCharacterBase(manager, gender = "male") {
 
 // body build: slim / normal / big (applies to the model scale; the name tag is not affected)
 const BUILD = { slim: [0.9, 1.0], normal: [1.0, 1.0], big: [1.3, 1.0] };
+function _outerBone(model, name) {
+  let f = null;
+  model.traverse((o) => { if (o.isBone && base(o.name) === name && !(o.parent && base(o.parent.name) === name) && !f) f = o; });
+  return f;
+}
+const ACC_MAT = { kufi: new THREE.MeshStandardMaterial({ color: 0xf6f2e8, roughness: 0.9 }), watch: new THREE.MeshStandardMaterial({ color: 0xe0b020, roughness: 0.3, metalness: 0.8 }) };
+// wearable extras (cap, watch) attached to bones; sizes are in metres, compensated for the bone's world scale
+function applyAccessories(model, look) {
+  const old = []; model.traverse((o) => { if (o.userData.acc) old.push(o); });
+  for (const o of old) { o.parent && o.parent.remove(o); o.geometry?.dispose(); }
+  const w = look.worn || {};
+  model.updateWorldMatrix(true, true);
+  const attach = (boneName, mesh, offY, rotX) => {
+    const bone = _outerBone(model, boneName); if (!bone) return;
+    const sc = bone.getWorldScale(new THREE.Vector3()).x || 1;
+    mesh.userData.acc = true; mesh.castShadow = false;
+    mesh.scale.setScalar(1 / sc); mesh.position.set(0, offY / sc, 0); if (rotX) mesh.rotation.x = rotX;
+    bone.add(mesh);
+  };
+  if (w.head === "kufi") {
+    const g = new THREE.CylinderGeometry(0.088, 0.1, 0.085, 20);
+    attach("Head", new THREE.Mesh(g, ACC_MAT.kufi), 0.215, 0);
+  }
+  if (w.wrist === "watch") {
+    const g = new THREE.TorusGeometry(0.034, 0.009, 8, 20);
+    attach("LeftHand", new THREE.Mesh(g, ACC_MAT.watch), 0.0, Math.PI / 2);
+  }
+}
+
 function applyBuild(model, look) {
   const k = model.userData._k; if (!k) return;
   const [w, h] = BUILD[look.build] || BUILD.normal;
@@ -187,7 +216,7 @@ export async function createCharacter(opts = {}) {
   const skin = lk.skin || opts.skin || pick(SKINS);
   const hair = lk.hair || opts.hair || pick(HAIRS);
   const shoes = lk.shoes || opts.shoes || (R() < 0.5 ? "#f2f2ee" : "#222222");
-  const fullLook = { top, bottom, skin, hair, shoes, topStyle: lk.topStyle || outfit, bottomStyle: lk.bottomStyle || "trousers", gender: lk0, build: lk.build || "normal", created: !!lk.created };
+  const fullLook = { top, bottom, skin, hair, shoes, topStyle: lk.topStyle || outfit, bottomStyle: lk.bottomStyle || "trousers", gender: lk0, build: lk.build || "normal", created: !!lk.created, owned: lk.owned || [], worn: lk.worn || {}, base: lk.base || null };
 
   const model = cloneSkinned(src);
   const height = opts.height || 1.75;
@@ -199,6 +228,7 @@ export async function createCharacter(opts = {}) {
   model.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.frustumCulled = true; } });
   _applyLook(model, fullLook);
   applyBuild(model, fullLook);
+  applyAccessories(model, fullLook);
   const group = new THREE.Group();
   group.add(model);
   group.userData.look = fullLook;
@@ -211,6 +241,7 @@ export function recolorCharacter(ch, look) {
   if (!ch?.model) return;
   _applyLook(ch.model, look);
   applyBuild(ch.model, look);
+  applyAccessories(ch.model, look);
   if (ch.group) ch.group.userData.look = look;
 }
 

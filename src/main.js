@@ -17,7 +17,7 @@ import { initAdmin, showAdminDashboard, hideAdminDashboard, isAdmin, adminTab } 
 import { checkDailyReward, getDailyStatus, claimQuestReward } from "./daily.js";
 import { ref, onValue, update } from "firebase/database";
 import { openCreator } from "./creator.js";
-import { outfitsFor, BUILDS } from "./outfits.js";
+import { outfitsFor, BUILDS, SHOP, SLOT_KEYS } from "./outfits.js";
 import { initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, getActivePlace, enterPlace, exitPlace, sendUIEvent } from "./places/manager.js";
 import { listPlaces, getPlace } from "./places/registry.js";
 
@@ -220,6 +220,7 @@ function showPhoneApp(appId) {
       {id:"events",icon:"🎉",label:"Events"},
       {id:"news",icon:"📰",label:"Gist"},
       {id:"boutique",icon:"👕",label:"Boutique"},
+      {id:"myoutfits",icon:"👜",label:"My Outfits"},
       {id:"wardrobe",icon:"👔",label:"Wardrobe"},
       {id:"contacts",icon:"📲",label:"Contacts"},
       {id:"settings",icon:"⚙️",label:"Settings"}
@@ -384,15 +385,19 @@ function showPhoneApp(appId) {
     return;
   }
   if(appId==="boutique"){
-    const items=[
-      {id:"ankara",name:"Ankara Outfit",emoji:"👗",price:3000,desc:"Beautiful African print · Fun +15"},
-      {id:"babanriga",name:"Baban Riga",emoji:"🧥",price:8000,desc:"Northern Nigeria traditional · Social +20"},
-      {id:"kufi",name:"Kufi Cap",emoji:"🎩",price:1500,desc:"Traditional cap · Status boost"},
-      {id:"agbada",name:"Agbada Set",emoji:"🥻",price:6500,desc:"Flowing robe · Social +15 · Fun +10"},
-      {id:"sneakers",name:"Designer Sneakers",emoji:"👟",price:4000,desc:"Move faster · Energy +5"},
-      {id:"watch",name:"Gold Watch",emoji:"⌚",price:12000,desc:"Status symbol · Rank boost"},
-    ];
-    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">👕 Kaduna Boutique</div>'+items.map(it=>'<div style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid #eee;border-radius:8px;margin-bottom:6px;"><span style="font-size:24px;">'+it.emoji+'</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;">'+it.name+'</div><div style="font-size:11px;color:#666;">'+it.desc+'</div></div><button onclick="window.buyClothing(\''+it.id+'\','+it.price+',\''+it.name.replace(/'/g,"")+'\')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;">₦'+it.price+'</button></div>').join("")+backBtn;
+    const L=game.state.look, g=L.gender==="female"?"f":"m", owned=L.owned||[];
+    const items=SHOP.filter(it=>it.for==="any"||it.for===g);
+    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">👕 Kaduna Boutique</div>'+
+      '<button onclick="window.showApp(\'myoutfits\')" style="width:100%;background:var(--gold,#f2b134);color:#1a1a1a;border:none;border-radius:10px;padding:10px;margin-bottom:10px;font-weight:700;font-size:13px;cursor:pointer;">👜 My Outfits ('+owned.length+')</button>'+
+      items.map(it=>'<div style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid #eee;border-radius:8px;margin-bottom:6px;"><span style="font-size:24px;">'+it.emoji+'</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;">'+it.name+'</div><div style="font-size:11px;color:#666;">'+it.desc+'</div></div>'+
+        (owned.includes(it.id)?'<span style="font-size:11px;font-weight:700;color:var(--green);">✓ Owned</span>':'<button onclick="window.buyClothing(\''+it.id+'\')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;">₦'+it.price+'</button>')+'</div>').join("")+backBtn;
+    return;
+  }
+  if(appId==="myoutfits"){
+    const L=game.state.look, owned=(L.owned||[]).map(id=>SHOP.find(x=>x.id===id)).filter(Boolean), worn=L.worn||{};
+    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">👜 My Outfits</div>'+
+      (owned.length?owned.map(it=>{const on=worn[it.slot]===it.id;return '<div style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid '+(on?'var(--green)':'#eee')+';border-radius:8px;margin-bottom:6px;"><span style="font-size:24px;">'+it.emoji+'</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;">'+it.name+'</div><div style="font-size:11px;color:#666;">'+(on?'Wearing now':'In your wardrobe')+'</div></div><button onclick="window._'+(on?'removeItem':'wearItem')+'(\''+it.id+'\')" style="background:'+(on?'#e11d48':'var(--green)')+';color:#fff;border:none;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:12px;font-weight:700;">'+(on?'Remove':'Wear')+'</button></div>';}).join(""):'<div style="color:#888;font-size:12px;padding:10px 0;">You have not bought any outfit yet. Visit the Boutique.</div>')+
+      '<button onclick="window.showApp(\'boutique\')" style="width:100%;margin-top:8px;background:var(--green);color:#fff;border:none;border-radius:10px;padding:11px;font-weight:700;font-size:13px;cursor:pointer;">🛍 Go to Boutique</button>'+backBtn;
     return;
   }
   if(appId==="wardrobe"){
@@ -473,13 +478,37 @@ window.buyMed=(id)=>{
   game.save?.(); updateHUD(); toast("Medicine taken! Feel better now.");
   showPhoneApp("health");
 };
-window.buyClothing=(id,price,name)=>{
-  if(game.state.money<price){toast("Not enough money for "+name);return;}
-  game.state.money-=price;
-  game.state.needs.fun=Math.min(100,(game.state.needs.fun||0)+15);
-  game.state.needs.social=Math.min(100,(game.state.needs.social||0)+10);
-  game.save?.(); updateHUD(); toast(name+" purchased! You look sharp.");
-  showPhoneApp("boutique");
+function _pushLook(){ clearTimeout(window._lookT); window._lookT=setTimeout(()=>{const u=getMyUid(); if(u) update(ref(db,"players/"+u+"/look"),game.state.look).catch(()=>{});},300); }
+window.buyClothing=(id)=>{
+  const it=SHOP.find(x=>x.id===id); if(!it) return;
+  const L=game.state.look; L.owned=L.owned||[];
+  if(L.owned.includes(id)){toast("You already own "+it.name);return;}
+  if(game.state.money<it.price){toast("Not enough money for "+it.name);return;}
+  game.state.money-=it.price; L.owned.push(id);
+  game.state.needs.fun=Math.min(100,(game.state.needs.fun||0)+(it.fun||10));
+  game.state.needs.social=Math.min(100,(game.state.needs.social||0)+(it.social||5));
+  game.save?.(); updateHUD(); _pushLook();
+  toast(it.name+" bought! Saved in My Outfits.");
+  window._wearItem(id, true);
+};
+window._wearItem=(id,fromBuy)=>{
+  const it=SHOP.find(x=>x.id===id), L=game.state.look; if(!it||!(L.owned||[]).includes(id)) return;
+  L.worn=L.worn||{};
+  if(!L.base) L.base={top:L.top,bottom:L.bottom,topStyle:L.topStyle,bottomStyle:L.bottomStyle,shoes:L.shoes}; // what you wore before
+  if(it.patch) Object.assign(L,it.patch);
+  L.worn[it.slot]=id;
+  game.save?.(); _pushLook(); if(rig?.recolor) rig.recolor(L);
+  if(!fromBuy) toast("Wearing "+it.name);
+  showPhoneApp(fromBuy?"boutique":"myoutfits");
+};
+window._removeItem=(id)=>{
+  const it=SHOP.find(x=>x.id===id), L=game.state.look; if(!it) return;
+  L.worn=L.worn||{}; if(L.worn[it.slot]!==id) return;
+  L.worn[it.slot]=null;
+  if(L.base) for(const k of (SLOT_KEYS[it.slot]||[])) if(L.base[k]!=null) L[k]=L.base[k];
+  game.save?.(); _pushLook(); if(rig?.recolor) rig.recolor(L);
+  toast(it.name+" removed");
+  showPhoneApp("myoutfits");
 };
 // ---- Character creator (after sign-up) + gender/build/outfit presets ----
 const _loadedGender = game.state.look.gender || "male";
@@ -887,6 +916,6 @@ Promise.all([loadPlayer(manager, scene, game.state.look), addCity(scene, world, 
   
   frame();
   $("loading").classList.add("done");
-  window.__dbg = { player, ctl, npcs, renderer, scene };
+  window.__dbg = { player, ctl, npcs, renderer, scene, game };
   window.__ready = true;
 }).catch((e) => showError("Could not load the game: " + e.message));

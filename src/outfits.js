@@ -24,3 +24,17 @@ export const BUILDS = [
   { id: "normal", label: "Normal" },
   { id: "big", label: "Big" },
 ];
+
+// ---- Boutique catalogue. slot: outfit | head | shoes | wrist.  for: m | f | any ----
+export const SHOP = [
+  { id: "ankara", name: "Ankara Outfit", emoji: "👗", price: 3000, slot: "outfit", for: "any", desc: "Bold African print colours", patch: { top: "#d98e2b", bottom: "#a23b72", topStyle: "kaftan", bottomStyle: "trousers" }, fun: 15 },
+  { id: "babanriga", name: "Baban Riga", emoji: "🧥", price: 8000, slot: "outfit", for: "m", desc: "Northern Nigeria traditional", patch: { top: "#9fc2d9", bottom: "#9fc2d9", topStyle: "kaftan", bottomStyle: "trousers" }, social: 20 },
+  { id: "agbada", name: "Agbada Set", emoji: "🥻", price: 6500, slot: "outfit", for: "m", desc: "Flowing robe", patch: { top: "#f4efe4", bottom: "#c9b38a", topStyle: "kaftan", bottomStyle: "trousers" }, social: 15 },
+  { id: "senator", name: "Senator Suit", emoji: "🧑‍💼", price: 7000, slot: "outfit", for: "m", desc: "Navy senator wear", patch: { top: "#2d3a4a", bottom: "#2d3a4a", topStyle: "kaftan", bottomStyle: "trousers" }, social: 12 },
+  { id: "abaya", name: "Abaya", emoji: "🧕", price: 5000, slot: "outfit", for: "f", desc: "Elegant black abaya", patch: { top: "#2e2e2e", bottom: "#2e2e2e", topStyle: "kaftan", bottomStyle: "trousers" }, social: 12 },
+  { id: "gown", name: "Evening Gown", emoji: "👗", price: 9000, slot: "outfit", for: "f", desc: "Wine evening gown", patch: { top: "#a23b72", bottom: "#a23b72", topStyle: "kaftan", bottomStyle: "trousers" }, fun: 15 },
+  { id: "kufi", name: "Kufi Cap", emoji: "🎩", price: 1500, slot: "head", for: "any", desc: "White traditional cap", acc: "kufi" },
+  { id: "sneakers", name: "Designer Sneakers", emoji: "👟", price: 4000, slot: "shoes", for: "any", desc: "Fresh white sneakers", patch: { shoes: "#ffffff" } },
+  { id: "watch", name: "Gold Watch", emoji: "⌚", price: 12000, slot: "wrist", for: "any", desc: "Status symbol", acc: "watch" },
+];
+export const SLOT_KEYS = { outfit: ["top", "bottom", "topStyle", "bottomStyle"], shoes: ["shoes"], head: [], wrist: [] };
