@@ -374,6 +374,7 @@ export function buildWorld(scene) {
       { id: "church", x: -70, z: 37, name: "CHURCH", icon: "⛪", color: 0xc8b890 },
       { id: "barber", x: 30, z: -37, name: "BARBER", icon: "💈", color: 0x1a1a2e },
       { id: "nightclub", x: 0, z: -37, name: "NIGHTCLUB", icon: "🪩", color: 0x6b21a8 },
+      { id: "home", x: -150, z: 37, name: "MY HOME", icon: "🏠", color: 0x2e7d4f },
     ];
     for (const m of _placeMarkers) {
       // Entrance pad (glowing circle on the ground)

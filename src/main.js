@@ -224,6 +224,7 @@ function _showPhoneApp(appId) {
       {id:"profile",icon:"👤",label:"Profile"},
       {id:"events",icon:"🎉",label:"Events"},
       {id:"news",icon:"📰",label:"Gist"},
+      {id:"realestate",icon:"🏡",label:"Houses"},
       {id:"homestore",icon:"🛋️",label:"HomeStore"},
       {id:"storage",icon:"📦",label:"Storage"},
       {id:"boutique",icon:"👕",label:"Boutique"},
@@ -444,6 +445,37 @@ function _showPhoneApp(appId) {
       const el=document.getElementById("contacts-list");
       if(el) el.innerHTML=list.length?list.map(([uid,p])=>{const nm=(p.name||"Player").replace(/'/g,"");return '<div style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid #eee;"><div style="width:32px;height:32px;background:var(--green);color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;">'+(p.name||"?").charAt(0).toUpperCase()+'</div><div style="flex:1;"><div style="font-size:13px;font-weight:600;">'+(p.name||"Unknown")+'</div><div style="font-size:10px;color:#999;">'+(p.x||0).toFixed(0)+', '+(p.z||0).toFixed(0)+'</div></div><button onclick="window.sendMessage(\''+uid+'\',\''+nm+'\')" style="background:var(--green);color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;">Wave 👋</button></div>';}).join(""):'<div style="text-align:center;padding:20px;color:#999;">No other players online right now.</div>';
     });
+    return;
+  }
+  if(appId==="realestate"){
+    const HOUSE_TYPES = [
+      { id: "room", name: "Face-Me-I-Face-You Room", price: 0, desc: "Starter room (free)", tier: 1, emoji: "🚪" },
+      { id: "flat", name: "1-Bedroom Flat", price: 50000, desc: "Small flat with kitchen + bath", tier: 2, emoji: "🏠" },
+      { id: "bungalow", name: "Bungalow", price: 200000, desc: "3-bedroom bungalow with compound", tier: 3, emoji: "🏡" },
+      { id: "duplex", name: "Duplex", price: 500000, desc: "2-storey duplex with car park", tier: 4, emoji: "🏢" },
+      { id: "mansion", name: "Mansion", price: 2000000, desc: "Luxury mansion with everything", tier: 5, emoji: "🏰" },
+    ];
+    let h = '<div style="font-size:15px;margin-bottom:8px;font-weight:700;color:#f2f2f4;">🏡 Real Estate</div>';
+    h += '<div style="font-size:11px;color:#6b7280;margin-bottom:10px;">Balance: ₦'+game.state.money.toLocaleString()+'</div>';
+    for (const ht of HOUSE_TYPES) {
+      const canAfford = game.state.money >= ht.price;
+      const isCurrent = (game.state.homeTier || 1) === ht.tier;
+      h += '<div style="display:flex;align-items:center;gap:8px;padding:10px;background:#17181b;border-radius:10px;margin-bottom:6px;' + (isCurrent ? 'border:2px solid #4ade80;' : '') + '">';
+      h += '<span style="font-size:28px;">' + ht.emoji + '</span>';
+      h += '<div style="flex:1;"><div style="font-size:13px;font-weight:600;color:#f2f2f4;">' + ht.name + (isCurrent ? ' ✅ (Current)' : '') + '</div>';
+      h += '<div style="font-size:10px;color:#9b9ba4;">' + ht.desc + '</div></div>';
+      if (isCurrent) {
+        h += '<span style="font-size:11px;color:#4ade80;font-weight:600;">Owned</span>';
+      } else if (canAfford) {
+        h += '<button onclick="window._buyHouse(' + ht.tier + ',' + ht.price + ',\'' + ht.name.replace(/'/g, "") + '\')" style="background:#f2b134;color:#000;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;">' + (ht.price === 0 ? 'Claim' : 'Buy ₦' + ht.price.toLocaleString()) + '</button>';
+      } else {
+        h += '<span style="font-size:11px;color:#6b7280;">₦' + ht.price.toLocaleString() + '</span>';
+      }
+      h += '</div>';
+    }
+    h += '<div style="font-size:11px;color:#6b7280;margin-top:10px;text-align:center;">💡 Walk to 🏠 My Home (west side) to enter your house. Use the HomeStore to buy furniture.</div>';
+    h += backBtn;
+    c.innerHTML = h;
     return;
   }
   if(appId==="homestore"){
@@ -682,6 +714,22 @@ window._buyFurniture = async (itemId) => {
   updateHUD();
   toast("🛋️ " + it.name + " bought! Check your Storage.");
   showPhoneApp("homestore");
+};
+// ---- Real Estate: buy/upgrade house ----
+window._buyHouse = async (tier, price, name) => {
+  if (game.state.money < price) { toast("Not enough money"); return; }
+  game.state.money -= price;
+  game.state.homeTier = tier;
+  game.save?.();
+  const uid = getMyUid();
+  if (uid) {
+    update(ref(db, "economy/" + uid + "/balance"), game.state.money);
+    update(ref(db, "players/" + uid), { homeTier: tier });
+  }
+  missionState.lastAction = "buyHouse";
+  updateHUD();
+  toast("🎉 Bought " + name + "! Walk to 🏠 My Home to enter.");
+  showPhoneApp("realestate");
 };
 window.logout=async()=>{ if(confirm("Log out of Kaduna Lifestyle?")){ await logout(); } };
 window.resetGame=()=>{
