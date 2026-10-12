@@ -1,46 +1,54 @@
 {
   "rules": {
-    ".read": false,
-    ".write": false,
-    "admins": {
-      "$uid": {
-        ".read": "auth != null && auth.uid === $uid",
-        ".write": false
-      }
-    },
     "players": {
-      ".read": "auth != null",
+      ".read": "auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
       "$uid": {
-        ".write": "auth != null && (auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1' || root.child('admins').child(auth.uid).val() === true)"
+        ".read": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
+        ".write": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'"
       }
     },
     "economy": {
-      ".read": "auth != null && (auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1' || root.child('admins').child(auth.uid).val() === true)",
+      ".read": "auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
       "$uid": {
-        ".read": "auth != null && auth.uid === $uid",
-        ".write": "auth != null && (auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1' || root.child('admins').child(auth.uid).val() === true)"
+        ".read": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
+        ".write": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'"
       }
     },
     "chat": {
       ".read": "auth != null",
-      ".write": "auth != null && (auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1' || root.child('admins').child(auth.uid).val() === true)",
-      "$key": {
-        ".write": "auth != null && (!data.exists() || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1' || root.child('admins').child(auth.uid).val() === true)"
+      ".write": "auth != null"
+    },
+    "dms": {
+      "$chatId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
       }
     },
     "announcements": {
       ".read": "auth != null",
-      ".write": "auth != null && (auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1' || root.child('admins').child(auth.uid).val() === true)"
+      ".write": "auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'"
     },
     "events": {
       ".read": "auth != null",
-      ".write": "auth != null && (auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1' || root.child('admins').child(auth.uid).val() === true)"
+      ".write": "auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'"
+    },
+    "admins": {
+      ".read": "auth != null",
+      ".write": false
     },
     "daily": {
       "$uid": {
-        ".read": "auth != null && auth.uid === $uid",
-        ".write": "auth != null && auth.uid === $uid"
+        ".read": "auth.uid === $uid",
+        ".write": "auth.uid === $uid"
       }
+    },
+    "houses": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "hunt": {
+      ".read": "auth != null",
+      ".write": "auth != null"
     }
   }
 }
