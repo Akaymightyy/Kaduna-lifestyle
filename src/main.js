@@ -21,6 +21,7 @@ import { outfitsFor, BUILDS, SHOP, SLOT_KEYS } from "./outfits.js";
 import { initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, getActivePlace, enterPlace, exitPlace, sendUIEvent } from "./places/manager.js";
 import { listPlaces, getPlace } from "./places/registry.js";
 import { initMissions, getActiveMission, getAllChapters, getDailyMissions, getWeeklyMissions, checkStep, createMissionState, claimDailyReward, claimWeeklyReward } from "./missions.js";
+import { FURNITURE_CATALOG, CATEGORIES, getItem, calcComfort } from "./furniture.js";
 
 const $ = (id) => document.getElementById(id);
 const showError = (m) => { const e = $("err"); e.style.display = "flex"; e.textContent = m; };
@@ -214,7 +215,6 @@ function _showPhoneApp(appId) {
       {id:"jobs",icon:"💼",label:"Hustle"},
       {id:"bank",icon:"🏦",label:"Bank"},
       {id:"ride",icon:"🛺",label:"Ride"},
-      {id:"messages",icon:"✉️",label:"Messages"},
       {id:"chat",icon:"💬",label:"Chat"},
       {id:"map",icon:"🗺️",label:"Map"},
       {id:"missions",icon:"🎯",label:"Missions"},
@@ -224,6 +224,8 @@ function _showPhoneApp(appId) {
       {id:"profile",icon:"👤",label:"Profile"},
       {id:"events",icon:"🎉",label:"Events"},
       {id:"news",icon:"📰",label:"Gist"},
+      {id:"homestore",icon:"🛋️",label:"HomeStore"},
+      {id:"storage",icon:"📦",label:"Storage"},
       {id:"boutique",icon:"👕",label:"Boutique"},
       {id:"myoutfits",icon:"👜",label:"My Outfits"},
       {id:"wardrobe",icon:"👔",label:"Wardrobe"},
@@ -433,52 +435,6 @@ function _showPhoneApp(appId) {
       backBtn;
     return;
   }
-  if(appId==="messages"){
-    // Messages app with Chats/Groups tabs
-    const myUid = getMyUid();
-    let h = '<div style="font-size:15px;margin-bottom:8px;font-weight:700;color:#f2f2f4;">✉️ Messages</div>';
-    h += '<div style="display:flex;gap:4px;margin-bottom:10px;"><button class="ph-tab-active" id="msg-tab-chats" style="flex:1;padding:8px;border:none;border-radius:8px;background:#f2b134;color:#000;font:600 12px Poppins,sans-serif;cursor:pointer;">Chats</button><button id="msg-tab-groups" style="flex:1;padding:8px;border:none;border-radius:8px;background:#17181b;color:#9b9ba4;font:600 12px Poppins,sans-serif;cursor:pointer;">Groups</button></div>';
-    h += '<div id="msg-list" style="font-size:12px;">Loading...</div>';
-    h += backBtn;
-    c.innerHTML = h;
-    // Load chats (DM list from Firebase)
-    onValue(ref(db, "players"), (snap) => {
-      const data = snap.val() || {};
-      const list = Object.entries(data).filter(([uid]) => uid !== myUid).slice(0, 30);
-      const el = document.getElementById("msg-list");
-      if (el) {
-        el.innerHTML = list.length ? list.map(([uid, p]) => {
-          const nm = (p.name || "Player").replace(/'/g, "");
-          return '<div onclick="window._openDM(\'' + uid + '\',\'' + nm + '\')" style="display:flex;align-items:center;gap:8px;padding:10px;background:#17181b;border-radius:10px;margin-bottom:4px;cursor:pointer;"><div style="width:36px;height:36px;background:#f2b134;color:#000;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;">' + (p.name || "?").charAt(0).toUpperCase() + '</div><div style="flex:1;"><div style="font-size:13px;font-weight:600;color:#f2f2f4;">' + (p.name || "Unknown") + '</div><div style="font-size:10px;color:#6b7280;">Tap to chat</div></div></div>';
-        }).join("") : '<div style="text-align:center;padding:20px;color:#6b7280;">No players online. Be the first!</div>';
-      }
-    });
-    // Tab switching
-    document.getElementById("msg-tab-chats").onclick = () => {
-      document.getElementById("msg-tab-chats").style.background = "#f2b134";
-      document.getElementById("msg-tab-chats").style.color = "#000";
-      document.getElementById("msg-tab-groups").style.background = "#17181b";
-      document.getElementById("msg-tab-groups").style.color = "#9b9ba4";
-      document.getElementById("msg-list").innerHTML = '<div style="text-align:center;padding:20px;color:#6b7280;">Loading chats...</div>';
-      onValue(ref(db, "players"), (snap) => {
-        const data = snap.val() || {};
-        const list = Object.entries(data).filter(([uid]) => uid !== myUid).slice(0, 30);
-        const el = document.getElementById("msg-list");
-        if (el) el.innerHTML = list.length ? list.map(([uid, p]) => {
-          const nm = (p.name || "Player").replace(/'/g, "");
-          return '<div onclick="window._openDM(\'' + uid + '\',\'' + nm + '\')" style="display:flex;align-items:center;gap:8px;padding:10px;background:#17181b;border-radius:10px;margin-bottom:4px;cursor:pointer;"><div style="width:36px;height:36px;background:#f2b134;color:#000;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;">' + (p.name || "?").charAt(0).toUpperCase() + '</div><div style="flex:1;"><div style="font-size:13px;font-weight:600;color:#f2f2f4;">' + (p.name || "Unknown") + '</div><div style="font-size:10px;color:#6b7280;">Tap to chat</div></div></div>';
-        }).join("") : '<div style="text-align:center;padding:20px;color:#6b7280;">No players online.</div>';
-      });
-    };
-    document.getElementById("msg-tab-groups").onclick = () => {
-      document.getElementById("msg-tab-groups").style.background = "#f2b134";
-      document.getElementById("msg-tab-groups").style.color = "#000";
-      document.getElementById("msg-tab-chats").style.background = "#17181b";
-      document.getElementById("msg-tab-chats").style.color = "#9b9ba4";
-      document.getElementById("msg-list").innerHTML = '<div style="text-align:center;padding:20px;color:#6b7280;">📋 Group chats coming soon! For now, use the global Chat app.</div>';
-    };
-    return;
-  }
   if(appId==="contacts"){
     c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">📲 Contacts</div><div id="contacts-list" style="font-size:12px;">Loading players...</div>'+backBtn;
     onValue(ref(db,"players"),(snap)=>{
@@ -488,6 +444,58 @@ function _showPhoneApp(appId) {
       const el=document.getElementById("contacts-list");
       if(el) el.innerHTML=list.length?list.map(([uid,p])=>{const nm=(p.name||"Player").replace(/'/g,"");return '<div style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid #eee;"><div style="width:32px;height:32px;background:var(--green);color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;">'+(p.name||"?").charAt(0).toUpperCase()+'</div><div style="flex:1;"><div style="font-size:13px;font-weight:600;">'+(p.name||"Unknown")+'</div><div style="font-size:10px;color:#999;">'+(p.x||0).toFixed(0)+', '+(p.z||0).toFixed(0)+'</div></div><button onclick="window.sendMessage(\''+uid+'\',\''+nm+'\')" style="background:var(--green);color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;">Wave 👋</button></div>';}).join(""):'<div style="text-align:center;padding:20px;color:#999;">No other players online right now.</div>';
     });
+    return;
+  }
+  if(appId==="homestore"){
+    let _hsCat = window._hsCat || "All";
+    const cats = ["All", ...CATEGORIES];
+    let h = '<div style="font-size:15px;margin-bottom:8px;font-weight:700;color:#f2f2f4;">🛋️ HomeStore</div>';
+    h += '<div style="display:flex;gap:4px;overflow-x:auto;margin-bottom:10px;padding-bottom:4px;">';
+    for (const cat of cats) {
+      const on = _hsCat === cat;
+      h += '<button onclick="window._hsSetCat(\''+cat+'\')" style="white-space:nowrap;padding:6px 10px;border:none;border-radius:8px;background:'+(on?'#f2b134':'#17181b')+';color:'+(on?'#000':'#9b9ba4')+';font:600 11px Poppins,sans-serif;cursor:pointer;">'+cat+'</button>';
+    }
+    h += '</div>';
+    const items = _hsCat === "All" ? FURNITURE_CATALOG : FURNITURE_CATALOG.filter(f => f.cat === _hsCat);
+    h += '<div style="font-size:11px;color:#6b7280;margin-bottom:6px;">Balance: ₦'+game.state.money.toLocaleString()+'</div>';
+    for (const it of items) {
+      const colorDots = it.colors.map((c, i) => '<span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:'+c+';border:1px solid #333;margin:0 1px;"></span>').join("");
+      h += '<div style="display:flex;align-items:center;gap:8px;padding:10px;background:#17181b;border-radius:10px;margin-bottom:6px;">';
+      h += '<span style="font-size:24px;">'+it.emoji+'</span>';
+      h += '<div style="flex:1;"><div style="font-size:13px;font-weight:600;color:#f2f2f4;">'+it.name+'</div>';
+      h += '<div style="font-size:10px;color:#9b9ba4;">'+it.cat+' · '+it.w+'×'+it.d+' grid · Comfort +'+it.comfort+'</div>';
+      h += '<div style="margin-top:2px;">'+colorDots+'</div></div>';
+      h += '<button onclick="window._buyFurniture(\''+it.id+'\')" style="background:#f2b134;color:#000;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;">₦'+it.price.toLocaleString()+'</button>';
+      h += '</div>';
+    }
+    h += backBtn;
+    c.innerHTML = h;
+    return;
+  }
+  if(appId==="storage"){
+    const uid = getMyUid();
+    let h = '<div style="font-size:15px;margin-bottom:8px;font-weight:700;color:#f2f2f4;">📦 My Storage</div>';
+    h += '<div id="storage-list" style="font-size:12px;">Loading...</div>';
+    h += backBtn;
+    c.innerHTML = h;
+    if (uid) {
+      import("firebase/database").then(({ ref, get }) => {
+        get(ref(db, "players/"+uid+"/storage")).then((snap) => {
+          const storage = snap.val() || [];
+          const el = document.getElementById("storage-list");
+          if (!el) return;
+          if (!storage.length) {
+            el.innerHTML = '<div style="text-align:center;padding:30px;color:#6b7280;">📦 Your storage is empty.<br>Buy furniture from the HomeStore!</div>';
+            return;
+          }
+          el.innerHTML = storage.map((s, i) => {
+            const it = getItem(s.id);
+            if (!it) return '';
+            return '<div style="display:flex;align-items:center;gap:8px;padding:10px;background:#17181b;border-radius:10px;margin-bottom:6px;"><span style="font-size:24px;">'+it.emoji+'</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;color:#f2f2f4;">'+it.name+'</div><div style="font-size:10px;color:#9b9ba4;">Comfort +'+it.comfort+' · '+it.w+'×'+it.d+'</div></div><span style="width:16px;height:16px;border-radius:50%;background:'+(s.color||it.colors[0])+';border:1px solid #333;"></span></div>';
+          }).join("");
+        });
+      });
+    }
     return;
   }
   if(appId==="missions"){
@@ -596,10 +604,8 @@ window._openCreator = () => {
     onDone: async (L) => {
       game.state.look = L; game.save?.();
       const uid = getMyUid();
-      // Set localStorage flag so creator NEVER pops on refresh
-      if (uid) localStorage.setItem("kaduna-creator-done-" + uid, "1");
-      try { if (uid) await update(ref(db, "players/" + uid + "/look"), { ...L, created: true }); } catch (e) {}
-      if ((L.gender || "male") !== _loadedGender) location.reload();
+      try { if (uid) await update(ref(db, "players/" + uid + "/look"), L); } catch (e) {}
+      if ((L.gender || "male") !== _loadedGender) location.reload(); // swap to the other body model
       else toast("Welcome to Kaduna! 🎉");
     },
   });
@@ -648,39 +654,35 @@ window.sendMessage=(uid,name)=>{
   sendChat("👋 Hi "+name+"!");
   toast("Waved at "+name);
 };
-// ---- Direct Messages (DM) ----
-window._openDM = (otherUid, otherName) => {
-  const c = $("phone-content");
-  const myUid = getMyUid();
-  const chatId = [myUid, otherUid].sort().join("_");
-  const backBtn = '<button class="ph-back" onclick="window.showApp(\'messages\')">← Back</button>';
-  c.innerHTML = backBtn + '<div style="font-size:15px;margin-bottom:8px;font-weight:700;color:#f2f2f4;">💬 ' + otherName + '</div><div id="dm-log" style="height:300px;overflow-y:auto;font-size:12px;margin-bottom:8px;border:1px solid #26272b;border-radius:8px;padding:8px;background:#0b0b0c;"></div><div style="display:flex;gap:4px;"><input id="dm-input" type="text" placeholder="Type message..." style="flex:1;padding:10px;background:#17181b;color:#f2f2f4;border:1.5px solid #2c2d32;border-radius:12px;font-family:inherit;font-size:13px;" /><button onclick="window._sendDM(\'' + otherUid + '\',\'' + chatId + '\')" style="background:#f2b134;color:#000;border:none;border-radius:12px;padding:10px 16px;cursor:pointer;font-size:13px;font-weight:600;">Send</button></div>';
-  // Listen for DM messages
-  import("firebase/database").then(({ ref, onValue, push }) => {
-    onValue(ref(db, "dms/" + chatId), (snap) => {
-      const msgs = snap.val() || {};
-      const sorted = Object.values(msgs).sort((a, b) => (a.ts || 0) - (b.ts || 0));
-      const log = document.getElementById("dm-log");
-      if (log) {
-        log.innerHTML = sorted.length ? sorted.map(m => {
-          const isMe = m.uid === myUid;
-          return '<div style="padding:6px;margin-bottom:4px;background:' + (isMe ? "#1a3a2a" : "#1a1a2e") + ';border-radius:8px;max-width:80%;' + (isMe ? "margin-left:auto;" : "") + '"><b style="color:' + (isMe ? "#4ade80" : "#f2b134") + ';">' + m.name + ':</b> ' + m.text + '</div>';
-        }).join("") : '<div style="text-align:center;padding:20px;color:#6b7280;">No messages yet. Say hi!</div>';
-        log.scrollTop = log.scrollHeight;
-      }
-    });
-  });
-};
-window._sendDM = (otherUid, chatId) => {
-  const input = document.getElementById("dm-input");
-  if (!input || !input.value.trim()) return;
-  const text = input.value.trim().slice(0, 200);
-  input.value = "";
-  import("firebase/database").then(({ ref, push }) => {
-    push(ref(db, "dms/" + chatId), { uid: getMyUid(), name: getMyName() || "You", text, ts: Date.now() });
-  });
-};
 window.saveGame=()=>{game.save?.();toast("Game saved!");};
+// ---- HomeStore: buy furniture + category filter ----
+window._hsSetCat = (cat) => { window._hsCat = cat; showPhoneApp("homestore"); };
+window._buyFurniture = async (itemId) => {
+  const it = getItem(itemId);
+  if (!it) return;
+  if (game.state.money < it.price) { toast("Not enough money for " + it.name); return; }
+  game.state.money -= it.price;
+  game.save?.();
+  // Save money to Firebase
+  const uid = getMyUid();
+  if (uid) update(ref(db, "economy/" + uid + "/balance"), game.state.money);
+  // Add to storage in Firebase
+  if (uid) {
+    import("firebase/database").then(({ ref, get, set }) => {
+      get(ref(db, "players/"+uid+"/storage")).then((snap) => {
+        const storage = snap.val() || [];
+        storage.push({ id: itemId, color: it.colors[0] });
+        set(ref(db, "players/"+uid+"/storage"), storage);
+      });
+    });
+  }
+  // Track for missions
+  if (!missionState.ownedFurniture) missionState.ownedFurniture = [];
+  missionState.ownedFurniture.push({ id: itemId });
+  updateHUD();
+  toast("🛋️ " + it.name + " bought! Check your Storage.");
+  showPhoneApp("homestore");
+};
 window.logout=async()=>{ if(confirm("Log out of Kaduna Lifestyle?")){ await logout(); } };
 window.resetGame=()=>{
   if(!confirm("Reset all progress? You'll lose your money, needs, and rank."))return;
@@ -884,23 +886,21 @@ initAuth((user) => {
   // ---- Also write player's name to economy node so admin shows it ----
   const playerName = user.displayName || user.email?.split("@")[0] || "Player";
   update(ref(db, "economy/" + user.uid), { name: playerName, balance: game.state.money });
-  // ---- Sync look across devices ----
-  // FIX: Use BOTH Firebase AND localStorage flag so creator NEVER pops on refresh.
-  // The creator should only show on FIRST sign-up, not every refresh.
+  // ---- Sync look across devices: the account's saved outfit in Firebase WINS over this device's local copy ----
   let _lookFirst = true;
-  const _creatorDone = localStorage.getItem("kaduna-creator-done-" + user.uid) === "1";
   onValue(ref(db, "players/" + user.uid + "/look"), (snap) => {
     const fb = snap.val();
     const first = _lookFirst; _lookFirst = false;
     if (first) {
-      // Only open creator if: no localStorage flag AND no Firebase look.created
-      const needCreate = !_creatorDone && !(fb && fb.created);
+      // new account (no saved character yet) -> character creator after the world has loaded
+      const needCreate = !(fb && fb.created);
       if (needCreate) {
         if (fb) game.state.look = { ...game.state.look, ...fb };
+        game.state.look.created = false;
         const t = setInterval(() => { if (!rig) return; clearInterval(t); window._openCreator(); }, 400);
       }
     }
-    if (!fb) return;
+    if (!fb) { if (first) update(ref(db, "players/" + user.uid + "/look"), game.state.look); return; }
     if (JSON.stringify(fb) === JSON.stringify(game.state.look)) return;
     game.state.look = { ...game.state.look, ...fb };
     game.save?.();
