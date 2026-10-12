@@ -1,0 +1,46 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "admins": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": false
+      }
+    },
+    "players": {
+      ".read": "auth != null",
+      "$uid": {
+        ".write": "auth != null && (auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1' || root.child('admins').child(auth.uid).val() === true)"
+      }
+    },
+    "economy": {
+      ".read": "auth != null && (auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1' || root.child('admins').child(auth.uid).val() === true)",
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && (auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1' || root.child('admins').child(auth.uid).val() === true)"
+      }
+    },
+    "chat": {
+      ".read": "auth != null",
+      ".write": "auth != null && (auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1' || root.child('admins').child(auth.uid).val() === true)",
+      "$key": {
+        ".write": "auth != null && (!data.exists() || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1' || root.child('admins').child(auth.uid).val() === true)"
+      }
+    },
+    "announcements": {
+      ".read": "auth != null",
+      ".write": "auth != null && (auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1' || root.child('admins').child(auth.uid).val() === true)"
+    },
+    "events": {
+      ".read": "auth != null",
+      ".write": "auth != null && (auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1' || root.child('admins').child(auth.uid).val() === true)"
+    },
+    "daily": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
+    }
+  }
+}
