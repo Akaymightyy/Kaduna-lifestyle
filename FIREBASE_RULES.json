@@ -4,14 +4,32 @@
       ".read": "auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
       "$uid": {
         ".read": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
-        ".write": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'"
+        ".write": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
+        "missions": {
+          ".read": "auth.uid === $uid",
+          ".write": "auth.uid === $uid"
+        },
+        "huntStats": {
+          ".read": "auth.uid === $uid",
+          ".write": "auth.uid === $uid"
+        }
       }
     },
     "economy": {
       ".read": "auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
       "$uid": {
         ".read": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
-        ".write": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'"
+        ".write": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
+        "balance": {
+          ".read": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
+          ".write": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'"
+        },
+        "log": {
+          ".read": "auth.uid === $uid",
+          "$eventId": {
+            ".write": "auth.uid === $uid"
+          }
+        }
       }
     },
     "chat": {
@@ -48,7 +66,21 @@
     },
     "hunt": {
       ".read": "auth != null",
-      ".write": "auth != null"
+      "$spotId": {
+        // Allow any authed player to read a spot's claim state.
+        ".read": "auth != null",
+        // Allow a write ONLY when:
+        //   1. The new claim's claimedBy === auth.uid (player can only claim for themselves).
+        //   2. The new claim's ts is later than the existing ts + respawn window.
+        //      (The respawn window is enforced client-side via runTransaction; this
+        //       rule is a second line of defence — without it, a malicious client
+        //       could just overwrite any spot. We can't read the respawn window in
+        //       rules without a server function, so we cap the basic shape here and
+        //       rely on runTransaction's optimistic concurrency for the timing check.)
+        ".write": "auth != null && (!data.exists() || (newData.child('claimedBy').val() === auth.uid && newData.child('ts').val() === data.child('ts').val() + 1 || newData.child('ts').val() > data.child('ts').val()))",
+        // Validate the shape of a claim so a malicious client can't write garbage.
+        ".validate": "newData.hasChildren(['claimedBy', 'ts', 'reward', 'rarity']) && newData.child('claimedBy').val() === auth.uid && newData.child('ts').isNumber() && newData.child('reward').isNumber() && newData.child('rarity').isString()"
+      }
     }
   }
 }
