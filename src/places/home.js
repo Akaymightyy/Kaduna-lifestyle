@@ -1,9 +1,7 @@
-// src/places/home.js — Player home interior
-// A simple one-room interior that reads the player's furniture from Firebase
-// and builds the room. Functional: bed=sleep, fridge=eat, TV=fun, shower=hygiene, toilet=bladder.
+// src/places/home.js — Player home interior with furniture placement
 import * as THREE from "three";
 import { box, mergedMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
-import { FURNITURE_CATALOG, getItem, makeFurnitureMesh, calcComfort } from "../furniture.js";
+import { getItem, makeFurnitureMesh, calcComfort } from "../furniture.js";
 
 let _built = false, _cache = null;
 
@@ -13,110 +11,152 @@ export async function build(scene, ctx) {
   group.name = "player_home";
   group.visible = false;
 
-  // Floor (wooden)
-  group.add(floor(20, 16, 0x8b6a3c));
-  // Walls (cream)
+  // Standard room: 16x12m, wooden floor, painted walls with windows
+  group.add(floor(16, 12, 0x9a7b4a));
+  // Walls
+  const wallMat = 0xf4f1ea;
   group.add(mergedMesh([
-    box(20, 4, 0.3, 0, 2, -8, 0xf4f1ea),
-    box(0.3, 4, 16, -10, 2, 0, 0xf4f1ea),
-    box(0.3, 4, 16, 10, 2, 0, 0xf4f1ea),
+    box(16, 4, 0.3, 0, 2, -6, wallMat),
+    box(0.3, 4, 12, -8, 2, 0, wallMat),
+    box(0.3, 4, 12, 8, 2, 0, wallMat),
+    // Door gap on front wall (two segments)
+    box(5, 4, 0.3, -5.5, 2, 6, wallMat),
+    box(5, 4, 0.3, 5.5, 2, 6, wallMat),
+    // Window frames (dark)
+    box(3, 2, 0.05, -4, 2.5, -5.95, 0x4a6177),
+    box(3, 2, 0.05, 4, 2.5, -5.95, 0x4a6177),
+    box(0.05, 2, 3, -7.95, 2.5, -2, 0x4a6177),
+    box(0.05, 2, 3, -7.95, 2.5, 2, 0x4a6177),
+    box(0.05, 2, 3, 7.95, 2.5, -2, 0x4a6177),
+    box(0.05, 2, 3, 7.95, 2.5, 2, 0x4a6177),
   ]));
-  // Lighting (bright ambient)
-  group.add(interiorLights({ ambient: 0.9, points: [{ x: 0, y: 4, z: 0, color: 0xfff0e0, intensity: 0.8, distance: 16 }] }));
-  // Sign
-  const sign = new THREE.Mesh(new THREE.PlaneGeometry(6, 1), new THREE.MeshBasicMaterial({ color: 0x0f4d3a }));
-  sign.position.set(0, 3.5, -7.9); group.add(sign);
+  // Ceiling light
+  group.add(interiorLights({ ambient: 0.85, points: [
+    { x: 0, y: 3.8, z: 0, color: 0xfff0e0, intensity: 0.7, distance: 14 },
+    { x: -4, y: 3.8, z: -2, color: 0xfff0e0, intensity: 0.5, distance: 8 },
+    { x: 4, y: 3.8, z: 2, color: 0xfff0e0, intensity: 0.5, distance: 8 },
+  ] }));
 
-  // Load placed furniture from Firebase
-  let _placedFurniture = [];
+  // Furniture container
   let _furnitureGroup = new THREE.Group();
   group.add(_furnitureGroup);
+  let _placedFurniture = [];
 
-  // Load from Firebase
-  const uid = ctx?.game?.state?.uid || (typeof getMyUid === "function" ? getMyUid() : null);
-  if (uid && ctx?.db) {
-    import("firebase/database").then(({ ref, get }) => {
-      get(ref(ctx.db, "players/" + uid + "/homeFurniture")).then((snap) => {
-        _placedFurniture = snap.val() || [];
-        _rebuildFurniture();
-      });
-    });
+  // Load placed furniture from Firebase
+  const uid = typeof getMyUid === "function" ? getMyUid() : null;
+  if (uid) {
+    try {
+      const { ref, get } = await import("firebase/database");
+      const { db } = await import("../firebase.js");
+      const snap = await get(ref(db, "players/" + uid + "/homeFurniture"));
+      _placedFurniture = snap.val() || [];
+      _rebuildFurniture();
+      if (_placedFurniture.length > 0) ctx.toast("🏠 Home comfort: " + calcComfort(_placedFurniture));
+    } catch (e) { console.warn("Could not load furniture", e); }
   }
 
   function _rebuildFurniture() {
-    // Clear old
-    while (_furnitureGroup.children.length) _furnitureGroup.remove(_furnitureGroup.children[0]);
-    // Build placed items
+    while (_furnitureGroup.children.length) {
+      const child = _furnitureGroup.children[0];
+      _furnitureGroup.remove(child);
+      child.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } });
+    }
     for (const p of _placedFurniture) {
       const item = getItem(p.id);
       if (!item) continue;
       const mesh = makeFurnitureMesh(item, p.color);
       mesh.position.set(p.x || 0, 0, p.z || 0);
       mesh.rotation.y = p.rot || 0;
+      mesh.userData.placedIdx = _placedFurniture.indexOf(p);
       _furnitureGroup.add(mesh);
     }
-    // Update comfort
-    const comfort = calcComfort(_placedFurniture);
-    ctx.toast("🏠 Home comfort: " + comfort);
   }
 
+  // Decorate mode: place furniture from storage
+  let _decorateMode = false;
+  let _pendingItem = null; // item being placed
+
   const colliders = [
-    { minX: -10.2, maxX: -9.8, minZ: -8, maxZ: 8 }, // left wall
-    { minX: 9.8, maxX: 10.2, minZ: -8, maxZ: 8 },   // right wall
-    { minX: -10, maxX: 10, minZ: -8.2, maxZ: -7.8 }, // back wall
+    { minX: -8.2, maxX: -7.8, minZ: -6, maxZ: 6 },
+    { minX: 7.8, maxX: 8.2, minZ: -6, maxZ: 6 },
+    { minX: -8, maxX: 8, minZ: -6.2, maxZ: -5.8 },
+    { minX: -8, maxX: -3, minZ: 5.8, maxZ: 6.2 },
+    { minX: 3, maxX: 8, minZ: 5.8, maxZ: 6.2 },
   ];
 
   scene.add(group);
 
   const handle = {
     group, colliders,
-    enter(ps) { ps.pos.set(0, 0, 6); ps.heading = Math.PI; },
-    exit() {},
+    enter(ps) { ps.pos.set(0, 0, 4); ps.heading = Math.PI; },
+    exit() { _decorateMode = false; _pendingItem = null; },
     update() {},
     dispose() { scene.remove(group); disposeGroup(group); _built = false; _cache = null; },
-    onUIEvent(eid) {
-      if (eid === "sleep") _sleep(ctx);
-      else if (eid === "eat_home") _eatHome(ctx);
-      else if (eid === "tv") _watchTV(ctx);
-      else if (eid === "shower") _shower(ctx);
-      else if (eid === "toilet") _useToilet(ctx);
+    onUIEvent(eid, payload) {
+      if (eid === "sleep") _doAction(ctx, "😴 Slept. Energy +40", "energy", 40);
+      else if (eid === "eat_home") _doAction(ctx, "🍛 Ate from fridge. Hunger +30", "hunger", 30);
+      else if (eid === "tv") _doAction(ctx, "📺 Watched TV. Fun +20", "fun", 20);
+      else if (eid === "shower") _doAction(ctx, "🚿 Showered. Hygiene +30", "hygiene", 30);
+      else if (eid === "toilet") _doAction(ctx, "🚽 Bladder relieved.", "bladder", 40);
+      else if (eid === "place_furniture") _startPlaceMode(ctx, payload);
+      else if (eid === "rotate_furniture") _rotatePending();
+      else if (eid === "confirm_place") _confirmPlace(ctx);
+      else if (eid === "cancel_place") _cancelPlace();
     },
     getComfort() { return calcComfort(_placedFurniture); },
     getPlaced() { return _placedFurniture; },
+    isDecorating() { return _decorateMode; },
   };
+
+  function _doAction(ctx, msg, need, amount) {
+    if (!ctx.game) return;
+    // Check if the required furniture is placed
+    const needMap = { sleep: "bed", eat_home: "fridge", tv: "tv", shower: "shower", toilet: "toilet" };
+    const reqId = needMap[need];
+    if (reqId && !_placedFurniture.some(f => f.id.includes(reqId))) {
+      ctx.toast("You need a " + (reqId === "tv" ? "TV" : reqId) + "! Buy one from HomeStore.");
+      return;
+    }
+    ctx.game.state.needs[need] = Math.min(100, (ctx.game.state.needs[need] || 0) + amount);
+    ctx.game.save?.(); ctx.updateHUD?.();
+    ctx.toast(msg);
+  }
+
+  function _startPlaceMode(ctx, payload) {
+    _decorateMode = true;
+    _pendingItem = payload;
+    ctx.toast("📋 Tap in the room to place " + (getItem(payload.id)?.name || "item"));
+  }
+
+  function _rotatePending() {
+    if (!_pendingItem) return;
+    _pendingItem.rot = (_pendingItem.rot || 0) + Math.PI / 2;
+  }
+
+  function _confirmPlace(ctx) {
+    if (!_pendingItem) return;
+    _placedFurniture.push({ ..._pendingItem });
+    _rebuildFurniture();
+    // Save to Firebase
+    const uid = typeof getMyUid === "function" ? getMyUid() : null;
+    if (uid) {
+      import("firebase/database").then(({ ref, set }) => {
+        import("../firebase.js").then(({ db }) => {
+          set(ref(db, "players/" + uid + "/homeFurniture"), _placedFurniture);
+        });
+      });
+    }
+    ctx.toast("✅ " + (getItem(_pendingItem.id)?.name || "Item") + " placed!");
+    _pendingItem = null;
+    _decorateMode = false;
+  }
+
+  function _cancelPlace() {
+    _pendingItem = null;
+    _decorateMode = false;
+  }
 
   _built = true;
   _cache = handle;
   return handle;
-}
-
-function _sleep(ctx) {
-  if (!ctx.game) return;
-  ctx.game.state.needs.energy = Math.min(100, (ctx.game.state.needs.energy || 0) + 40);
-  ctx.game.save?.(); ctx.updateHUD?.();
-  ctx.toast("😴 You slept. Energy +40");
-}
-function _eatHome(ctx) {
-  if (!ctx.game) return;
-  ctx.game.state.needs.hunger = Math.min(100, (ctx.game.state.needs.hunger || 0) + 30);
-  ctx.game.save?.(); ctx.updateHUD?.();
-  ctx.toast("🍛 Ate from fridge. Hunger +30");
-}
-function _watchTV(ctx) {
-  if (!ctx.game) return;
-  ctx.game.state.needs.fun = Math.min(100, (ctx.game.state.needs.fun || 0) + 20);
-  ctx.game.save?.(); ctx.updateHUD?.();
-  ctx.toast("📺 Watched TV. Fun +20");
-}
-function _shower(ctx) {
-  if (!ctx.game) return;
-  ctx.game.state.needs.hygiene = Math.min(100, (ctx.game.state.needs.hygiene || 0) + 30);
-  ctx.game.save?.(); ctx.updateHUD?.();
-  ctx.toast("🚿 Showered. Hygiene +30");
-}
-function _useToilet(ctx) {
-  if (!ctx.game) return;
-  ctx.game.state.needs.bladder = Math.min(100, (ctx.game.state.needs.bladder || 0) + 40);
-  ctx.game.save?.(); ctx.updateHUD?.();
-  ctx.toast("🚽 Bladder relieved.");
 }
