@@ -12,7 +12,7 @@
 //     onUIEvent?(id, payload): void,   // optional
 //   }
 
-import { buildPlace, getPlace, isPlaceOpen, listPlaces } from "./registry.js";
+import { buildPlace, getPlace, isPlaceOpen, listPlaces, disposePlace } from "./registry.js";
 
 const _state = {
   active: null,
@@ -119,6 +119,13 @@ export async function enterPlace(id, playerState) {
   if (!def) throw new Error("Unknown place id: " + id);
 
   await _fadeTo(1);
+
+  // ---- For the player's home: always dispose the old instance so it rebuilds
+  // fresh with the current player's furniture + home tier. Without this, the
+  // home would be cached and show the wrong furniture when switching accounts. ----
+  if (id === "home") {
+    try { await disposePlace("home"); } catch (e) { console.warn("home dispose", e); }
+  }
 
   let handle;
   try {
