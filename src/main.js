@@ -22,6 +22,7 @@ import { initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, ge
 import { listPlaces, getPlace } from "./places/registry.js";
 import { initMissions, getActiveMission, getAllChapters, getDailyMissions, getWeeklyMissions, checkStep, createMissionState, claimDailyReward, claimWeeklyReward } from "./missions.js";
 import { FURNITURE_CATALOG, CATEGORIES, getItem, calcComfort } from "./furniture.js";
+import { ORIGINS, HOUSE_TIERS, getRentInfo, payRent, checkRentDue, applyOrigin, getOriginUI } from "./origins.js";
 
 const $ = (id) => document.getElementById(id);
 const showError = (m) => { const e = $("err"); e.style.display = "flex"; e.textContent = m; };
@@ -448,32 +449,33 @@ function _showPhoneApp(appId) {
     return;
   }
   if(appId==="realestate"){
-    const HOUSE_TYPES = [
-      { id: "room", name: "Face-Me-I-Face-You Room", price: 0, desc: "Starter room (free)", tier: 1, emoji: "🚪" },
-      { id: "flat", name: "1-Bedroom Flat", price: 50000, desc: "Small flat with kitchen + bath", tier: 2, emoji: "🏠" },
-      { id: "bungalow", name: "Bungalow", price: 200000, desc: "3-bedroom bungalow with compound", tier: 3, emoji: "🏡" },
-      { id: "duplex", name: "Duplex", price: 500000, desc: "2-storey duplex with car park", tier: 4, emoji: "🏢" },
-      { id: "mansion", name: "Mansion", price: 2000000, desc: "Luxury mansion with everything", tier: 5, emoji: "🏰" },
-    ];
-    let h = '<div style="font-size:15px;margin-bottom:8px;font-weight:700;color:#f2f2f4;">🏡 Real Estate</div>';
-    h += '<div style="font-size:11px;color:#6b7280;margin-bottom:10px;">Balance: ₦'+game.state.money.toLocaleString()+'</div>';
-    for (const ht of HOUSE_TYPES) {
-      const canAfford = game.state.money >= ht.price;
+    const rentInfo = getRentInfo(game.state);
+    let h = '<div style="font-size:15px;margin-bottom:8px;font-weight:700;color:#f2f2f4;">🏡 Real Estate & Rent</div>';
+    // Rent status
+    h += '<div style="background:'+(rentInfo.due?'#3a1a1a':'#1a2a1a')+';border-radius:10px;padding:10px;margin-bottom:10px;border:1px solid '+(rentInfo.due?'#e11d48':'#2e7d4f')+';">';
+    h += '<div style="font-size:12px;font-weight:600;color:'+(rentInfo.due?'#e11d48':'#4ade80')+';">'+(rentInfo.due?'🔔 RENT DUE!':'✅ Rent paid')+'</div>';
+    h += '<div style="font-size:11px;color:#9b9ba4;margin-top:2px;">'+rentInfo.tier.name+' — ₦'+rentInfo.amount.toLocaleString()+'/week';
+    if (rentInfo.due) h += ' · <b style="color:#e11d48;">Pay now!</b>';
+    else h += ' · Next due in '+rentInfo.nextDueMins+' min';
+    h += '</div>';
+    if (rentInfo.due) h += '<button onclick="window._payRent()" style="width:100%;margin-top:6px;background:#f2b134;color:#000;border:none;border-radius:8px;padding:8px;cursor:pointer;font-size:12px;font-weight:600;">Pay Rent ₦'+rentInfo.amount.toLocaleString()+'</button>';
+    h += '</div>';
+    // Housing tiers
+    h += '<div style="font-size:12px;font-weight:600;margin-bottom:6px;color:#f2b134;">🏠 Housing Tiers</div>';
+    h += '<div style="font-size:11px;color:#6b7280;margin-bottom:8px;">Balance: ₦'+game.state.money.toLocaleString()+'</div>';
+    for (const ht of HOUSE_TIERS) {
+      const canAfford = game.state.money >= ht.buyPrice;
       const isCurrent = (game.state.homeTier || 1) === ht.tier;
-      h += '<div style="display:flex;align-items:center;gap:8px;padding:10px;background:#17181b;border-radius:10px;margin-bottom:6px;' + (isCurrent ? 'border:2px solid #4ade80;' : '') + '">';
-      h += '<span style="font-size:28px;">' + ht.emoji + '</span>';
-      h += '<div style="flex:1;"><div style="font-size:13px;font-weight:600;color:#f2f2f4;">' + ht.name + (isCurrent ? ' ✅ (Current)' : '') + '</div>';
-      h += '<div style="font-size:10px;color:#9b9ba4;">' + ht.desc + '</div></div>';
-      if (isCurrent) {
-        h += '<span style="font-size:11px;color:#4ade80;font-weight:600;">Owned</span>';
-      } else if (canAfford) {
-        h += '<button onclick="window._buyHouse(' + ht.tier + ',' + ht.price + ',\'' + ht.name.replace(/'/g, "") + '\')" style="background:#f2b134;color:#000;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;">' + (ht.price === 0 ? 'Claim' : 'Buy ₦' + ht.price.toLocaleString()) + '</button>';
-      } else {
-        h += '<span style="font-size:11px;color:#6b7280;">₦' + ht.price.toLocaleString() + '</span>';
-      }
+      h += '<div style="display:flex;align-items:center;gap:8px;padding:10px;background:#17181b;border-radius:10px;margin-bottom:6px;'+(isCurrent?'border:2px solid #4ade80;':'')+'">';
+      h += '<span style="font-size:24px;">'+ht.emoji+'</span>';
+      h += '<div style="flex:1;"><div style="font-size:13px;font-weight:600;color:#f2f2f4;">'+ht.name+(isCurrent?' ✅':'')+'</div>';
+      h += '<div style="font-size:10px;color:#9b9ba4;">Rent ₦'+ht.rent+'/wk · Buy ₦'+ht.buyPrice.toLocaleString()+' · Guests: '+ht.guestCap+'</div></div>';
+      if (isCurrent) h += '<span style="font-size:10px;color:#4ade80;">Current</span>';
+      else if (canAfford) h += '<button onclick="window._buyHouse('+ht.tier+','+ht.buyPrice+',\''+ht.name.replace(/'/g,"")+'\')" style="background:#f2b134;color:#000;border:none;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:11px;font-weight:600;">Buy</button>';
+      else h += '<span style="font-size:10px;color:#6b7280;">₦'+ht.buyPrice.toLocaleString()+'</span>';
       h += '</div>';
     }
-    h += '<div style="font-size:11px;color:#6b7280;margin-top:10px;text-align:center;">💡 Walk to 🏠 My Home (west side) to enter your house. Use the HomeStore to buy furniture.</div>';
+    h += '<div style="font-size:11px;color:#6b7280;margin-top:8px;text-align:center;">💡 Walk to 🏠 My Home to enter. Rent due every 10 min.</div>';
     h += backBtn;
     c.innerHTML = h;
     return;
@@ -639,8 +641,10 @@ window._openCreator = () => {
       game.state.look = L; game.save?.();
       const uid = getMyUid();
       try { if (uid) await update(ref(db, "players/" + uid + "/look"), L); } catch (e) {}
-      if ((L.gender || "male") !== _loadedGender) location.reload(); // swap to the other body model
-      else toast("Welcome to Kaduna! 🎉");
+      if ((L.gender || "male") !== _loadedGender) { location.reload(); return; }
+      toast("Welcome to Kaduna! 🎉");
+      // Show origin selection if not yet chosen
+      if (!game.state.origin) { setTimeout(() => _showOriginScreen(), 500); }
     },
   });
 };
@@ -733,6 +737,75 @@ window._buyHouse = async (tier, price, name) => {
   toast("🎉 Bought " + name + "! Walk to 🏠 My Home to enter.");
   showPhoneApp("realestate");
 };
+// ---- Pay rent ----
+window._payRent = async () => {
+  const uid = getMyUid();
+  const r = await payRent(uid, game.state);
+  toast(r.msg || r.error);
+  updateHUD();
+  if (r.ok) showPhoneApp("realestate");
+};
+// ---- Origin selection ----
+window._pickOrigin = (originId) => {
+  const r = applyOrigin(game.state, originId);
+  if (r.ok) {
+    const uid = getMyUid();
+    if (uid) {
+      update(ref(db, "economy/" + uid + "/balance"), game.state.money);
+      update(ref(db, "players/" + uid), { homeTier: game.state.homeTier, origin: game.state.origin, lastRentPaid: game.state.lastRentPaid });
+      if (r.origin.starterFurniture.length) {
+        import("firebase/database").then(({ ref, get, set }) => {
+          get(ref(db, "players/"+uid+"/storage")).then((snap) => {
+            const storage = snap.val() || [];
+            for (const fid of r.origin.starterFurniture) {
+              const it = getItem(fid);
+              if (it) storage.push({ id: fid, color: it.colors[0] });
+            }
+            set(ref(db, "players/"+uid+"/storage"), storage);
+          });
+        });
+      }
+    }
+    toast("🎉 You chose " + r.origin.name + "! Check your Storage for starter items.");
+    updateHUD();
+    document.getElementById("origin-sheet")?.remove();
+  } else {
+    toast(r.error);
+  }
+};
+function _showOriginScreen() {
+  let el = document.getElementById("origin-sheet");
+  if (el) el.remove();
+  el = document.createElement("div");
+  el.id = "origin-sheet";
+  el.style.cssText = "position:fixed;inset:0;z-index:65;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;padding:16px;";
+  let h = '<div style="background:#0b0b0c;border-radius:20px;padding:24px;width:min(400px,92vw);max-height:80vh;overflow-y:auto;color:#f2f2f4;">';
+  h += '<div style="font-size:20px;font-weight:800;text-align:center;margin-bottom:6px;">🌍 Choose Your Origin</div>';
+  h += '<div style="font-size:12px;color:#9b9ba4;text-align:center;margin-bottom:16px;">Your origin determines your starting money, home, and playstyle. Choose wisely — this is permanent!</div>';
+  for (const o of ORIGINS) {
+    h += '<div onclick="window._pickOrigin(\''+o.id+'\')" style="background:#17181b;border:2px solid '+o.color+';border-radius:14px;padding:14px;margin-bottom:10px;cursor:pointer;">';
+    h += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;"><span style="font-size:32px;">'+o.icon+'</span><div><div style="font-size:16px;font-weight:700;color:'+o.color+';">'+o.name+'</div></div></div>';
+    h += '<div style="font-size:12px;color:#9b9ba4;line-height:1.4;">'+o.desc+'</div>';
+    h += '<div style="font-size:11px;margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">';
+    h += '<span style="background:#26272b;padding:3px 8px;border-radius:6px;">💰 ₦'+o.money.toLocaleString()+'</span>';
+    h += '<span style="background:#26272b;padding:3px 8px;border-radius:6px;">🏠 '+HOUSE_TIERS.find(t=>t.tier===o.homeTier)?.name+'</span>';
+    if (o.skillBonus) h += '<span style="background:#26272b;padding:3px 8px;border-radius:6px;">⚡ +'+(o.skillBonus*100)+'% skill growth</span>';
+    if (o.weeklyDebt) h += '<span style="background:#26272b;padding:3px 8px;border-radius:6px;">📉 Owes ₦'+o.weeklyDebt+'/wk adashe</span>';
+    h += '</div></div>';
+  }
+  h += '</div>';
+  el.innerHTML = h;
+  document.body.appendChild(el);
+}
+// ---- Check rent every 60 seconds ----
+let _rentCheckT = 0;
+function _tickRent(dt) {
+  _rentCheckT += dt;
+  if (_rentCheckT > 60) {
+    _rentCheckT = 0;
+    checkRentDue(game.state, toast);
+  }
+}
 // ---- Place furniture from storage into home ----
 window._placeInRoom = (storageIdx) => {
   const storage = window._storageCache || [];
@@ -1109,6 +1182,7 @@ function frame() {
   if(player.speed>0.5){missionState.totalDistance+=player.speed*dt;}
   missionState.money=game.state.money;
   _missionCheckT+=dt;if(_missionCheckT>2){_missionCheckT=0;checkStep(missionState);_updateMissionTracker();}
+  _tickRent(dt);
   hudT += dt; if (hudT > 0.5) { hudT = 0; updateHUD(); }
   if (!active) savePos(dt);
   sendPosition(player.pos.x, player.pos.z, player.heading);
