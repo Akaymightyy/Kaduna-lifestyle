@@ -75,10 +75,23 @@ export async function claimPlot(areaId, uid, name, origin) {
       await runTransaction(plotRef, (cur) => {
         if (cur && cur.ownerUid) return; // already taken — abort
         claimed = true;
+        // Starting tier depends on origin + area:
+        //   attajiri + rich area   → tier 4 (Duplex)
+        //   attajiri + middle area → tier 3 (3-Bedroom Bungalow)
+        //   attajiri + cheap area  → tier 2 (1-Bedroom Flat)
+        //   talaka + rich area     → tier 2 (1-Bedroom Flat) — rare, but possible if they save
+        //   talaka + middle area   → tier 1 (Room)
+        //   talaka + cheap area    → tier 1 (Room)
+        let tier;
+        if (origin === "attajiri") {
+          tier = area.tier === "rich" ? 4 : area.tier === "middle" ? 3 : 2;
+        } else {
+          tier = area.tier === "rich" ? 2 : 1;
+        }
         return {
           ownerUid: uid,
           ownerName: name,
-          tier: origin === "attajiri" ? 2 : 1,
+          tier,
           colors: { wall: area.wallCol, roof: area.roofCol, door: 0x4a3a2a },
           locked: false,
           forSale: false,
@@ -93,8 +106,15 @@ export async function claimPlot(areaId, uid, name, origin) {
     }
     if (claimed) {
       // Save the player's home area + plot
-      await update(ref(db, "players/" + uid), { homeArea: areaId, homePlot: plotNo });
-      return { ok: true, area, plotNo };
+      // Determine the tier (same logic as above)
+      let tier;
+      if (origin === "attajiri") {
+        tier = area.tier === "rich" ? 4 : area.tier === "middle" ? 3 : 2;
+      } else {
+        tier = area.tier === "rich" ? 2 : 1;
+      }
+      await update(ref(db, "players/" + uid), { homeArea: areaId, homePlot: plotNo, homeTier: tier });
+      return { ok: true, area, plotNo, tier };
     }
   }
   return { ok: false, reason: "Area is full — try another area" };

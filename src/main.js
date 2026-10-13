@@ -19,7 +19,7 @@ import { ref, onValue, update } from "firebase/database";
 import { openCreator } from "./creator.js";
 import { outfitsFor, BUILDS, SHOP, SLOT_KEYS } from "./outfits.js";
 import { initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, getActivePlace, enterPlace, exitPlace, sendUIEvent } from "./places/manager.js";
-import { listPlaces, getPlace } from "./places/registry.js";
+import { listPlaces, getPlace, updateHomeEntrance } from "./places/registry.js";
 import { initMissions, getActiveMission, getAllChapters, getDailyMissions, getWeeklyMissions, checkStep, createMissionState, claimDailyReward, claimWeeklyReward, setCelebrateCallback } from "./missions.js";
 import { FURNITURE_CATALOG, CATEGORIES, getItem, calcComfort } from "./furniture.js";
 import { ORIGINS, HOUSE_TIERS, getRentInfo, payRent, checkRentDue, applyOrigin, getOriginUI } from "./origins.js";
@@ -1364,7 +1364,10 @@ window._pickArea = async (areaId) => {
   const name = (typeof getMyName === "function" ? getMyName() : "Player");
   const r = await claimPlot(areaId, uid, name, game.state.origin);
   if (r.ok) {
-    game.state.homeArea = areaId; game.state.homePlot = r.plotNo; game.save?.();
+    game.state.homeArea = areaId; game.state.homePlot = r.plotNo;
+    if (r.tier) game.state.homeTier = r.tier;
+    game.save?.();
+    _syncHomeEntrance();
     toast("🎉 Plot " + r.plotNo + " in " + area.name + " is yours!");
     celebrate("🏠 " + area.name, "Plot " + r.plotNo);
     document.getElementById("area-sheet")?.remove();
@@ -1395,9 +1398,11 @@ window._moveToArea = async (areaId) => {
   if (!r.ok) { toast("❌ " + r.reason); return; }
   game.state.money -= area.buyPrice;
   game.state.homeArea = areaId; game.state.homePlot = r.plotNo;
+  if (r.tier) game.state.homeTier = r.tier;
   game.state.lastRentPaid = Date.now(); game.save?.();
+  _syncHomeEntrance();
   await update(ref(db, "economy/" + uid), { balance: game.state.money });
-  await update(ref(db, "players/" + uid), { homeArea: areaId, homePlot: r.plotNo, lastRentPaid: game.state.lastRentPaid });
+  await update(ref(db, "players/" + uid), { homeArea: areaId, homePlot: r.plotNo, homeTier: game.state.homeTier, lastRentPaid: game.state.lastRentPaid });
   toast("📦 Moved to " + area.name + "! Furniture in storage.");
   celebrate("🏠 " + area.name, "Plot " + r.plotNo);
   const pos = getPlotPosition(area, r.plotNo);
@@ -1466,27 +1471,26 @@ function _tickRent(dt) {
   }
 }
 // ---- Place furniture from storage into home ----
-window._placeInRoom = (storageIdx) => {
+window._placeInRoom = async (storageIdx) => {
   const storage = window._storageCache || [];
   const item = storage[storageIdx];
   if (!item) return;
   const it = getItem(item.id);
   if (!it) return;
-  // Close phone, enter home if not already inside
   closePhone();
   const active = getActivePlace();
   if (!active || active.id !== "home") {
-    toast("Go to your home first, then place furniture!");
-    // Travel to home entrance
+    // Auto-enter the home: teleport to entrance, then enter the place
     const homeDef = getPlace("home");
     if (homeDef) {
       player.pos.set(homeDef.entranceX, 0, homeDef.entranceZ);
       player.heading = homeDef.entranceFacing;
-      toast("Walked to your home. Tap the prompt to enter, then place furniture.");
-    }
-    return;
+      toast("🏠 Entering your home to place " + it.name + "...");
+      // Wait for the place to load, then place the furniture
+      try { await enterPlace("home", { pos: player.pos, heading: player.heading }); } catch (e) { console.warn("auto-enter failed", e); toast("Could not enter home. Walk to your house and tap to enter."); return; }
+    } else { toast("No home found."); return; }
   }
-  // Send place event to the home
+  // Now inside the home — send the place event
   sendUIEvent("place_furniture", { id: item.id, color: item.color || it.colors[0], x: 0, z: 0, rot: 0 });
   // Remove from storage
   storage.splice(storageIdx, 1);
@@ -1497,7 +1501,7 @@ window._placeInRoom = (storageIdx) => {
       set(ref(db, "players/"+uid+"/storage"), storage);
     });
   }
-  toast("📍 " + it.name + " placed in your room! Walk around to see it.");
+  toast("📍 " + it.name + " ready to place! Tap in the room to position it, then tap ✓ Confirm.");
 };
 window.logout=async()=>{ if(confirm("Log out of Kaduna Lifestyle?")){ await logout(); } };
 window.resetGame=()=>{
@@ -1609,7 +1613,16 @@ document.querySelectorAll("#bottom-nav .nav-btn").forEach(btn=>{
     const n=btn.dataset.nav;
     if(n==="phone")openPhone();
     else if(n==="map"){openPhone();setTimeout(()=>showPhoneApp("map"),50);}
-    else if(n==="home"){closePhone();$("profile-sheet")?.classList.remove("show");}
+    else if(n==="home"){
+      closePhone();$("profile-sheet")?.classList.remove("show");
+      // Travel to the player's home entrance (dynamic coordinates)
+      const homeDef = getPlace("home");
+      if (homeDef) {
+        player.pos.set(homeDef.entranceX, 0, homeDef.entranceZ);
+        player.heading = homeDef.entranceFacing;
+        toast("🏠 Walking to your home in " + (getArea(game.state.homeArea)?.name || "Kaduna") + "...");
+      }
+    }
   });
 });
 // Avatar + needs chip → profile sheet
@@ -1683,6 +1696,8 @@ initAuth((user) => {
   const myName = user.displayName || user.email?.split("@")[0] || "Player";
   initMessages(user.uid, myName, toast, () => { if (_showingApp === "messages") showPhoneApp("messages"); });
   initFlavour((headline) => { if (headline) toast("📰 " + headline.text); });
+  // ---- Sync home entrance to player's plot (so Home button + entrance prompt work) ----
+  _syncHomeEntrance();
   // Check for visit link (?v=username)
   checkVisitLink((username) => {
     toast("👋 Visiting " + username + "'s home...");
@@ -1785,9 +1800,33 @@ initAuth((user) => {
     if (p.missedRent != null && p.missedRent !== game.state.missedRent) { game.state.missedRent = p.missedRent; changed = true; }
     if (p.skillBonus != null && p.skillBonus !== game.state.skillBonus) { game.state.skillBonus = p.skillBonus; changed = true; }
     if (p.weeklyDebt != null && p.weeklyDebt !== game.state.weeklyDebt) { game.state.weeklyDebt = p.weeklyDebt; changed = true; }
-    if (changed) { game.save?.(); updateHUD(); }
+    if (changed) { game.save?.(); updateHUD(); _syncHomeEntrance(); }
+    // Fallback: if origin is set but no homeArea, show area screen (covers the case
+    // where the look listener's first block already ran before origin was synced)
+    if (game.state.origin && !game.state.homeArea && !document.getElementById("area-sheet")) {
+      const t = setInterval(() => { if (!rig) return; clearInterval(t); _showAreaScreen(); }, 400);
+    }
   });
 });
+
+// ---- Sync the home entrance coordinates to the player's actual plot ----
+// Called on login + whenever homeArea/homePlot changes. Without this, the
+// "Press here 🟢 to enter" prompt shows at the wrong location and the Home
+// button teleports to the wrong place.
+function _syncHomeEntrance() {
+  if (!game.state.homeArea || game.state.homePlot == null) return;
+  const area = getArea(game.state.homeArea);
+  if (!area) return;
+  const pos = getPlotPosition(area, game.state.homePlot);
+  updateHomeEntrance(pos.x, pos.z + 4, Math.PI);
+  // Update minimap home marker
+  _updateHomeMinimapMarker(pos.x, pos.z);
+}
+function _updateHomeMinimapMarker(x, z) {
+  // The minimap draws markers from MAP_LOCATIONS. We add/update a "My Home" marker.
+  // This is a lightweight approach — just store it on window for the minimap to pick up.
+  window._myHomePos = { x, z };
+}
 initAdmin((user) => {
   toast("Admin access detected — welcome, " + (user.email || "Admin"));
   const badge = document.getElementById("admin-user-badge");
