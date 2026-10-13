@@ -6,7 +6,7 @@
 //   2. Listen to Firebase hunt/{spotId} to know when each spot was last claimed,
 //      and only render the mesh when the spot is claimable.
 //   3. Each frame, check if the player is within 6 m of a claimable spot — if so,
-//      show the "Press E to claim" prompt and bind the claim key.
+//      show the "Press here 🟢 to claim" prompt (tappable, mobile-friendly).
 //   4. On claim: write a Firebase transaction on hunt/{spotId} so only the first
 //      player to claim wins. Add the reward to economy/{uid}/balance and log to
 //      economy/{uid}/log. Update HUD card + phone app.
@@ -36,7 +36,7 @@ let _toast = null;
 let _updateHud = null;
 let _celebrate = null;
 let _nearest = null;   // { spot, dist } nearest claimable spot
-let _promptEl = null;  // the "Press E to claim" DOM element
+let _promptEl = null;  // the "Press here 🟢 to claim" DOM element
 let _boundKey = false;
 let _stats = { totalClaims: 0, jackpotClaims: 0, rareClaims: 0, commonClaims: 0, earlyBirdClaims: 0, areasClaimed: {}, lastClaimDay: "" };
 let _dayClaimCount = 0;
@@ -149,16 +149,22 @@ function _updateInstances(now) {
   _tickRadar(now, nearestDist === Infinity ? null : nearestDist);
 }
 
-// ---- "Press E to claim" prompt ----
+// ---- "Press here 🟢 to claim" prompt (tappable, mobile-friendly) ----
 function _showPrompt(spot) {
   if (!_promptEl) {
     _promptEl = document.createElement("div");
     _promptEl.id = "hunt-claim-prompt";
-    _promptEl.style.cssText = "position:fixed;left:50%;bottom:calc(120px + env(safe-area-inset-bottom));transform:translateX(-50%);background:rgba(11,11,12,.92);color:#f2b134;border:2px solid #f2b134;border-radius:12px;padding:10px 16px;font:700 13px Poppins,sans-serif;z-index:55;pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.5);text-align:center;";
+    _promptEl.style.cssText = "position:fixed;left:50%;bottom:calc(130px + env(safe-area-inset-bottom));transform:translateX(-50%);background:rgba(11,11,12,.95);color:#f2b134;border:2px solid #f2b134;border-radius:14px;padding:12px 20px;font:700 13px Poppins,sans-serif;z-index:55;pointer-events:auto;box-shadow:0 4px 14px rgba(0,0,0,.5);text-align:center;cursor:pointer;user-select:none;-webkit-user-select:none;";
     document.body.appendChild(_promptEl);
+    // Tap the prompt itself to claim (mobile-friendly — no E key needed)
+    _promptEl.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (_nearest) claimSpot(_nearest.spot);
+    });
   }
   const r = RARITY[spot.rarity];
-  _promptEl.innerHTML = `${r.glyph} <b>${r.label}</b> spot here!<br><span style="font-size:11px;color:#9b9ba4">Press <b style="color:#f2b134">E</b> to claim</span>`;
+  _promptEl.innerHTML = `${r.glyph} <b>${r.label}</b> spot here!<br><span style="font-size:12px;color:#4ade80;font-weight:600;">Press here 🟢 to claim</span>`;
   _promptEl.style.display = "block";
   _bindClaimKey();
 }
@@ -186,17 +192,17 @@ function _onClaimKey(e) {
 // ---- Claim a spot via Firebase transaction ----
 export async function claimSpot(spot) {
   if (!_uid) return;
+  // Pre-check: are we really within range? (anti-cheat)
+  const dx = spot.x - _player.x, dz = spot.z - _player.z;
+  if (Math.sqrt(dx * dx + dz * dz) > CLAIM_RANGE + 1.5) {
+    _toast?.("Too far — walk closer to claim.");
+    return;
+  }
   // Per-day cap
   const today = new Date().toISOString().slice(0, 10);
   if (_stats.lastClaimDay !== today) { _stats.lastClaimDay = today; _dayClaimCount = 0; }
   if (_dayClaimCount >= MAX_CLAIMS_PER_DAY) {
     _toast?.("🚫 You don reach today's claim limit (" + MAX_CLAIMS_PER_DAY + "). Try again tomorrow.");
-    return;
-  }
-  // Pre-check: are we really within range? (anti-cheat)
-  const dx = spot.x - _player.x, dz = spot.z - _player.z;
-  if (Math.sqrt(dx * dx + dz * dz) > CLAIM_RANGE + 1.5) {
-    _toast?.("Too far — walk closer to claim.");
     return;
   }
   // The reward is deterministic for this respawn bucket so every player who
@@ -208,6 +214,7 @@ export async function claimSpot(spot) {
   // unclaimed (or past its respawn window) wins; everyone else gets "too late".
   const spotRef = ref(db, "hunt/" + spot.id);
   let won = false;
+  let alreadyClaimed = false;
   try {
     await runTransaction(spotRef, (cur) => {
       const lastTs = cur && cur.ts ? cur.ts : 0;
@@ -215,6 +222,7 @@ export async function claimSpot(spot) {
       if (now - lastTs < r.respawnMs) {
         // Still in respawn window — abort the transaction (returning undefined
         // tells Firebase to abort without writing).
+        alreadyClaimed = true;
         return; // undefined → abort
       }
       won = true;
@@ -226,7 +234,11 @@ export async function claimSpot(spot) {
     return;
   }
   if (!won) {
-    _toast?.("😅 Too late — someone don already claim this one. Try another spot.");
+    if (alreadyClaimed) {
+      _toast?.("😅 Too late — someone don already claim this one. Try another spot.");
+    } else {
+      _toast?.("😅 Could not claim — try again.");
+    }
     return;
   }
   // Won! Add reward to balance. We use a transaction here too so the balance

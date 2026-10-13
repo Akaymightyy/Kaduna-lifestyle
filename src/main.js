@@ -631,7 +631,7 @@ function _showPhoneApp(appId) {
       }
       h += '</div>';
     }
-    h += '<div style="font-size:10px;color:#6b7280;margin-top:10px;text-align:center;line-height:1.4;">💡 Listen for the beep — it speeds up as you get closer. Press <b>E</b> when you see the prompt to claim.</div>';
+    h += '<div style="font-size:10px;color:#6b7280;margin-top:10px;text-align:center;line-height:1.4;">💡 Listen for the beep — it speeds up as you get closer. Tap the prompt when you see it to claim.</div>';
     h += backBtn;
     c.innerHTML = h;
     return;
@@ -1219,7 +1219,7 @@ window._placeInRoom = (storageIdx) => {
     if (homeDef) {
       player.pos.set(homeDef.entranceX, 0, homeDef.entranceZ);
       player.heading = homeDef.entranceFacing;
-      toast("Walked to your home. Press E to enter, then place furniture.");
+      toast("Walked to your home. Tap the prompt to enter, then place furniture.");
     }
     return;
   }
