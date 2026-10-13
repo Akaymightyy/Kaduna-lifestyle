@@ -65,7 +65,7 @@ export function tickEntrancePrompt(playerX, playerZ, gameHour) {
   if (_state.active) {
     _state.promptEl.style.display = "block";
     _state.promptEl.innerHTML =
-      '🚪 Press <b style="background:#fff;color:#0f4d3a;padding:2px 8px;border-radius:6px;">E</b> to leave';
+      '🚪 Press here 🟢 to leave';
     return;
   }
   for (const def of listPlaces()) {
@@ -80,7 +80,7 @@ export function tickEntrancePrompt(playerX, playerZ, gameHour) {
       _state.promptEl.style.display = "block";
       _state.promptEl.innerHTML =
         '🚪 Enter <b style="color:#f2b134;">' + def.name +
-        '</b> &nbsp;Press <b style="background:#fff;color:#0f4d3a;padding:2px 8px;border-radius:6px;">E</b>';
+        '</b> &nbsp;<span style="color:#4ade80;font-weight:600;">Press here 🟢</span>';
     }
     return;
   }
