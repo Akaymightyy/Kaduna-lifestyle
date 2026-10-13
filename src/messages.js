@@ -136,4 +136,15 @@ export async function leaveGroup(chatId) { if (!_uid) return; await set(ref(db, 
 export async function blockUser(otherUid) { if (!_uid) return; await set(ref(db, "blocks/" + _uid + "/" + otherUid), true); _toast?.("🚫 Blocked user"); }
 export async function reportUser(otherUid, reason) { if (!_uid) return; const r = push(ref(db, "reports")); await set(r, { from: _uid, against: otherUid, reason: reason || "", ts: Date.now() }); _toast?.("📝 Report submitted."); }
 export async function getChatMeta(chatId) { try { const snap = await get(ref(db, "chats/" + chatId + "/meta")); return snap.val() || null; } catch (e) { return null; } }
+
+// ---- FIX: Add exported getPresence + listenToPresence (were imported in main.js but didn't exist) ----
+export async function getPresence(uid) {
+  try { const snap = await get(ref(db, "presence/" + uid)); return snap.val() || null; } catch (e) { return null; }
+}
+export function listenToPresence(uid, cb) {
+  if (!uid) return () => {};
+  const unsub = onValue(ref(db, "presence/" + uid), (snap) => { cb?.(snap.val() || null); });
+  return unsub;
+}
+
 export function cleanupMessages() { closeChat(); if (_unsubUserChats) { _unsubUserChats(); _unsubUserChats = null; } if (_uid) { update(ref(db, "presence/" + _uid), { online: false, lastSeen: Date.now() }); } }

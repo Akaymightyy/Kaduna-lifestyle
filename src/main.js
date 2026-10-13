@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { buildWorld } from "./world.js";
-import { createTraffic, setPedestrianPos } from "./traffic.js";
+import { createTraffic } from "./traffic.js";
 import { loadPlayer, collide } from "./player.js";
 import { createControls, updateCamera } from "./controls.js";
 import { createMinimap } from "./minimap.js";
@@ -28,7 +28,7 @@ import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
 import { celebrate } from "./celebrate.js";
 import { initGraphics, updateSky, tickGraphics, applyQuality, autoDetectQuality, getQuality, QUALITY_PRESETS } from "./graphics.js";
 import { AREAS, getArea, claimPlot, getMyHouse, canPickArea, getPlotPosition } from "./areas.js";
-import { initMessages, searchUsers, openDM, sendMessage, openChat, closeChat, getChatList, getPresence, listenToPresence, sendMoney, createGroup, leaveGroup, blockUser, reportUser, getChatMeta, cleanupMessages } from "./messages.js";
+import { initMessages, searchUsers, openDM, sendMessage, openChat, closeChat, getChatList, sendMoney, createGroup, leaveGroup, blockUser, reportUser, getChatMeta, cleanupMessages, getPresence, listenToPresence } from "./messages.js";
 import { initEvents, tickNepa, isNepaCut, getNepaStatus, hasPowerBackup, getModifiedDrain, tickMoodlets, addMoodlet, getActiveMoodlets, getConsequences, getWalkSpeedMultiplier, MOODLET_DEFS } from "./events.js";
 import { SKILLS, CAREERS, SHIFT_TONES, initCareers, getSkills, getCareer, getCareerDef, canJoinCareer, canPromote, joinCareer, promote, doShift, trainSkill } from "./careers.js";
 import { WISH_POOL, PERKS, initWishes, getTodaysWishes, getWishPoints, getPerks, hasPerk, checkWishes, buyPerk } from "./wishes.js";
@@ -107,22 +107,8 @@ const npcs = createNPCs(scene);
 const missionState = createMissionState();
 let _activeMission = null;
 
-// ---- day/night (real cycle) ----
-// FIX: Slow down time from 1 real minute = 1 game hour to 5 real minutes = 1 game hour
-// This makes the day last 2 hours of real time instead of 24 minutes
-const TIME_SCALE = 1 / 5;  // 5 real minutes = 1 game hour (was 1 min = 1 hour)
-const SKY = [
-  [0,0x1a1a2e,0.15,0.35,0x4a4a6a],      // midnight — brighter, not pitch black
-  [5,0x2a2a4e,0.2,0.4,0x5a5a7a],        // pre-dawn
-  [6.5,0xf3a56b,1.0,0.65,0xffb070],      // sunrise
-  [9,0x9fd4f5,2.0,0.9,0xfff2d6],        // morning
-  [12,0x9fd4f5,2.0,0.9,0xfff2d6],       // midday
-  [16,0xb8d8f0,1.8,0.85,0xffe8c8],      // afternoon
-  [18,0xf08a5d,1.2,0.7,0xff9a5a],       // golden hour
-  [19.5,0x3a3f6a,0.3,0.45,0x6a6a9a],    // dusk — brighter
-  [21,0x2a2a4e,0.2,0.4,0x5a5a7a],       // early night
-  [24,0x1a1a2e,0.15,0.35,0x4a4a6a],      // night — not pitch black
-];
+// ---- day/night (real cycle, not forced daytime) ----
+const SKY = [[0,0x0b1230,0.0,0.25,0x8899ff],[5,0x1b2548,0.0,0.3,0x8899ff],[6.5,0xf3a56b,0.9,0.7,0xffb070],[9,0x9fd4f5,1.8,1.0,0xfff2d6],[16,0x9fd4f5,1.8,1.0,0xfff2d6],[18,0xf08a5d,1.0,0.75,0xff9a5a],[19.5,0x2a2f55,0.1,0.35,0x8899ff],[24,0x0b1230,0.0,0.25,0x8899ff]];
 function skyAt(h) { let i=0; while(i<SKY.length-2&&h>=SKY[i+1][0])i++; const a=SKY[i],b=SKY[i+1],t=(h-a[0])/(b[0]-a[0]); const lc=(x,y)=>new THREE.Color(x).lerp(new THREE.Color(y),t); return {sky:lc(a[1],b[1]),sun:a[2]+(b[2]-a[2])*t,hemi:a[3]+(b[3]-a[3])*t,sunCol:lc(a[4],b[4])}; }
 const qs = new URLSearchParams(location.search);
 const fixedHour = qs.has("t") ? parseFloat(qs.get("t")) : null;
@@ -131,8 +117,7 @@ const INTERIOR_BG = new THREE.Color(0x1a1510);
 let lastClock = "";
 let _graphicsInited = false;
 function applyTime() {
-  // FIX: Slow down the clock — TIME_SCALE makes 5 real minutes = 1 game hour
-  const mins = (Date.now() / 60000) * TIME_SCALE; const hour = fixedHour ?? (mins%24);
+  const mins = Date.now()/60000; const hour = fixedHour ?? (mins%24);
   // ---- Init graphics once (after scene/sun/hemi are ready) ----
   if (!_graphicsInited) {
     _graphicsInited = true;
@@ -144,15 +129,16 @@ function applyTime() {
   }
   // ---- Update sky + sun + clouds based on hour ----
   updateSky(hour);
-  // FIX: Night is no longer pitch black — always keep minimum hemisphere light
   const night = hour < 6.5 || hour > 19.5;
-  // Even at night, keep hemi at minimum 0.4 (was dropping to 0.25-0.35)
+  // sun follows the player (shadows) — position set by updateSky, but we offset to follow player
+  sun.position.x += player.pos.x;
+  sun.position.z += player.pos.z;
+  sun.target.position.set(player.pos.x, 0, player.pos.z);
+  // Lamp lights at night
   if (night) {
     traffic.setNight(true);
     world.lamps.material.color.set(0xffd070);
-    if (world.lampLights) for (const pl of world.lampLights) { pl.intensity = 1.2; pl.visible = true; }
-    // FIX: Add a moonlight ambient so you can see at night
-    if (hemi.intensity < 0.4) hemi.intensity = 0.4;
+    if (world.lampLights) for (const pl of world.lampLights) { pl.intensity = 0.8; pl.visible = true; }
   } else {
     traffic.setNight(false);
     world.lamps.material.color.set(0x555555);
@@ -205,8 +191,7 @@ bindInteractKey(
 );
 function _gameHour() {
   if (fixedHour != null) return fixedHour;
-  // FIX: Use slowed-down time
-  return ((Date.now() / 60000) * TIME_SCALE) % 24;
+  return (Date.now() / 60000) % 24;
 }
 function _renderPlaceActions(def) {
   let bar = document.getElementById("place-actions");
@@ -284,7 +269,6 @@ function _showPhoneApp(appId) {
       {id:"jobs",icon:"💼",label:"Hustle"},
       {id:"bank",icon:"🏦",label:"Bank"},
       {id:"ride",icon:"🛺",label:"Ride"},
-      {id:"chat",icon:"💬",label:"Chat"},
       {id:"map",icon:"🗺️",label:"Map"},
       {id:"missions",icon:"🎯",label:"Missions"},
       {id:"daily",icon:"🎁",label:"Daily"},
@@ -311,11 +295,11 @@ function _showPhoneApp(appId) {
       {id:"settings",icon:"⚙️",label:"Settings"}
     ];
     if(isAdmin()) apps.push({id:"admin",icon:"🔐",label:"Admin"});
-    const COL={food:["#f59e0b","#f97316"],jobs:["#8b5cf6","#6366f1"],bank:["#3b82f6","#2563eb"],ride:["#10b981","#059669"],chat:["#22c55e","#16a34a"],map:["#06b6d4","#0891b2"],daily:["#ec4899","#db2777"],health:["#ef4444","#dc2626"],richlist:["#f59e0b","#d97706"],profile:["#6366f1","#4f46e5"],events:["#d946ef","#c026d3"],news:["#64748b","#475569"],boutique:["#d946ef","#a855f7"],myoutfits:["#f97316","#ea580c"],wardrobe:["#14b8a6","#0d9488"],contacts:["#6366f1","#818cf8"],settings:["#64748b","#475569"],admin:["#ef4444","#b91c1c"],hunt:["#f2b134","#d97706"],missions:["#dc2626","#b91c1c"],realestate:["#16a34a","#15803d"],homestore:["#ea580c","#c2410c"],storage:["#0891b2","#0e7490"],messages:["#22c55e","#16a34a"]};
+    const COL={food:["#f59e0b","#f97316"],jobs:["#8b5cf6","#6366f1"],bank:["#3b82f6","#2563eb"],ride:["#10b981","#059669"],map:["#06b6d4","#0891b2"],daily:["#ec4899","#db2777"],health:["#ef4444","#dc2626"],richlist:["#f59e0b","#d97706"],profile:["#6366f1","#4f46e5"],events:["#d946ef","#c026d3"],news:["#64748b","#475569"],boutique:["#d946ef","#a855f7"],myoutfits:["#f97316","#ea580c"],wardrobe:["#14b8a6","#0d9488"],contacts:["#6366f1","#818cf8"],settings:["#64748b","#475569"],admin:["#ef4444","#b91c1c"],hunt:["#f2b134","#d97706"],missions:["#dc2626","#b91c1c"],realestate:["#16a34a","#15803d"],homestore:["#ea580c","#c2410c"],storage:["#0891b2","#0e7490"],messages:["#22c55e","#16a34a"]};
     const now=new Date(), hh=String(now.getHours()).padStart(2,"0"), mm=String(now.getMinutes()).padStart(2,"0");
     const dateTxt=now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})+" · Kaduna";
     c.innerHTML='<div class="ph-home-clock">'+hh+':'+mm+'</div><div class="ph-home-date">'+dateTxt+'</div><div class="ph-home-bal"><span>₦'+(game.state.money||0).toLocaleString()+'</span></div>'+
-      '<div class="ph-grid">'+apps.map(a=>{const k=COL[a.id]||["#64748b","#475569"];return '<button class="ph-app" onclick="window.showApp(\''+a.id+'\')"><div class="ph-ic" style="background:linear-gradient(145deg,'+k[0]+','+k[1]+')">'+a.icon+'</div>'+a.label+'</button>';}).join("")+'</div>';
+      '<div class="ph-grid">'+apps.map(a=>{const k=COL[a.id]||["#64748b","#475569"];const badge=(a.id==="messages"&&_totalUnread>0)?'<span style="position:absolute;top:-2px;right:-2px;background:#e11d48;color:#fff;border-radius:10px;min-width:18px;height:18px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;padding:0 4px;">'+_totalUnread+'</span>':'';return '<button class="ph-app" onclick="window.showApp(\''+a.id+'\')" style="position:relative;"><div class="ph-ic" style="background:linear-gradient(145deg,'+k[0]+','+k[1]+')">'+a.icon+'</div>'+a.label+badge+'</button>';}).join("")+'</div>';
     const pt=$("phone-time"); if(pt) pt.textContent=hh+':'+mm;
     return;
   }
@@ -353,7 +337,8 @@ function _showPhoneApp(appId) {
     return;
   }
   if(appId==="chat"){
-    c.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #ddd;margin-bottom:8px;"><span style="font-size:14px;font-weight:700;color:var(--green);">💬 Kaduna Chat</span><span id="online-count" style="font-size:11px;color:#999;">1 here</span></div><div id="chat-log" style="height:240px;overflow-y:auto;font-size:12px;margin-bottom:8px;border:1px solid #eee;border-radius:8px;padding:8px;background:#fff;"></div><div style="display:flex;gap:4px;"><input id="chat-input" type="text" placeholder="Type message..." style="flex:1;padding:8px 10px;border:1px solid #ddd;border-radius:8px;font-family:inherit;font-size:12px;" onkeydown="if(event.key===\'Enter\')sendChatMsg()" /><button onclick="sendChatMsg()" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:12px;font-weight:600;">Send</button></div>'+backBtn;
+    // FIX: Old "chat" app removed — redirect to "messages" app
+    showPhoneApp("messages");
     return;
   }
   if(appId==="map"){
@@ -1067,9 +1052,8 @@ window.travelToPlace=(placeId)=>{
   }, 50);
 };
 window.sendMessage=(uid,name)=>{
-  // FIX: Actually send a chat message instead of just "waving"
   sendChat("👋 Hi "+name+"!");
-  toast("💬 Said hi to "+name);
+  toast("Waved at "+name);
 };
 window.saveGame=()=>{game.save?.();toast("Game saved!");};
 window._setGraphicsQuality = (q) => {
@@ -1200,22 +1184,70 @@ function _showOriginScreen() {
 }
 // ---- Messages app rendering ----
 let _showingApp = null;
+let _totalUnread = 0;
+let _lastUnreadCount = 0;
+function _updateUnreadBadge() {
+  const chats = getChatList();
+  _totalUnread = chats.reduce((s, c) => s + (c.unread || 0), 0);
+  // Update phone button badge
+  const phoneBtn = document.querySelector(".phone-btn");
+  if (phoneBtn) {
+    const existing = phoneBtn.querySelector(".phone-unread-badge");
+    if (_totalUnread > 0) {
+      if (existing) existing.textContent = _totalUnread;
+      else {
+        const badge = document.createElement("span");
+        badge.className = "phone-unread-badge";
+        badge.style.cssText = "position:absolute;top:-4px;right:-4px;background:#e11d48;color:#fff;border-radius:10px;min-width:18px;height:18px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;padding:0 4px;z-index:5;";
+        badge.textContent = _totalUnread;
+        phoneBtn.style.position = "relative";
+        phoneBtn.appendChild(badge);
+      }
+    } else if (existing) existing.remove();
+  }
+  // Toast on new message
+  if (_totalUnread > _lastUnreadCount) {
+    const newChats = chats.filter(c => (c.unread || 0) > 0);
+    if (newChats.length > 0) {
+      const latest = newChats[0];
+      // Don't toast if phone is open AND we're in the messages app
+      const phoneOpen = document.getElementById("phone-modal")?.classList.contains("show");
+      const inMessages = _showingApp === "messages" && window._openChatId;
+      if (!phoneOpen || !inMessages) {
+        toast("💬 New message" + (_totalUnread > 1 ? " (" + _totalUnread + " unread)" : ""));
+      }
+    }
+  }
+  _lastUnreadCount = _totalUnread;
+}
 function _renderMessagesList(c) {
   const backBtnMsg = '<button onclick="window.showApp(\'home\')" style="margin-top:14px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;font-weight:600;">← Back to Phone</button>';
   const chats = getChatList();
-  let h = '<div style="font-size:15px;margin-bottom:8px;font-weight:700;color:#f2f2f4;">💬 Messages</div>';
+  let h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">';
+  h += '<div style="font-size:16px;font-weight:700;color:#f2f2f4;">💬 Messages</div>';
+  // FIX: Show total unread badge in header
+  const totalUnread = chats.reduce((s, c2) => s + (c2.unread || 0), 0);
+  if (totalUnread > 0) h += '<span style="background:#e11d48;color:#fff;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:700;">' + totalUnread + ' unread</span>';
+  h += '</div>';
+  // Tabs: Chats | Groups
+  h += '<div style="display:flex;gap:4px;margin-bottom:10px;">';
+  h += '<button id="msg-tab-chats" onclick="window._msgTab(\'chats\')" style="flex:1;padding:8px;background:#0f4d3a;color:#fff;border:none;border-radius:8px;font:600 12px Poppins,sans-serif;">Chats</button>';
+  h += '<button id="msg-tab-groups" onclick="window._msgTab(\'groups\')" style="flex:1;padding:8px;background:#17181b;color:#9b9ba4;border:1px solid #26272b;border-radius:8px;font:600 12px Poppins,sans-serif;">Groups</button>';
+  h += '</div>';
   // Search box
   h += '<div style="display:flex;gap:4px;margin-bottom:10px;"><input id="msg-search" type="text" placeholder="Message someone: @username" style="flex:1;padding:8px 10px;border:1px solid #26272b;border-radius:8px;background:#0b0b0c;color:#fff;font-size:12px;outline:none;" oninput="window._searchUsers(this.value)" /><button onclick="window._newGroup()" style="background:#f2b134;color:#000;border:none;border-radius:8px;padding:8px 12px;cursor:pointer;font:600 11px Poppins,sans-serif;white-space:nowrap;">+ Group</button></div>';
   // Search results
   h += '<div id="msg-search-results" style="margin-bottom:8px;"></div>';
   // Chat list
-  h += '<div style="font-size:12px;font-weight:600;margin:8px 0 6px;color:#f2b134;">📋 Chats (' + chats.length + ')</div>';
+  h += '<div id="msg-chat-list" style="font-size:12px;font-weight:600;margin:8px 0 6px;color:#f2b134;">📋 Chats (' + chats.length + ')</div>';
   if (chats.length === 0) {
     h += '<div style="text-align:center;padding:20px;color:#6b7280;font-size:12px;">No chats yet. Search for someone by @username to start chatting!</div>';
   } else {
     for (const chat of chats) {
       const unread = chat.unread || 0;
       const time = chat.lastTs ? new Date(chat.lastTs).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "";
+      // FIX: Show chat name (from meta) not just lastText — look up name from chat meta
+      const chatName = chat.name || chat.lastText || "Tap to chat";
       h += '<div onclick="window._openChatView(\'' + chat.chatId + '\')" style="display:flex;align-items:center;gap:8px;padding:10px;background:' + (unread > 0 ? '#1a2a1a' : '#17181b') + ';border-radius:10px;margin-bottom:4px;cursor:pointer;">';
       h += '<div style="width:36px;height:36px;background:#0f4d3a;color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;">💬</div>';
       h += '<div style="flex:1;min-width:0;"><div style="font-size:12px;font-weight:600;color:#f2f2f4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (chat.lastText || "Tap to chat") + '</div>';
@@ -1362,6 +1394,43 @@ window._newGroup = () => {
     createGroup(name, "👥", validUids).then((r) => { toast(r.ok ? "🎉 Group created!" : r.msg); if (r.ok) showPhoneApp("messages"); });
   });
 };
+// FIX: Tab switching for Messages app (Chats | Groups)
+window._msgTab = (tab) => {
+  const c = document.getElementById("phone-content");
+  if (!c) return;
+  const chatsBtn = document.getElementById("msg-tab-chats");
+  const groupsBtn = document.getElementById("msg-tab-groups");
+  if (tab === "chats") {
+    if (chatsBtn) { chatsBtn.style.background = "#0f4d3a"; chatsBtn.style.color = "#fff"; chatsBtn.style.border = "none"; }
+    if (groupsBtn) { groupsBtn.style.background = "#17181b"; groupsBtn.style.color = "#9b9ba4"; groupsBtn.style.border = "1px solid #26272b"; }
+    _renderMessagesList(c);
+  } else if (tab === "groups") {
+    if (groupsBtn) { groupsBtn.style.background = "#0f4d3a"; groupsBtn.style.color = "#fff"; groupsBtn.style.border = "none"; }
+    if (chatsBtn) { chatsBtn.style.background = "#17181b"; chatsBtn.style.color = "#9b9ba4"; chatsBtn.style.border = "1px solid #26272b"; }
+    // Render groups list
+    const allChats = getChatList();
+    const groups = allChats.filter(c => c.chatId && c.chatId.startsWith("grp_"));
+    let h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">';
+    h += '<div style="font-size:16px;font-weight:700;color:#f2f2f4;">👥 Groups</div>';
+    h += '<button onclick="window._newGroup()" style="background:#f2b134;color:#000;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font:600 11px Poppins,sans-serif;">+ New</button>';
+    h += '</div>';
+    if (groups.length === 0) {
+      h += '<div style="text-align:center;padding:20px;color:#6b7280;font-size:12px;">No groups yet. Tap "+ New" to create one.</div>';
+    } else {
+      for (const g of groups) {
+        const unread = g.unread || 0;
+        h += '<div onclick="window._openChatView(\'' + g.chatId + '\')" style="display:flex;align-items:center;gap:8px;padding:10px;background:' + (unread > 0 ? '#1a2a1a' : '#17181b') + ';border-radius:10px;margin-bottom:4px;cursor:pointer;">';
+        h += '<div style="width:36px;height:36px;background:#f2b134;color:#000;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;">👥</div>';
+        h += '<div style="flex:1;min-width:0;"><div style="font-size:12px;font-weight:600;color:#f2f2f4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (g.lastText || "Group chat") + '</div>';
+        h += '<div style="font-size:10px;color:#9b9ba4;">' + (g.lastTs ? new Date(g.lastTs).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "") + '</div></div>';
+        if (unread > 0) h += '<span style="background:#e11d48;color:#fff;border-radius:10px;padding:2px 7px;font-size:10px;font-weight:700;">' + unread + '</span>';
+        h += '</div>';
+      }
+    }
+    h += '<button onclick="window.showApp(\'home\')" style="margin-top:14px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;font-weight:600;">← Back to Phone</button>';
+    c.innerHTML = h;
+  }
+};
 function _showAreaScreen() {
   if (game.state.homeArea) return;
   let el = document.getElementById("area-sheet");
@@ -1493,10 +1562,18 @@ window._addFriend = async () => {
   const r = await addFriendByUsername(username.trim());
   toast(r.msg); showPhoneApp("friends");
 };
-window._dmFriend = (fUid, name) => {
-  // Simple DM: open chat with this friend
-  toast("💬 DM with " + name + " — chat at the bottom");
-  openPhone(); setTimeout(() => showPhoneApp("chat"), 100);
+window._dmFriend = async (fUid, name) => {
+  // FIX: Open the Messages app DM with this friend (was opening the old "chat" app)
+  const r = await openDM(fUid, name);
+  if (r) {
+    window._openChatId = r.chatId;
+    window._openChatName = name;
+    window._openChatOtherUid = fUid;
+    openPhone();
+    setTimeout(() => showPhoneApp("messages"), 100);
+  } else {
+    toast("💬 Could not open chat with " + name);
+  }
 };
 window._visitFriend = (username) => {
   if (!username) { toast("Friend has no username"); return; }
@@ -1589,10 +1666,6 @@ window.bookRide=(rideId)=>{
   });
 };
 window.sendChatMsg=function(){const i=$("chat-input");if(i&&i.value.trim()){sendChat(i.value);i.value="";}};
-// FIX: Quick chat bar handler
-window.sendQuickChat=function(){const i=$("quick-chat-input");if(i&&i.value.trim()){sendChat(i.value.trim().slice(0,200));i.value="";toast("💬 Message sent!");}};
-$("quick-chat-send")?.addEventListener("click",window.sendQuickChat);
-$("quick-chat-input")?.addEventListener("keydown",(e)=>{if(e.key==="Enter"){window.sendQuickChat();}});
 
 // ---- Daily rewards ----
 async function loadDaily() {
@@ -1662,16 +1735,6 @@ document.querySelectorAll("#bottom-nav .nav-btn").forEach(btn=>{
     const n=btn.dataset.nav;
     if(n==="phone")openPhone();
     else if(n==="map"){openPhone();setTimeout(()=>showPhoneApp("map"),50);}
-    else if(n==="chat"){
-      // FIX: Toggle quick chat bar instead of opening phone
-      const bar=$("quick-chat-bar");
-      if(bar.style.display==="none"||!bar.style.display){
-        bar.style.display="block";
-        setTimeout(()=>$("quick-chat-input")?.focus(),100);
-      } else {
-        bar.style.display="none";
-      }
-    }
     else if(n==="home"){
       closePhone();$("profile-sheet")?.classList.remove("show");
       // Travel to the player's home entrance (dynamic coordinates)
@@ -1753,7 +1816,7 @@ initAuth((user) => {
   initSocial(user.uid, () => {});
   // ---- Init Messages app ----
   const myName = user.displayName || user.email?.split("@")[0] || "Player";
-  initMessages(user.uid, myName, toast, () => { if (_showingApp === "messages") showPhoneApp("messages"); });
+  initMessages(user.uid, myName, toast, () => { _updateUnreadBadge(); if (_showingApp === "messages") showPhoneApp("messages"); });
   initFlavour((headline) => { if (headline) toast("📰 " + headline.text); });
   // ---- Sync home entrance to player's plot (so Home button + entrance prompt work) ----
   _syncHomeEntrance();
@@ -1772,19 +1835,12 @@ initAuth((user) => {
     const hudEl=$("online-count-hud"); if(hudEl) hudEl.textContent=count;
   },
     (msg) => {
-      // FIX: Show chat messages BOTH in the phone chat log AND as a floating toast bubble
-      const log=$("chat-log");
-      if(log){
-        const div=document.createElement("div");
-        div.style.cssText="padding:4px 6px;border-bottom:1px solid #eee;";
-        div.innerHTML='<b style="color:'+(msg.uid===getMyUid()?"var(--green)":"#1d5fa8")+';">'+msg.name+':</b> '+msg.text;
-        log.appendChild(div); log.scrollTop=log.scrollHeight;
-        while(log.children.length>30) log.removeChild(log.firstChild);
-      }
-      // FIX: Also show as a temporary toast so players see messages without opening the phone
-      if(msg.uid !== getMyUid()) {
-        toast("💬 " + msg.name + ": " + msg.text);
-      }
+      const log=$("chat-log"); if(!log)return;
+      const div=document.createElement("div");
+      div.style.cssText="padding:4px 6px;border-bottom:1px solid #eee;";
+      div.innerHTML='<b style="color:'+(msg.uid===getMyUid()?"var(--green)":"#1d5fa8")+';">'+msg.name+':</b> '+msg.text;
+      log.appendChild(div); log.scrollTop=log.scrollHeight;
+      while(log.children.length>30) log.removeChild(log.firstChild);
     });
   // Check daily reward on login
   checkDailyReward(user.uid).then((reward) => {
@@ -1822,18 +1878,16 @@ initAuth((user) => {
     const fb = snap.val();
     const first = _lookFirst; _lookFirst = false;
     if (first) {
-      // FIX: Check BOTH Firebase AND localStorage for 'created' flag
-      // The bug was that new accounts had localStorage from a previous account
-      // (keyed by old UID) that had look.created = true, so the creator was skipped.
-      // Now we ONLY trust Firebase's look.created — not localStorage.
-      const alreadyMade = !!(fb && fb.created);
+      // new account (no saved character yet) -> character creator after the world has loaded
+      const alreadyMade = !!((fb && fb.created) || game.state.look.created);
       const needCreate = !alreadyMade;
+      if (alreadyMade && !(fb && fb.created)) {
+        // made on this device before but never reached the account: save it so it never asks again
+        game.state.look.created = true;
+        update(ref(db, "players/" + user.uid + "/look"), game.state.look).catch(() => {});
+      }
       if (needCreate) {
-        // New account or no saved character — ALWAYS show the creator
         if (fb) game.state.look = { ...game.state.look, ...fb };
-        // FIX: Clear any stale 'created' from localStorage so it doesn't interfere
-        game.state.look.created = false;
-        game.save?.();
         const t = setInterval(() => { if (!rig) return; clearInterval(t); window._openCreator(); }, 400);
       } else {
         // Character already created (e.g. after a gender-change reload). But if
@@ -1992,8 +2046,6 @@ function frame() {
 
   // Hide traffic when inside a place (fixes "cars inside buildings" bug)
   traffic.setVisible?.(!active);
-  // FIX: Tell traffic where the player is so cars can yield at zebra crossings
-  setPedestrianPos(player.pos.x, player.pos.z);
   if (!active) traffic.update(now);
   if (!active) npcs.update(dt, now, player.pos.x, player.pos.z);
   hitCool -= dt;
