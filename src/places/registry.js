@@ -362,6 +362,21 @@ export function getPlace(id) {
   return PLACE_DEFS.find((p) => p.id === id) || null;
 }
 
+// ---- Dynamic home entrance ----
+// The home's entrance coordinates must be updated to match the player's actual
+// plot position in their chosen area. Without this, the "Press here 🟢 to enter"
+// prompt never shows at the player's house, and the "🏠 Home" button teleports
+// them to the wrong place.
+export function updateHomeEntrance(x, z, facing) {
+  const home = getPlace("home");
+  if (!home) return;
+  home.worldX = x;
+  home.worldZ = z;
+  home.entranceX = x;
+  home.entranceZ = z;
+  if (facing != null) home.entranceFacing = facing;
+}
+
 export function findPlaceAtPosition(x, z, radius = 6) {
   for (const def of PLACE_DEFS) {
     const dx = def.entranceX - x, dz = def.entranceZ - z;
