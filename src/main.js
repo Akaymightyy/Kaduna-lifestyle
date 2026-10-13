@@ -1476,10 +1476,15 @@ initAuth((user) => {
     const first = _lookFirst; _lookFirst = false;
     if (first) {
       // new account (no saved character yet) -> character creator after the world has loaded
-      const needCreate = !(fb && fb.created);
+      const alreadyMade = !!((fb && fb.created) || game.state.look.created);
+      const needCreate = !alreadyMade;
+      if (alreadyMade && !(fb && fb.created)) {
+        // made on this device before but never reached the account: save it so it never asks again
+        game.state.look.created = true;
+        update(ref(db, "players/" + user.uid + "/look"), game.state.look).catch(() => {});
+      }
       if (needCreate) {
         if (fb) game.state.look = { ...game.state.look, ...fb };
-        game.state.look.created = false;
         const t = setInterval(() => { if (!rig) return; clearInterval(t); window._openCreator(); }, 400);
       } else {
         // Character already created (e.g. after a gender-change reload). But if
