@@ -26,6 +26,12 @@ import { ORIGINS, HOUSE_TIERS, getRentInfo, payRent, checkRentDue, applyOrigin, 
 import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
 import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
 import { celebrate } from "./celebrate.js";
+import { initEvents, tickNepa, isNepaCut, getNepaStatus, hasPowerBackup, getModifiedDrain, tickMoodlets, addMoodlet, getActiveMoodlets, getConsequences, getWalkSpeedMultiplier, MOODLET_DEFS } from "./events.js";
+import { SKILLS, CAREERS, SHIFT_TONES, initCareers, getSkills, getCareer, getCareerDef, canJoinCareer, canPromote, joinCareer, promote, doShift, trainSkill } from "./careers.js";
+import { WISH_POOL, PERKS, initWishes, getTodaysWishes, getWishPoints, getPerks, hasPerk, checkWishes, buyPerk } from "./wishes.js";
+import { POLICIES, initElection, getElection, getWeekKey, isCandidate, hasVoted, registerCandidate, vote, tallyVotes, getActivePolicy, applyPolicy } from "./election.js";
+import { initSocial, getFriends, addFriendByUsername, removeFriend, listenToDMs, sendDM, generateVisitLink, checkVisitLink } from "./social.js";
+import { WEATHERS, HEADLINES, initFlavour, getTodayWeather, getCurrentWeather, tickHeadlines, getActiveHeadlines, getCombinedModifiers } from "./flavour.js";
 
 const $ = (id) => document.getElementById(id);
 const showError = (m) => { const e = $("err"); e.style.display = "flex"; e.textContent = m; };
@@ -261,6 +267,12 @@ function _showPhoneApp(appId) {
       {id:"homestore",icon:"🛋️",label:"HomeStore"},
       {id:"storage",icon:"📦",label:"Storage"},
       {id:"hunt",icon:"💎",label:"Hunt"},
+      {id:"careers",icon:"💼",label:"Careers"},
+      {id:"skills",icon:"📈",label:"Skills"},
+      {id:"wishes",icon:"⭐",label:"Wishes"},
+      {id:"election",icon:"🗳️",label:"Election"},
+      {id:"friends",icon:"👥",label:"Friends"},
+      {id:"weather",icon:"🌤️",label:"Weather"},
       {id:"boutique",icon:"👕",label:"Boutique"},
       {id:"myoutfits",icon:"👜",label:"My Outfits"},
       {id:"wardrobe",icon:"👔",label:"Wardrobe"},
@@ -624,6 +636,232 @@ function _showPhoneApp(appId) {
     c.innerHTML = h;
     return;
   }
+  if(appId==="careers"){
+    const career = getCareer();
+    const skills = getSkills();
+    let h = '<div style="font-size:15px;margin-bottom:8px;font-weight:700;color:#f2f2f4;">💼 Careers</div>';
+    if (career.id) {
+      const c = getCareerDef(career.id);
+      const level = c.levels[career.level];
+      h += '<div style="background:#17181b;border-radius:10px;padding:10px;margin-bottom:10px;border-left:3px solid #f2b134;">';
+      h += '<div style="font-size:13px;font-weight:700;color:#f2b134;">' + c.icon + ' ' + c.name + ' — ' + level.title + '</div>';
+      h += '<div style="font-size:11px;color:#9b9ba4;margin-top:4px;">Pay: ₦' + level.pay + ' per shift · Energy cost: ' + level.energyCost + '</div>';
+      h += '<div style="font-size:11px;color:#9b9ba4;">XP: ' + career.xp + '/100 · Shifts: ' + (career.totalShifts || 0) + '</div>';
+      const promoCheck = canPromote();
+      if (promoCheck.ok) {
+        h += '<button onclick="window._promoteCareer()" style="margin-top:6px;width:100%;background:#4ade80;color:#000;border:none;border-radius:8px;padding:8px;cursor:pointer;font:600 12px Poppins,sans-serif;">🎉 Promote to ' + promoCheck.nextLevel.title + '</button>';
+      } else if (career.level >= c.levels.length - 1) {
+        h += '<div style="font-size:11px;color:#4ade80;margin-top:4px;">🏆 Max level reached!</div>';
+      } else {
+        h += '<div style="font-size:10px;color:#9b9ba4;margin-top:4px;">Next: ' + promoCheck.reason + '</div>';
+      }
+      h += '</div>';
+      // Shift tones
+      h += '<div style="font-size:12px;font-weight:600;margin:10px 0 6px;color:#f2b134;">⚡ Do a Shift</div>';
+      for (const t of SHIFT_TONES) {
+        h += '<button onclick="window._doShift(\'' + t.id + '\')" style="width:100%;background:#17181b;color:#f2f2f4;border:1px solid #26272b;border-radius:8px;padding:8px 10px;margin-bottom:4px;cursor:pointer;text-align:left;font:600 11px Poppins,sans-serif;">' + t.icon + ' ' + t.label + ' <span style="color:#9b9ba4;font-weight:400;">— Pay x' + t.payMul + ' · Risk ' + Math.round(t.risk * 100) + '%</span></button>';
+      }
+    } else {
+      h += '<div style="font-size:11px;color:#9b9ba4;margin-bottom:10px;">Join a career to start earning. Some careers need skill levels.</div>';
+    }
+    // Career list
+    h += '<div style="font-size:12px;font-weight:600;margin:10px 0 6px;color:#f2b134;">📋 All Careers</div>';
+    for (const c of CAREERS) {
+      const skillVal = skills[c.skill] || 0;
+      const canJoin = canJoinCareer(c.id);
+      const isCurrent = career.id === c.id;
+      h += '<div style="background:#17181b;border-radius:8px;padding:8px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;">';
+      h += '<div><div style="font-size:12px;font-weight:600;color:' + (isCurrent ? '#4ade80' : '#f2f2f4') + ';">' + c.icon + ' ' + c.name + (isCurrent ? ' ✅' : '') + '</div>';
+      h += '<div style="font-size:10px;color:#9b9ba4;">Needs ' + c.skill + ' lvl ' + c.levels[0].levelReq + ' (you: ' + skillVal + ')</div></div>';
+      if (!isCurrent) {
+        if (canJoin.ok) {
+          h += '<button onclick="window._joinCareer(\'' + c.id + '\')" style="background:#f2b134;color:#000;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;font:600 10px Poppins,sans-serif;">Join</button>';
+        } else {
+          h += '<span style="font-size:10px;color:#6b7280;">🔒</span>';
+        }
+      }
+      h += '</div>';
+    }
+    h += backBtn;
+    c.innerHTML = h;
+    return;
+  }
+  if(appId==="skills"){
+    const skills = getSkills();
+    let h = '<div style="font-size:15px;margin-bottom:8px;font-weight:700;color:#f2f2f4;">📈 Skills</div>';
+    h += '<div style="font-size:11px;color:#9b9ba4;margin-bottom:10px;">Train skills to unlock careers and earn more. Each training costs ₦1,000 + 20 energy.</div>';
+    for (const s of SKILLS) {
+      const val = skills[s.id] || 0;
+      h += '<div style="background:#17181b;border-radius:8px;padding:10px;margin-bottom:6px;">';
+      h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">';
+      h += '<span style="font-size:13px;font-weight:600;color:#f2f2f4;">' + s.icon + ' ' + s.label + '</span>';
+      h += '<span style="font-size:12px;font-weight:700;color:#f2b134;">' + val.toFixed(0) + '/100</span></div>';
+      h += '<div style="height:6px;background:#26272b;border-radius:3px;overflow:hidden;margin-bottom:4px;"><div style="height:100%;width:' + val + '%;background:#f2b134;border-radius:3px;"></div></div>';
+      h += '<div style="font-size:10px;color:#9b9ba4;margin-bottom:6px;">' + s.desc + '</div>';
+      h += '<button onclick="window._trainSkill(\'' + s.id + '\')" style="width:100%;background:#0f4d3a;color:#fff;border:none;border-radius:6px;padding:6px;cursor:pointer;font:600 10px Poppins,sans-serif;">📚 Train (₦1,000)</button>';
+      h += '</div>';
+    }
+    h += backBtn;
+    c.innerHTML = h;
+    return;
+  }
+  if(appId==="wishes"){
+    const wishes = getTodaysWishes();
+    const points = getWishPoints();
+    const perks = getPerks();
+    let h = '<div style="font-size:15px;margin-bottom:8px;font-weight:700;color:#f2f2f4;">⭐ Daily Wishes</div>';
+    h += '<div style="background:#17181b;border-radius:10px;padding:10px;margin-bottom:10px;text-align:center;">';
+    h += '<div style="font-size:11px;color:#9b9ba4;">Your Points</div>';
+    h += '<div style="font-size:28px;font-weight:800;color:#f2b134;">' + points + '</div></div>';
+    // Today's wishes
+    h += '<div style="font-size:12px;font-weight:600;margin-bottom:6px;color:#f2b134;">🎯 Today\'s Wishes</div>';
+    for (const w of wishes) {
+      h += '<div style="background:' + (w.claimed ? '#1a2a1a' : '#17181b') + ';border-radius:8px;padding:8px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;">';
+      h += '<span style="font-size:11px;color:' + (w.claimed ? '#4ade80' : '#f2f2f4') + ';">' + (w.claimed ? '✅ ' : '⬜ ') + w.text + '</span>';
+      h += '<span style="font-size:11px;font-weight:600;color:#f2b134;">+' + w.points + '</span></div>';
+    }
+    // Perks shop
+    h += '<div style="font-size:12px;font-weight:600;margin:12px 0 6px;color:#f2b134;">🏆 Perks Shop</div>';
+    for (const p of PERKS) {
+      const owned = perks.includes(p.id);
+      const canBuy = !owned && points >= p.cost;
+      h += '<div style="background:#17181b;border-radius:8px;padding:8px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;">';
+      h += '<div style="flex:1;"><div style="font-size:12px;font-weight:600;color:' + (owned ? '#4ade80' : '#f2f2f4') + ';">' + p.icon + ' ' + p.name + (owned ? ' ✅' : '') + '</div>';
+      h += '<div style="font-size:10px;color:#9b9ba4;">' + p.desc + '</div></div>';
+      if (owned) {
+        h += '<span style="font-size:10px;color:#4ade80;font-weight:600;">Owned</span>';
+      } else {
+        h += '<button onclick="window._buyPerk(\'' + p.id + '\')" ' + (canBuy ? '' : 'disabled') + ' style="background:' + (canBuy ? '#f2b134' : '#26272b') + ';color:' + (canBuy ? '#000' : '#6b7280') + ';border:none;border-radius:6px;padding:5px 10px;cursor:' + (canBuy ? 'pointer' : 'not-allowed') + ';font:600 10px Poppins,sans-serif;">' + p.cost + ' pts</button>';
+      }
+      h += '</div>';
+    }
+    h += backBtn;
+    c.innerHTML = h;
+    return;
+  }
+  if(appId==="election"){
+    const election = getElection();
+    const myUid = getMyUid();
+    const isCand = isCandidate(myUid);
+    const voted = hasVoted(myUid);
+    const activePolicy = getActivePolicy();
+    let h = '<div style="font-size:15px;margin-bottom:8px;font-weight:700;color:#f2f2f4;">🗳️ Kaduna Election</div>';
+    h += '<div style="font-size:10px;color:#9b9ba4;margin-bottom:10px;">Week: ' + getWeekKey() + '</div>';
+    // Active policy
+    if (activePolicy) {
+      h += '<div style="background:#1a2a1a;border:1px solid #4ade80;border-radius:10px;padding:10px;margin-bottom:10px;">';
+      h += '<div style="font-size:11px;color:#4ade80;font-weight:600;">📋 Active Policy This Week</div>';
+      h += '<div style="font-size:13px;color:#f2f2f4;margin-top:4px;">' + activePolicy.icon + ' ' + activePolicy.name + '</div>';
+      h += '<div style="font-size:10px;color:#9b9ba4;">' + activePolicy.desc + '</div></div>';
+    }
+    // Register as candidate
+    if (!isCand) {
+      h += '<div style="background:#17181b;border-radius:10px;padding:10px;margin-bottom:10px;">';
+      h += '<div style="font-size:12px;font-weight:600;color:#f2b134;margin-bottom:6px;">📝 Run for Governor</div>';
+      h += '<div style="font-size:10px;color:#9b9ba4;margin-bottom:6px;">Fee: ₦10,000. Pick a policy + slogan.</div>';
+      h += '<input id="el-slogan" type="text" placeholder="Your slogan (max 80 chars)" style="width:100%;padding:8px;border:1px solid #26272b;border-radius:6px;background:#0b0b0c;color:#fff;margin-bottom:6px;font-size:12px;" />';
+      h += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;">';
+      for (const p of POLICIES) {
+        h += '<label style="display:flex;align-items:center;gap:4px;font-size:10px;color:#f2f2f4;cursor:pointer;"><input type="radio" name="el-policy" value="' + p.id + '" style="margin:0;" /> ' + p.icon + ' ' + p.name + '</label>';
+      }
+      h += '</div>';
+      h += '<button onclick="window._registerCandidate()" style="width:100%;background:#f2b134;color:#000;border:none;border-radius:8px;padding:8px;cursor:pointer;font:600 12px Poppins,sans-serif;">Register (₦10,000)</button>';
+      h += '</div>';
+    } else {
+      h += '<div style="background:#1a2a1a;border:1px solid #4ade80;border-radius:10px;padding:10px;margin-bottom:10px;text-align:center;">✅ You are a candidate this week!</div>';
+    }
+    // Candidates
+    const candidates = Object.entries(election.candidates || {});
+    h += '<div style="font-size:12px;font-weight:600;margin-bottom:6px;color:#f2b134;">📊 Candidates (' + candidates.length + ')</div>';
+    if (candidates.length === 0) {
+      h += '<div style="font-size:11px;color:#9b9ba4;text-align:center;padding:10px;">No candidates yet. Be the first!</div>';
+    } else {
+      // Count votes per candidate
+      const voteCount = {};
+      for (const v of Object.values(election.votes || {})) voteCount[v] = (voteCount[v] || 0) + 1;
+      for (const [candUid, cand] of candidates) {
+        const votes = voteCount[candUid] || 0;
+        const policy = POLICIES.find(p => p.id === cand.policy);
+        h += '<div style="background:#17181b;border-radius:8px;padding:10px;margin-bottom:6px;">';
+        h += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+        h += '<div><div style="font-size:12px;font-weight:600;color:#f2f2f4;">' + cand.name + '</div>';
+        h += '<div style="font-size:10px;color:#9b9ba4;">' + (policy?.icon || '') + ' ' + (policy?.name || '') + ' · ' + votes + ' votes</div></div>';
+        if (!voted && candUid !== myUid) {
+          h += '<button onclick="window._vote(\'' + candUid + '\')" style="background:#0f4d3a;color:#fff;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font:600 10px Poppins,sans-serif;">Vote</button>';
+        } else if (voted) {
+          h += '<span style="font-size:10px;color:#9b9ba4;">✓ Voted</span>';
+        }
+        h += '</div>';
+        h += '<div style="font-size:11px;color:#9b9ba4;margin-top:4px;font-style:italic;">"' + cand.slogan + '"</div>';
+        h += '</div>';
+      }
+    }
+    h += backBtn;
+    c.innerHTML = h;
+    return;
+  }
+  if(appId==="friends"){
+    const friends = getFriends();
+    const friendList = Object.entries(friends);
+    let h = '<div style="font-size:15px;margin-bottom:8px;font-weight:700;color:#f2f2f4;">👥 Friends</div>';
+    // Add friend
+    h += '<div style="background:#17181b;border-radius:10px;padding:10px;margin-bottom:10px;">';
+    h += '<div style="font-size:12px;font-weight:600;color:#f2b134;margin-bottom:6px;">➕ Add Friend</div>';
+    h += '<div style="display:flex;gap:4px;"><input id="fr-username" type="text" placeholder="Username" style="flex:1;padding:8px;border:1px solid #26272b;border-radius:6px;background:#0b0b0c;color:#fff;font-size:12px;" /><button onclick="window._addFriend()" style="background:#f2b134;color:#000;border:none;border-radius:6px;padding:8px 12px;cursor:pointer;font:600 11px Poppins,sans-serif;">Add</button></div>';
+    h += '</div>';
+    // Friend list
+    h += '<div style="font-size:12px;font-weight:600;margin-bottom:6px;color:#f2b134;">📋 Your Friends (' + friendList.length + ')</div>';
+    if (friendList.length === 0) {
+      h += '<div style="font-size:11px;color:#9b9ba4;text-align:center;padding:20px;">No friends yet. Add someone by their username!</div>';
+    } else {
+      for (const [fUid, f] of friendList) {
+        const level = f.level || 0;
+        const levelLabel = ["Stranger", "Acquaintance", "Buddy", "Friend", "Close Friend", "Best Friend"][level];
+        h += '<div style="background:#17181b;border-radius:8px;padding:10px;margin-bottom:6px;">';
+        h += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+        h += '<div><div style="font-size:12px;font-weight:600;color:#f2f2f4;">' + f.name + '</div>';
+        h += '<div style="font-size:10px;color:#9b9ba4;">@' + (f.username || '?') + ' · ' + levelLabel + ' (Lvl ' + level + ')</div></div>';
+        h += '<div style="display:flex;gap:4px;">';
+        h += '<button onclick="window._dmFriend(\'' + fUid + '\',\'' + (f.name || '').replace(/'/g, "") + '\')" style="background:#0f4d3a;color:#fff;border:none;border-radius:6px;padding:5px 8px;cursor:pointer;font:600 10px Poppins,sans-serif;">💬 DM</button>';
+        h += '<button onclick="window._visitFriend(\'' + (f.username || '') + '\')" style="background:#60a5fa;color:#fff;border:none;border-radius:6px;padding:5px 8px;cursor:pointer;font:600 10px Poppins,sans-serif;">🏠 Visit</button>';
+        h += '</div></div></div>';
+      }
+    }
+    // Visit link
+    h += '<div style="background:#17181b;border-radius:10px;padding:10px;margin-top:10px;">';
+    h += '<div style="font-size:11px;color:#9b9ba4;margin-bottom:4px;">🔗 Your visit link — share so friends can visit your home:</div>';
+    const myName = (typeof getMyName === "function" ? getMyName() : "player");
+    h += '<div style="font-size:10px;color:#f2b134;word-break:break-all;background:#0b0b0c;padding:6px;border-radius:4px;">' + generateVisitLink(myName) + '</div>';
+    h += '</div>';
+    h += backBtn;
+    c.innerHTML = h;
+    return;
+  }
+  if(appId==="weather"){
+    const weather = getCurrentWeather();
+    const headlines = getActiveHeadlines();
+    let h = '<div style="font-size:15px;margin-bottom:8px;font-weight:700;color:#f2f2f4;">🌤️ Weather & News</div>';
+    // Weather
+    h += '<div style="background:#17181b;border-radius:10px;padding:14px;margin-bottom:10px;text-align:center;">';
+    h += '<div style="font-size:40px;">' + weather.icon + '</div>';
+    h += '<div style="font-size:16px;font-weight:700;color:#f2b134;margin-top:4px;">' + weather.label + '</div>';
+    h += '<div style="font-size:11px;color:#9b9ba4;margin-top:2px;">' + weather.desc + '</div></div>';
+    // Active headlines
+    h += '<div style="font-size:12px;font-weight:600;margin-bottom:6px;color:#f2b134;">📰 Active Headlines</div>';
+    if (headlines.length === 0) {
+      h += '<div style="font-size:11px;color:#9b9ba4;text-align:center;padding:10px;">No active headlines. Check back later.</div>';
+    } else {
+      for (const hl of headlines) {
+        const minsLeft = Math.ceil((hl.expires - Date.now()) / 60000);
+        h += '<div style="background:#17181b;border-radius:8px;padding:8px;margin-bottom:4px;">';
+        h += '<div style="font-size:11px;color:#f2f2f4;">' + hl.text + '</div>';
+        h += '<div style="font-size:9px;color:#6b7280;margin-top:2px;">⏳ ' + minsLeft + ' min left</div></div>';
+      }
+    }
+    h += backBtn;
+    c.innerHTML = h;
+    return;
+  }
   if(appId==="missions"){
     const chapters=getAllChapters();const dailies=getDailyMissions();const weeklies=getWeeklyMissions();
     let h='<div style="font-size:15px;margin-bottom:10px;font-weight:700;color:#f2f2f4;">🎯 Missions</div>';
@@ -923,6 +1161,38 @@ window._claimSpot = (id) => {
   const spot = SPOTS.find((s) => s.id === id);
   if (spot) claimSpot(spot);
 };
+// ---- Phase 3-9 window functions ----
+window._joinCareer = async (id) => { const r = await joinCareer(id); toast(r.msg || r.reason); showPhoneApp("careers"); };
+window._promoteCareer = async () => { const r = await promote(); toast(r.msg || r.reason); if (r.ok) celebrate("🎉 Promotion!", r.msg); showPhoneApp("careers"); };
+window._doShift = async (toneId) => { const r = await doShift(toneId, game.state); toast(r.msg); updateHUD(); if (r.ok) { missionState.jobsToday = (missionState.jobsToday || 0) + 1; missionState.earnedToday = (missionState.earnedToday || 0) + r.pay; } showPhoneApp("careers"); };
+window._trainSkill = async (skillId) => { const r = await trainSkill(skillId, game.state); toast(r.msg); updateHUD(); showPhoneApp("skills"); };
+window._buyPerk = async (perkId) => { const r = await buyPerk(perkId); toast(r.msg); showPhoneApp("wishes"); };
+window._registerCandidate = async () => {
+  const slogan = document.getElementById("el-slogan")?.value;
+  const policy = document.querySelector('input[name="el-policy"]:checked')?.value;
+  const r = await registerCandidate(slogan, policy, game.state);
+  toast(r.msg); updateHUD(); showPhoneApp("election");
+};
+window._vote = async (candidateUid) => { const r = await vote(candidateUid); toast(r.msg); showPhoneApp("election"); };
+window._addFriend = async () => {
+  const username = document.getElementById("fr-username")?.value;
+  if (!username || !username.trim()) { toast("Enter a username"); return; }
+  const r = await addFriendByUsername(username.trim());
+  toast(r.msg); showPhoneApp("friends");
+};
+window._dmFriend = (fUid, name) => {
+  // Simple DM: open chat with this friend
+  toast("💬 DM with " + name + " — chat at the bottom");
+  openPhone(); setTimeout(() => showPhoneApp("chat"), 100);
+};
+window._visitFriend = (username) => {
+  if (!username) { toast("Friend has no username"); return; }
+  const link = generateVisitLink(username);
+  toast("🔗 Visit link copied: " + link.slice(0, 40) + "...");
+  // In full version: travel to friend's home. For now, go to your own home.
+  const homeDef = getPlace("home");
+  if (homeDef) { player.pos.set(homeDef.entranceX, 0, homeDef.entranceZ); player.heading = homeDef.entranceFacing; toast("🏠 Traveling to " + username + "'s home..."); }
+};
 // ---- Check rent every 60 seconds ----
 let _rentCheckT = 0;
 function _tickRent(dt) {
@@ -1140,6 +1410,23 @@ initAuth((user) => {
   });
   // Initial HUD refresh so the gem card shows real hunt stats right away.
   _updateHuntHud();
+  // ---- Init Phase 2-9 systems ----
+  initEvents();
+  initCareers(user.uid, () => {});
+  initWishes(user.uid, () => {});
+  initElection(user.uid, () => {});
+  initSocial(user.uid, () => {});
+  initFlavour((headline) => { if (headline) toast("📰 " + headline.text); });
+  // Check for visit link (?v=username)
+  checkVisitLink((username) => {
+    toast("👋 Visiting " + username + "'s home...");
+    // Travel to home entrance (simplified — in full version would look up their home)
+    const homeDef = getPlace("home");
+    if (homeDef) {
+      player.pos.set(homeDef.entranceX, 0, homeDef.entranceZ);
+      player.heading = homeDef.entranceFacing;
+    }
+  });
   initMultiplayer(scene, (count) => {
     const el=$("online-count"); if(el) el.textContent=count+" here";
     const hudEl=$("online-count-hud"); if(hudEl) hudEl.textContent=count;
@@ -1292,7 +1579,7 @@ function frame() {
   const dt = Math.min(_raw, 0.05);
   const now = Date.now() / 1000;
   const it = ctl.intent();
-  const maxSpd = ctl.jog ? 4.8 : 2.1;
+  const maxSpd = (ctl.jog ? 4.8 : 2.1) * (game.state.needs?.energy < 20 ? 0.5 : 1.0);
   const target = it.mag * maxSpd;
   player.speed += (target - player.speed) * (1 - Math.exp(-dt * 9));
   if (it.mag > 0) {
@@ -1339,11 +1626,77 @@ function frame() {
   applyTime();
   if (active) { scene.background = INTERIOR_BG; scene.fog.color.copy(INTERIOR_BG); sun.intensity = 0; hemi.intensity = 0.8; _dayApplied = false; }
   renderer.shadowMap.autoUpdate = !active;   // no shadow pass inside buildings
+  // ---- Phase 2+9: Calculate modified drain rates (NEPA + moodlets + weather) ----
+  const homeHandle = getActivePlace();
+  const placedFurniture = homeHandle?.handle?.getPlaced?.() || [];
+  const hasBackup = hasPowerBackup(placedFurniture);
+  const activeMoodlets = getActiveMoodlets(game.state);
+  const flavourMods = getCombinedModifiers();
+  // Build drain modifiers per need
+  const drainMods = {};
+  for (const need of NEEDS) {
+    let rate = need.drainPerMin;
+    // NEPA: energy and fun drain faster during cuts (unless backup)
+    if (isNepaCut() && !hasBackup) {
+      if (need.key === "energy") rate *= 2.0;
+      if (need.key === "fun") rate *= 1.5;
+    }
+    // Moodlets
+    for (const m of activeMoodlets) {
+      if (m.modifiers && m.modifiers[need.key]) rate *= m.modifiers[need.key];
+    }
+    // Weather + headlines
+    if (need.key === "hygiene" && flavourMods.hygieneMul) rate *= flavourMods.hygieneMul;
+    if (need.key === "energy" && flavourMods.energyMul) rate *= flavourMods.energyMul;
+    if (need.key === "fun" && flavourMods.funMul) rate *= flavourMods.funMul;
+    drainMods[need.key] = rate;
+  }
+  game.state.drainModifiers = drainMods;
   game.updateNeeds(dt);
+  // ---- Phase 2: NEPA tick + moodlet expiry ----
+  const nepaEvents = tickNepa(dt, hasBackup);
+  for (const ev of nepaEvents) toast(ev.msg);
+  tickMoodlets(game.state);
+  // Apply walk speed consequence (low energy = slow walk)
+  const speedMul = getWalkSpeedMultiplier(game.state);
+  // Blackout check (zero hunger)
+  const cons = getConsequences(game.state);
+  if (cons.blackout && !window._blackoutCooldown) {
+    window._blackoutCooldown = true;
+    toast("😫 You don faint from hunger! Rushing you home...");
+    const homeDef = getPlace("home");
+    if (homeDef) { player.pos.set(homeDef.entranceX, 0, homeDef.entranceZ); player.heading = homeDef.entranceFacing; }
+    game.state.needs.hunger = 30;
+    game.state.money = Math.max(0, game.state.money - 500);
+    game.save?.();
+    setTimeout(() => { window._blackoutCooldown = false; }, 60000);
+  }
+  // Stinky check
+  if (cons.stinky && !window._stinkyWarned) {
+    window._stinkyWarned = true;
+    toast("💩 You dey smell! Go shower.");
+    addMoodlet(game.state, "stinky");
+    setTimeout(() => { window._stinkyWarned = false; }, 120000);
+  }
+  // ---- Phase 9: Weather + headlines ----
+  const newHeadline = tickHeadlines();
+  if (newHeadline) toast("📰 " + newHeadline.text);
   // ---- Mission tracking ----
-  if(player.speed>0.5){missionState.totalDistance+=player.speed*dt;}
+  if(player.speed>0.5){missionState.totalDistance+=player.speed*speedMul*dt;}
   missionState.money=game.state.money;
-  _missionCheckT+=dt;if(_missionCheckT>2){_missionCheckT=0;checkStep(missionState);_updateMissionTracker();}
+  _missionCheckT+=dt;if(_missionCheckT>2){
+    _missionCheckT=0;
+    checkStep(missionState);
+    _updateMissionTracker();
+    // Phase 6: check wishes
+    try {
+      const wishClaimed = checkWishes(missionState);
+      if (wishClaimed && wishClaimed.claimed) {
+        toast("⭐ Wish complete: " + wishClaimed.claimed.text + " (+" + wishClaimed.points + " pts)");
+        celebrate("⭐ +" + wishClaimed.points, wishClaimed.claimed.text);
+      }
+    } catch (e) { /* wish check non-critical */ }
+  }
   _tickRent(dt);
   hudT += dt; if (hudT > 0.5) { hudT = 0; updateHUD(); }
   // ---- Money Hunt tick: update instance positions + claim prompt ----

@@ -69,7 +69,13 @@ export function createGameState() {
     const mins = dt / 60;
     for (const need of NEEDS) {
       const current = state.needs[need.key] ?? 100;
-      state.needs[need.key] = Math.max(0, Math.min(100, current - need.drainPerMin * mins));
+      // Base drain — modified by NEPA/moodlets/weather via state.drainModifiers
+      // (set by main.js from events.js + flavour.js). If not set, use base rate.
+      let rate = need.drainPerMin;
+      if (state.drainModifiers && state.drainModifiers[need.key]) {
+        rate = state.drainModifiers[need.key];
+      }
+      state.needs[need.key] = Math.max(0, Math.min(100, current - rate * mins));
     }
     for (let i = RANKS.length - 1; i >= 0; i--) {
       if (state.money >= RANKS[i].minMoney) { state.rank = RANKS[i].id; break; }
