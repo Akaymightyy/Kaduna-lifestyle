@@ -26,6 +26,7 @@ import { ORIGINS, HOUSE_TIERS, getRentInfo, payRent, checkRentDue, applyOrigin, 
 import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
 import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
 import { celebrate } from "./celebrate.js";
+import { AREAS, getArea, claimPlot, getMyHouse, canPickArea, getPlotPosition } from "./areas.js";
 import { initEvents, tickNepa, isNepaCut, getNepaStatus, hasPowerBackup, getModifiedDrain, tickMoodlets, addMoodlet, getActiveMoodlets, getConsequences, getWalkSpeedMultiplier, MOODLET_DEFS } from "./events.js";
 import { SKILLS, CAREERS, SHIFT_TONES, initCareers, getSkills, getCareer, getCareerDef, canJoinCareer, canPromote, joinCareer, promote, doShift, trainSkill } from "./careers.js";
 import { WISH_POOL, PERKS, initWishes, getTodaysWishes, getWishPoints, getPerks, hasPerk, checkWishes, buyPerk } from "./wishes.js";
@@ -496,6 +497,15 @@ function _showPhoneApp(appId) {
   if(appId==="realestate"){
     const rentInfo = getRentInfo(game.state);
     let h = '<div style="font-size:15px;margin-bottom:8px;font-weight:700;color:#f2f2f4;">🏡 Real Estate & Rent</div>';
+    // Current home info
+    const myArea = game.state.homeArea ? getArea(game.state.homeArea) : null;
+    if (myArea) {
+      h += '<div style="background:#1a2a1a;border:1px solid #4ade80;border-radius:10px;padding:10px;margin-bottom:10px;">';
+      h += '<div style="font-size:12px;font-weight:600;color:#4ade80;">📍 Your Home</div>';
+      h += '<div style="font-size:13px;color:#f2f2f4;margin-top:2px;">' + myArea.name + ' · Plot ' + (game.state.homePlot ?? '?') + '</div>';
+      h += '<div style="font-size:10px;color:#9b9ba4;margin-top:2px;">' + myArea.desc + '</div>';
+      h += '</div>';
+    }
     // Rent status
     h += '<div style="background:'+(rentInfo.due?'#3a1a1a':'#1a2a1a')+';border-radius:10px;padding:10px;margin-bottom:10px;border:1px solid '+(rentInfo.due?'#e11d48':'#2e7d4f')+';">';
     h += '<div style="font-size:12px;font-weight:600;color:'+(rentInfo.due?'#e11d48':'#4ade80')+';">'+(rentInfo.due?'🔔 RENT DUE!':'✅ Rent paid')+'</div>';
@@ -505,9 +515,25 @@ function _showPhoneApp(appId) {
     h += '</div>';
     if (rentInfo.due) h += '<button onclick="window._payRent()" style="width:100%;margin-top:6px;background:#f2b134;color:#000;border:none;border-radius:8px;padding:8px;cursor:pointer;font-size:12px;font-weight:600;">Pay Rent ₦'+rentInfo.amount.toLocaleString()+'</button>';
     h += '</div>';
-    // Housing tiers
-    h += '<div style="font-size:12px;font-weight:600;margin-bottom:6px;color:#f2b134;">🏠 Housing Tiers</div>';
-    h += '<div style="font-size:11px;color:#6b7280;margin-bottom:8px;">Balance: ₦'+game.state.money.toLocaleString()+'</div>';
+    // Browse areas to move
+    h += '<div style="font-size:12px;font-weight:600;margin-bottom:6px;color:#f2b134;">🏘️ Move to Another Area</div>';
+    h += '<div style="font-size:11px;color:#6b7280;margin-bottom:8px;">Balance: ₦'+game.state.money.toLocaleString()+' · Moving carries your furniture to storage</div>';
+    for (const a of AREAS) {
+      const isCurrent = game.state.homeArea === a.id;
+      const canBuy = game.state.money >= a.buyPrice;
+      const canRent = game.state.money >= a.rentPrice * 2;
+      h += '<div style="display:flex;align-items:center;gap:8px;padding:10px;background:#17181b;border-radius:10px;margin-bottom:6px;'+(isCurrent?'border:2px solid #4ade80;':'')+'">';
+      h += '<div style="flex:1;"><div style="font-size:13px;font-weight:600;color:'+(isCurrent?'#4ade80':'#f2f2f4')+';">' + a.name + (isCurrent ? ' ✅' : '') + '</div>';
+      h += '<div style="font-size:10px;color:#9b9ba4;">' + a.desc + '</div>';
+      h += '<div style="font-size:10px;color:#9b9ba4;margin-top:2px;">Rent ₦'+a.rentPrice.toLocaleString()+'/wk · Buy ₦'+a.buyPrice.toLocaleString()+'</div></div>';
+      if (!isCurrent) {
+        if (canBuy) h += '<button onclick="window._moveToArea(\''+a.id+'\')" style="background:#f2b134;color:#000;border:none;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:11px;font-weight:600;">Move</button>';
+        else h += '<span style="font-size:10px;color:#6b7280;">₦'+a.buyPrice.toLocaleString()+'</span>';
+      }
+      h += '</div>';
+    }
+    // Housing tiers (upgrade)
+    h += '<div style="font-size:12px;font-weight:600;margin:12px 0 6px;color:#f2b134;">🏠 Upgrade House Tier</div>';
     for (const ht of HOUSE_TIERS) {
       const canAfford = game.state.money >= ht.buyPrice;
       const isCurrent = (game.state.homeTier || 1) === ht.tier;
@@ -631,7 +657,7 @@ function _showPhoneApp(appId) {
       }
       h += '</div>';
     }
-    h += '<div style="font-size:10px;color:#6b7280;margin-top:10px;text-align:center;line-height:1.4;">💡 Listen for the beep — it speeds up as you get closer. Tap the prompt when you see it to claim.</div>';
+    h += '<div style="font-size:10px;color:#6b7280;margin-top:10px;text-align:center;line-height:1.4;">💡 Listen for the beep — it speeds up as you get closer. Press <b>E</b> when you see the prompt to claim.</div>';
     h += backBtn;
     c.innerHTML = h;
     return;
@@ -973,6 +999,8 @@ window._openCreator = () => {
       toast("Welcome to Kaduna! 🎉");
       // Show origin selection if not yet chosen
       if (!game.state.origin) { setTimeout(() => _showOriginScreen(), 500); }
+      // Show area selection if origin chosen but no home area yet
+      else if (!game.state.homeArea) { setTimeout(() => _showAreaScreen(), 500); }
     },
   });
 };
@@ -1067,6 +1095,52 @@ window._buyHouse = async (tier, price, name) => {
   celebrate("🏠 " + name, "Welcome to your new home!");
   showPhoneApp("realestate");
 };
+// ---- Move to a new area (carries furniture to storage) ----
+window._moveToArea = async (areaId) => {
+  const area = getArea(areaId);
+  if (!area) { toast("Unknown area"); return; }
+  if (game.state.homeArea === areaId) { toast("You already live here"); return; }
+  const uid = getMyUid();
+  if (!uid) { toast("Sign in first"); return; }
+  // Check money — moving costs the buy price of the new area
+  if (game.state.money < area.buyPrice) { toast("Need ₦" + area.buyPrice.toLocaleString() + " to move to " + area.name); return; }
+  // Move existing furniture to storage first
+  try {
+    const { ref, get, set } = await import("firebase/database");
+    const furnitureSnap = await get(ref(db, "players/" + uid + "/homeFurniture"));
+    const oldFurniture = furnitureSnap.val() || [];
+    if (oldFurniture.length > 0) {
+      const storageSnap = await get(ref(db, "players/" + uid + "/storage"));
+      const storage = storageSnap.val() || [];
+      for (const f of oldFurniture) {
+        storage.push({ id: f.id, color: f.color });
+      }
+      await set(ref(db, "players/" + uid + "/storage"), storage);
+      // Clear old home furniture
+      await set(ref(db, "players/" + uid + "/homeFurniture"), []);
+    }
+  } catch (e) { console.warn("move furniture failed", e); }
+  // Claim a new plot in the target area
+  const name = (typeof getMyName === "function" ? getMyName() : "Player");
+  const r = await claimPlot(areaId, uid, name, game.state.origin);
+  if (!r.ok) { toast("❌ " + r.reason); return; }
+  // Deduct money
+  game.state.money -= area.buyPrice;
+  game.state.homeArea = areaId;
+  game.state.homePlot = r.plotNo;
+  game.state.lastRentPaid = Date.now();
+  game.save?.();
+  await update(ref(db, "economy/" + uid), { balance: game.state.money });
+  await update(ref(db, "players/" + uid), { homeArea: areaId, homePlot: r.plotNo, lastRentPaid: game.state.lastRentPaid });
+  toast("📦 Moved to " + area.name + "! Your furniture is in storage. Place it in your new home.");
+  celebrate("🏠 " + area.name, "Plot " + r.plotNo + " is yours!");
+  // Teleport to new home
+  const pos = getPlotPosition(area, r.plotNo);
+  player.pos.set(pos.x, 0, pos.z + 4);
+  player.heading = Math.PI;
+  updateHUD();
+  showPhoneApp("realestate");
+};
 // ---- Pay rent ----
 window._payRent = async () => {
   const uid = getMyUid();
@@ -1106,6 +1180,8 @@ window._pickOrigin = (originId) => {
     }
     toast("🎉 You chose " + r.origin.name + "! Check your Storage for starter items.");
     try { updateHUD(); } catch (e) { console.warn("[origin] updateHUD failed", e); }
+    // Show area selection after origin is picked
+    if (!game.state.homeArea) { setTimeout(() => _showAreaScreen(), 600); }
   } catch (e) {
     console.error("[origin] _pickOrigin failed", e);
     toast("Could not save your origin — try again.");
@@ -1141,6 +1217,74 @@ function _showOriginScreen() {
   el.innerHTML = h;
   document.body.appendChild(el);
 }
+// ---- Area selection screen (shown once after origin) ----
+function _showAreaScreen() {
+  if (game.state.homeArea) return;  // already picked
+  let el = document.getElementById("area-sheet");
+  if (el) el.remove();
+  el = document.createElement("div");
+  el.id = "area-sheet";
+  el.style.cssText = "position:fixed;inset:0;z-index:65;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;padding:16px;";
+  let h = '<div style="background:#0b0b0c;border-radius:20px;padding:24px;width:min(420px,92vw);max-height:85vh;overflow-y:auto;color:#f2f2f4;">';
+  h += '<div style="font-size:20px;font-weight:800;text-align:center;margin-bottom:6px;">📍 Where do you want to live?</div>';
+  h += '<div style="font-size:12px;color:#9b9ba4;text-align:center;margin-bottom:16px;">Pick your area. Each area has different prices and vibes. You can move later.</div>';
+  const origin = game.state.origin || "talaka";
+  // Group areas by tier
+  const tiers = [
+    { id: "cheap",  label: "🏠 Budget Areas",   color: "#4ade80" },
+    { id: "middle", label: "🏡 Mid-Tier Areas",  color: "#f2b134" },
+    { id: "rich",   label: "🏛️ GRA / Upscale",  color: "#60a5fa" },
+  ];
+  for (const t of tiers) {
+    const areaList = AREAS.filter(a => a.tier === t.id);
+    if (!areaList.length) continue;
+    h += '<div style="font-size:13px;font-weight:700;color:' + t.color + ';margin:12px 0 6px;">' + t.label + '</div>';
+    for (const a of areaList) {
+      const canPick = canPickArea(origin, a);
+      const tierLabel = a.tier === "rich" ? "Upscale" : a.tier === "middle" ? "Mid" : "Budget";
+      h += '<div onclick="' + (canPick ? "window._pickArea('" + a.id + "')" : "") + '" style="background:#17181b;border:2px solid ' + (canPick ? t.color : "#333") + ';border-radius:14px;padding:14px;margin-bottom:8px;cursor:' + (canPick ? "pointer" : "not-allowed") + ';opacity:' + (canPick ? "1" : "0.5") + ';">';
+      h += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+      h += '<div style="font-size:15px;font-weight:700;color:' + (canPick ? t.color : "#666") + ';">' + a.name + '</div>';
+      h += '<span style="font-size:10px;background:#26272b;padding:3px 8px;border-radius:6px;color:' + t.color + ';">' + tierLabel + '</span>';
+      h += '</div>';
+      h += '<div style="font-size:11px;color:#9b9ba4;line-height:1.4;margin-top:4px;">' + a.desc + '</div>';
+      h += '<div style="font-size:10px;margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;">';
+      h += '<span style="background:#26272b;padding:3px 8px;border-radius:6px;">💰 Rent ₦' + a.rentPrice.toLocaleString() + '/wk</span>';
+      h += '<span style="background:#26272b;padding:3px 8px;border-radius:6px;">🏠 Buy ₦' + a.buyPrice.toLocaleString() + '</span>';
+      h += '<span style="background:#26272b;padding:3px 8px;border-radius:6px;">📍 ' + a.plots + ' plots</span>';
+      h += '</div>';
+      if (!canPick) h += '<div style="font-size:10px;color:#e11d48;margin-top:4px;">🔒 Dan Talaka no fit start here. Hustle first!</div>';
+      h += '</div>';
+    }
+  }
+  h += '</div>';
+  el.innerHTML = h;
+  document.body.appendChild(el);
+}
+window._pickArea = async (areaId) => {
+  const uid = getMyUid();
+  if (!uid) { toast("Sign in first"); return; }
+  const area = getArea(areaId);
+  if (!area) { toast("Unknown area"); return; }
+  if (!canPickArea(game.state.origin, area)) { toast("🔒 Your origin no fit start for this area"); return; }
+  toast("🏠 Claiming your plot in " + area.name + "...");
+  const name = (typeof getMyName === "function" ? getMyName() : "Player");
+  const r = await claimPlot(areaId, uid, name, game.state.origin);
+  if (r.ok) {
+    game.state.homeArea = areaId;
+    game.state.homePlot = r.plotNo;
+    game.save?.();
+    toast("🎉 You got Plot " + r.plotNo + " in " + area.name + "!");
+    celebrate("🏠 " + area.name, "Plot " + r.plotNo + " is yours!");
+    document.getElementById("area-sheet")?.remove();
+    // Teleport player to their new home entrance
+    const pos = getPlotPosition(area, r.plotNo);
+    player.pos.set(pos.x, 0, pos.z + 4);
+    player.heading = Math.PI;
+  } else {
+    toast("❌ " + r.reason);
+  }
+};
 // ---- Money Hunt HUD update (called by moneyhunt.js after a successful claim) ----
 function _updateHuntHud() {
   const stats = getHuntStats();
@@ -1219,7 +1363,7 @@ window._placeInRoom = (storageIdx) => {
     if (homeDef) {
       player.pos.set(homeDef.entranceX, 0, homeDef.entranceZ);
       player.heading = homeDef.entranceFacing;
-      toast("Walked to your home. Tap the prompt to enter, then place furniture.");
+      toast("Walked to your home. Press E to enter, then place furniture.");
     }
     return;
   }
@@ -1493,6 +1637,9 @@ initAuth((user) => {
         if (fb) game.state.look = { ...game.state.look, ...fb };
         if (!game.state.origin) {
           const t = setInterval(() => { if (!rig) return; clearInterval(t); _showOriginScreen(); }, 400);
+        } else if (!game.state.homeArea) {
+          // Origin picked but no area yet — show area screen after reload
+          const t = setInterval(() => { if (!rig) return; clearInterval(t); _showAreaScreen(); }, 400);
         }
       }
     }
@@ -1511,6 +1658,8 @@ initAuth((user) => {
     let changed = false;
     if (p.origin && p.origin !== game.state.origin) { game.state.origin = p.origin; changed = true; }
     if (p.homeTier != null && p.homeTier !== game.state.homeTier) { game.state.homeTier = p.homeTier; changed = true; }
+    if (p.homeArea && p.homeArea !== game.state.homeArea) { game.state.homeArea = p.homeArea; changed = true; }
+    if (p.homePlot != null && p.homePlot !== game.state.homePlot) { game.state.homePlot = p.homePlot; changed = true; }
     if (p.lastRentPaid != null && p.lastRentPaid !== game.state.lastRentPaid) { game.state.lastRentPaid = p.lastRentPaid; changed = true; }
     if (p.missedRent != null && p.missedRent !== game.state.missedRent) { game.state.missedRent = p.missedRent; changed = true; }
     if (p.skillBonus != null && p.skillBonus !== game.state.skillBonus) { game.state.skillBonus = p.skillBonus; changed = true; }

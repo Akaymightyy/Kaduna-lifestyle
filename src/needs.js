@@ -53,6 +53,8 @@ export function createGameState() {
         missedRent: state.missedRent,
         skillBonus: state.skillBonus,
         weeklyDebt: state.weeklyDebt,
+        homeArea: state.homeArea,
+        homePlot: state.homePlot,
       }));
     } catch (e) {}
   }
