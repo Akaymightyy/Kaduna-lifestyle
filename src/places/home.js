@@ -16,6 +16,7 @@
 import * as THREE from "three";
 import { box, mergedMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { getItem, makeFurnitureMesh, calcComfort } from "../furniture.js";
+import { getMyUid } from "../multiplayer.js";
 
 // Tier -> room dimensions + wall color + floor color + description
 const TIER_CONFIG = {
@@ -87,8 +88,8 @@ export async function build(scene, ctx) {
   let _placedFurniture = [];
 
   // ---- Load THIS player's placed furniture from Firebase ----
-  // We use getMyUid() from multiplayer.js to identify the current player.
-  const uid = typeof getMyUid === "function" ? getMyUid() : null;
+  // getMyUid() is imported from multiplayer.js — identifies the current player.
+  const uid = getMyUid();
   if (uid) {
     try {
       const { ref, get } = await import("firebase/database");
@@ -102,7 +103,10 @@ export async function build(scene, ctx) {
       } else {
         ctx.toast("🏠 " + cfg.name + " — " + cfg.desc);
       }
-    } catch (e) { console.warn("Could not load furniture", e); }
+    } catch (e) { console.warn("Could not load furniture:", e.message); ctx.toast("⚠️ Could not load furniture: " + e.message); }
+  } else {
+    console.warn("[home] getMyUid() returned null — furniture will not load");
+    ctx.toast("🏠 " + cfg.name);
   }
 
   function _rebuildFurniture() {
@@ -247,7 +251,7 @@ export async function build(scene, ctx) {
   };
 
   function _returnToStorage(itemId, color) {
-    const uid = typeof getMyUid === "function" ? getMyUid() : null;
+    const uid = getMyUid();
     if (!uid) return;
     import("firebase/database").then(({ ref, get, set }) => {
       import("../firebase.js").then(({ db }) => {
@@ -261,8 +265,8 @@ export async function build(scene, ctx) {
   }
 
   function _saveFurniture() {
-    const uid = typeof getMyUid === "function" ? getMyUid() : null;
-    if (!uid) return;
+    const uid = getMyUid();
+    if (!uid) { console.warn("[home] _saveFurniture: no uid"); return; }
     import("firebase/database").then(({ ref, set }) => {
       import("../firebase.js").then(({ db }) => {
         set(ref(db, "players/" + uid + "/homeFurniture"), _placedFurniture);
