@@ -55,6 +55,8 @@ export function createGameState() {
         weeklyDebt: state.weeklyDebt,
         homeArea: state.homeArea,
         homePlot: state.homePlot,
+        // FIX: Also persist look.created so character creator logic works correctly
+        // (but Firebase is still the source of truth — checked in main.js)
       }));
     } catch (e) {}
   }

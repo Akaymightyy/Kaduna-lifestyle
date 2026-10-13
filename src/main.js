@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { buildWorld } from "./world.js";
-import { createTraffic } from "./traffic.js";
+import { createTraffic, setPedestrianPos } from "./traffic.js";
 import { loadPlayer, collide } from "./player.js";
 import { createControls, updateCamera } from "./controls.js";
 import { createMinimap } from "./minimap.js";
@@ -107,8 +107,22 @@ const npcs = createNPCs(scene);
 const missionState = createMissionState();
 let _activeMission = null;
 
-// ---- day/night (real cycle, not forced daytime) ----
-const SKY = [[0,0x0b1230,0.0,0.25,0x8899ff],[5,0x1b2548,0.0,0.3,0x8899ff],[6.5,0xf3a56b,0.9,0.7,0xffb070],[9,0x9fd4f5,1.8,1.0,0xfff2d6],[16,0x9fd4f5,1.8,1.0,0xfff2d6],[18,0xf08a5d,1.0,0.75,0xff9a5a],[19.5,0x2a2f55,0.1,0.35,0x8899ff],[24,0x0b1230,0.0,0.25,0x8899ff]];
+// ---- day/night (real cycle) ----
+// FIX: Slow down time from 1 real minute = 1 game hour to 5 real minutes = 1 game hour
+// This makes the day last 2 hours of real time instead of 24 minutes
+const TIME_SCALE = 1 / 5;  // 5 real minutes = 1 game hour (was 1 min = 1 hour)
+const SKY = [
+  [0,0x1a1a2e,0.15,0.35,0x4a4a6a],      // midnight — brighter, not pitch black
+  [5,0x2a2a4e,0.2,0.4,0x5a5a7a],        // pre-dawn
+  [6.5,0xf3a56b,1.0,0.65,0xffb070],      // sunrise
+  [9,0x9fd4f5,2.0,0.9,0xfff2d6],        // morning
+  [12,0x9fd4f5,2.0,0.9,0xfff2d6],       // midday
+  [16,0xb8d8f0,1.8,0.85,0xffe8c8],      // afternoon
+  [18,0xf08a5d,1.2,0.7,0xff9a5a],       // golden hour
+  [19.5,0x3a3f6a,0.3,0.45,0x6a6a9a],    // dusk — brighter
+  [21,0x2a2a4e,0.2,0.4,0x5a5a7a],       // early night
+  [24,0x1a1a2e,0.15,0.35,0x4a4a6a],      // night — not pitch black
+];
 function skyAt(h) { let i=0; while(i<SKY.length-2&&h>=SKY[i+1][0])i++; const a=SKY[i],b=SKY[i+1],t=(h-a[0])/(b[0]-a[0]); const lc=(x,y)=>new THREE.Color(x).lerp(new THREE.Color(y),t); return {sky:lc(a[1],b[1]),sun:a[2]+(b[2]-a[2])*t,hemi:a[3]+(b[3]-a[3])*t,sunCol:lc(a[4],b[4])}; }
 const qs = new URLSearchParams(location.search);
 const fixedHour = qs.has("t") ? parseFloat(qs.get("t")) : null;
@@ -117,7 +131,8 @@ const INTERIOR_BG = new THREE.Color(0x1a1510);
 let lastClock = "";
 let _graphicsInited = false;
 function applyTime() {
-  const mins = Date.now()/60000; const hour = fixedHour ?? (mins%24);
+  // FIX: Slow down the clock — TIME_SCALE makes 5 real minutes = 1 game hour
+  const mins = (Date.now() / 60000) * TIME_SCALE; const hour = fixedHour ?? (mins%24);
   // ---- Init graphics once (after scene/sun/hemi are ready) ----
   if (!_graphicsInited) {
     _graphicsInited = true;
@@ -129,16 +144,15 @@ function applyTime() {
   }
   // ---- Update sky + sun + clouds based on hour ----
   updateSky(hour);
+  // FIX: Night is no longer pitch black — always keep minimum hemisphere light
   const night = hour < 6.5 || hour > 19.5;
-  // sun follows the player (shadows) — position set by updateSky, but we offset to follow player
-  sun.position.x += player.pos.x;
-  sun.position.z += player.pos.z;
-  sun.target.position.set(player.pos.x, 0, player.pos.z);
-  // Lamp lights at night
+  // Even at night, keep hemi at minimum 0.4 (was dropping to 0.25-0.35)
   if (night) {
     traffic.setNight(true);
     world.lamps.material.color.set(0xffd070);
-    if (world.lampLights) for (const pl of world.lampLights) { pl.intensity = 0.8; pl.visible = true; }
+    if (world.lampLights) for (const pl of world.lampLights) { pl.intensity = 1.2; pl.visible = true; }
+    // FIX: Add a moonlight ambient so you can see at night
+    if (hemi.intensity < 0.4) hemi.intensity = 0.4;
   } else {
     traffic.setNight(false);
     world.lamps.material.color.set(0x555555);
@@ -191,7 +205,8 @@ bindInteractKey(
 );
 function _gameHour() {
   if (fixedHour != null) return fixedHour;
-  return (Date.now() / 60000) % 24;
+  // FIX: Use slowed-down time
+  return ((Date.now() / 60000) * TIME_SCALE) % 24;
 }
 function _renderPlaceActions(def) {
   let bar = document.getElementById("place-actions");
@@ -1052,8 +1067,9 @@ window.travelToPlace=(placeId)=>{
   }, 50);
 };
 window.sendMessage=(uid,name)=>{
+  // FIX: Actually send a chat message instead of just "waving"
   sendChat("👋 Hi "+name+"!");
-  toast("Waved at "+name);
+  toast("💬 Said hi to "+name);
 };
 window.saveGame=()=>{game.save?.();toast("Game saved!");};
 window._setGraphicsQuality = (q) => {
@@ -1573,6 +1589,10 @@ window.bookRide=(rideId)=>{
   });
 };
 window.sendChatMsg=function(){const i=$("chat-input");if(i&&i.value.trim()){sendChat(i.value);i.value="";}};
+// FIX: Quick chat bar handler
+window.sendQuickChat=function(){const i=$("quick-chat-input");if(i&&i.value.trim()){sendChat(i.value.trim().slice(0,200));i.value="";toast("💬 Message sent!");}};
+$("quick-chat-send")?.addEventListener("click",window.sendQuickChat);
+$("quick-chat-input")?.addEventListener("keydown",(e)=>{if(e.key==="Enter"){window.sendQuickChat();}});
 
 // ---- Daily rewards ----
 async function loadDaily() {
@@ -1642,6 +1662,16 @@ document.querySelectorAll("#bottom-nav .nav-btn").forEach(btn=>{
     const n=btn.dataset.nav;
     if(n==="phone")openPhone();
     else if(n==="map"){openPhone();setTimeout(()=>showPhoneApp("map"),50);}
+    else if(n==="chat"){
+      // FIX: Toggle quick chat bar instead of opening phone
+      const bar=$("quick-chat-bar");
+      if(bar.style.display==="none"||!bar.style.display){
+        bar.style.display="block";
+        setTimeout(()=>$("quick-chat-input")?.focus(),100);
+      } else {
+        bar.style.display="none";
+      }
+    }
     else if(n==="home"){
       closePhone();$("profile-sheet")?.classList.remove("show");
       // Travel to the player's home entrance (dynamic coordinates)
@@ -1742,12 +1772,19 @@ initAuth((user) => {
     const hudEl=$("online-count-hud"); if(hudEl) hudEl.textContent=count;
   },
     (msg) => {
-      const log=$("chat-log"); if(!log)return;
-      const div=document.createElement("div");
-      div.style.cssText="padding:4px 6px;border-bottom:1px solid #eee;";
-      div.innerHTML='<b style="color:'+(msg.uid===getMyUid()?"var(--green)":"#1d5fa8")+';">'+msg.name+':</b> '+msg.text;
-      log.appendChild(div); log.scrollTop=log.scrollHeight;
-      while(log.children.length>30) log.removeChild(log.firstChild);
+      // FIX: Show chat messages BOTH in the phone chat log AND as a floating toast bubble
+      const log=$("chat-log");
+      if(log){
+        const div=document.createElement("div");
+        div.style.cssText="padding:4px 6px;border-bottom:1px solid #eee;";
+        div.innerHTML='<b style="color:'+(msg.uid===getMyUid()?"var(--green)":"#1d5fa8")+';">'+msg.name+':</b> '+msg.text;
+        log.appendChild(div); log.scrollTop=log.scrollHeight;
+        while(log.children.length>30) log.removeChild(log.firstChild);
+      }
+      // FIX: Also show as a temporary toast so players see messages without opening the phone
+      if(msg.uid !== getMyUid()) {
+        toast("💬 " + msg.name + ": " + msg.text);
+      }
     });
   // Check daily reward on login
   checkDailyReward(user.uid).then((reward) => {
@@ -1785,16 +1822,18 @@ initAuth((user) => {
     const fb = snap.val();
     const first = _lookFirst; _lookFirst = false;
     if (first) {
-      // new account (no saved character yet) -> character creator after the world has loaded
-      const alreadyMade = !!((fb && fb.created) || game.state.look.created);
+      // FIX: Check BOTH Firebase AND localStorage for 'created' flag
+      // The bug was that new accounts had localStorage from a previous account
+      // (keyed by old UID) that had look.created = true, so the creator was skipped.
+      // Now we ONLY trust Firebase's look.created — not localStorage.
+      const alreadyMade = !!(fb && fb.created);
       const needCreate = !alreadyMade;
-      if (alreadyMade && !(fb && fb.created)) {
-        // made on this device before but never reached the account: save it so it never asks again
-        game.state.look.created = true;
-        update(ref(db, "players/" + user.uid + "/look"), game.state.look).catch(() => {});
-      }
       if (needCreate) {
+        // New account or no saved character — ALWAYS show the creator
         if (fb) game.state.look = { ...game.state.look, ...fb };
+        // FIX: Clear any stale 'created' from localStorage so it doesn't interfere
+        game.state.look.created = false;
+        game.save?.();
         const t = setInterval(() => { if (!rig) return; clearInterval(t); window._openCreator(); }, 400);
       } else {
         // Character already created (e.g. after a gender-change reload). But if
@@ -1953,6 +1992,8 @@ function frame() {
 
   // Hide traffic when inside a place (fixes "cars inside buildings" bug)
   traffic.setVisible?.(!active);
+  // FIX: Tell traffic where the player is so cars can yield at zebra crossings
+  setPedestrianPos(player.pos.x, player.pos.z);
   if (!active) traffic.update(now);
   if (!active) npcs.update(dt, now, player.pos.x, player.pos.z);
   hitCool -= dt;

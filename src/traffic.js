@@ -1,7 +1,8 @@
 // src/traffic.js — improved vehicles with windshields, bumpers + okada motorcycle
+// FIX: Cars now YIELD at zebra crossings when a pedestrian is on or near the crossing
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { LANES, WORLD_HALF_X, rng } from "./config.js";
+import { LANES, WORLD_HALF_X, CROSSINGS, rng } from "./config.js";
 
 function part(w, h, d, x, y, z, hex) {
   const g = new THREE.BoxGeometry(w, h, d);
@@ -101,7 +102,6 @@ const TYPES = {
     lights: () => [part(0.08, 0.16, 0.2, 1.38, 0.8, 0, 0xfff3c4), part(0.08, 0.16, 0.2, -1.38, 0.8, 0.4, 0xff2a2a), part(0.08, 0.16, 0.2, -1.38, 0.8, -0.4, 0xff2a2a)],
     weight: 5, fixedColors: [0xf2c230]
   },
-  // Okada (motorcycle taxi) — new
   okada: {
     L: 1.8, W: 0.6,
     body: () => [
@@ -120,6 +120,30 @@ const TYPES = {
 };
 
 const BODY_COLORS = [0xf2f2ee, 0x1f2a36, 0xb7bcc4, 0xa32b2b, 0x1d5fa8, 0x2e7d4f, 0xd98e2b, 0x6b4a8a, 0x8a8f96];
+
+// ---- FIX: Pedestrian-aware traffic — cars yield at zebra crossings ----
+let _pedestrianPos = { x: 0, z: 0 };
+const CROSSING_YIELD_RANGE = 12;   // metres — car starts slowing within this of a crossing that has a ped
+const CROSSING_STOP_RANGE = 5;    // metres — car stops completely when ped is this close to crossing center
+const CROSSING_DETECT_WIDTH = 10;  // metres — ped must be within this Z of crossing center to trigger
+
+export function setPedestrianPos(x, z) { _pedestrianPos.x = x; _pedestrianPos.z = z; }
+
+function isPedAtCrossing(carX, laneZ, dir) {
+  // Check if the pedestrian is near ANY crossing that this car is approaching
+  for (const cx of CROSSINGS) {
+    // Is the pedestrian within the crossing's Z range?
+    if (Math.abs(_pedestrianPos.z - laneZ) > CROSSING_DETECT_WIDTH) continue;
+    // Is the pedestrian near the crossing X?
+    if (Math.abs(_pedestrianPos.x - cx) > CROSSING_STOP_RANGE) continue;
+    // Is this car approaching the crossing?
+    const distToCrossing = (cx - carX) * dir;
+    if (distToCrossing > 0 && distToCrossing < CROSSING_YIELD_RANGE) {
+      return { shouldStop: distToCrossing < CROSSING_STOP_RANGE, dist: distToCrossing };
+    }
+  }
+  return null;
+}
 
 export function createTraffic(scene) {
   const R = rng(777);
@@ -153,21 +177,53 @@ export function createTraffic(scene) {
   const white = new THREE.Color(1, 1, 1);
   const positions = [];
 
+  // ---- FIX: Per-car speed modifiers for yielding at crossings ----
+  const carSpeedMods = cars.map(() => 1.0); // 1.0 = full speed, 0.0 = stopped
+
   function update(tSeconds) {
     for (const k in meshes) meshes[k].i = 0;
     positions.length = 0;
-    for (const c of cars) {
+    for (let ci = 0; ci < cars.length; ci++) {
+      const c = cars[ci];
       const mm = meshes[c.type];
+
+      // ---- FIX: Check if car should yield at crossing ----
       let s = (c.offset + c.lane.speed * tSeconds) % len;
       if (s < 0) s += len;
       const x = c.lane.dir > 0 ? -WORLD_HALF_X + s : WORLD_HALF_X - s;
-      p.set(x, 0.02, c.lane.z);
+
+      const pedCheck = isPedAtCrossing(x, c.lane.z, c.lane.dir);
+      if (pedCheck) {
+        if (pedCheck.shouldStop) {
+          carSpeedMods[ci] = 0; // full stop
+        } else {
+          // Slow down proportionally — closer = slower
+          carSpeedMods[ci] = Math.max(0.15, pedCheck.dist / CROSSING_YIELD_RANGE);
+        }
+      } else {
+        // Smoothly return to full speed
+        carSpeedMods[ci] = Math.min(1.0, carSpeedMods[ci] + 0.05);
+      }
+
+      // Apply speed modifier to this car's movement
+      // We simulate the slowdown by adjusting the effective offset
+      // (can't change c.lane.speed directly — it's shared)
+      // Instead, we store a per-car delta that accumulates
+      if (!c._yieldDelta) c._yieldDelta = 0;
+      const speedMod = carSpeedMods[ci];
+      c._yieldDelta += c.lane.speed * (1 - speedMod) * 0.016; // approx dt
+
+      let sAdjusted = (c.offset + c.lane.speed * tSeconds - c._yieldDelta) % len;
+      if (sAdjusted < 0) sAdjusted += len;
+      const xAdjusted = c.lane.dir > 0 ? -WORLD_HALF_X + sAdjusted : WORLD_HALF_X - sAdjusted;
+
+      p.set(xAdjusted, 0.02, c.lane.z);
       q.setFromAxisAngle(up, c.lane.dir > 0 ? 0 : Math.PI);
       m.compose(p, q, one);
       mm.body.setMatrixAt(mm.i, m); mm.body.setColorAt(mm.i, c.color);
       mm.lights.setMatrixAt(mm.i, m); mm.lights.setColorAt(mm.i, white);
       mm.i++;
-      positions.push({ x, z: c.lane.z, hl: TYPES[c.type].L / 2, hw: TYPES[c.type].W / 2, dir: c.lane.dir, speed: c.lane.speed });
+      positions.push({ x: xAdjusted, z: c.lane.z, hl: TYPES[c.type].L / 2, hw: TYPES[c.type].W / 2, dir: c.lane.dir, speed: c.lane.speed });
     }
     for (const k in meshes) {
       const mm = meshes[k];

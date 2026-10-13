@@ -198,7 +198,7 @@ export async function claimSpot(spot) {
     _toast?.("Too far — walk closer to claim.");
     return;
   }
-  // Per-day cap
+  // Per-day cap — FIX: also persist dayClaimCount to Firebase so it survives logout/login
   const today = new Date().toISOString().slice(0, 10);
   if (_stats.lastClaimDay !== today) { _stats.lastClaimDay = today; _dayClaimCount = 0; }
   if (_dayClaimCount >= MAX_CLAIMS_PER_DAY) {
@@ -257,6 +257,7 @@ export async function claimSpot(spot) {
   // Update local stats
   _dayClaimCount++;
   _stats.totalClaims++;
+  _stats.dayClaimCount = _dayClaimCount; // FIX: persist dayClaimCount in _stats so it loads on re-login
   if (spot.rarity === "jackpot") _stats.jackpotClaims++;
   if (spot.rarity === "rare")    _stats.rareClaims++;
   if (spot.rarity === "common")  _stats.commonClaims++;
@@ -265,7 +266,8 @@ export async function claimSpot(spot) {
   _stats.areasClaimed = _stats.areasClaimed || {};
   _stats.areasClaimed[spot.area] = (_stats.areasClaimed[spot.area] || 0) + 1;
   // Save stats to Firebase so they persist across sessions.
-  try { await update(ref(db, "players/" + _uid + "/huntStats"), _stats); } catch (e) {}
+  // FIX: Also save lastClaimDay and dayClaimCount so the progress doesn't reset on re-login
+  try { await update(ref(db, "players/" + _uid + "/huntStats"), { ..._stats, lastClaimDay: _stats.lastClaimDay, dayClaimCount: _dayClaimCount }); } catch (e) {}
   // Local feedback
   _toast?.(`${RARITY[spot.rarity].glyph} You claim ₦${reward.toLocaleString()}! ${spot.rarity === "jackpot" ? "JACKPOT! 🏆" : ""}`);
   if (spot.rarity === "jackpot" || reward >= 50000) {
@@ -350,12 +352,22 @@ export function initMoneyHunt({ scene, player, uid, toast, updateHud, celebrate 
     });
     _unsubSpotListeners.push(unsub);
   }
-  // Load my stats
+  // Load my stats — FIX: also restore dayClaimCount and lastClaimDay so progress persists
   if (uid) {
     get(ref(db, "players/" + uid + "/huntStats")).then((snap) => {
       const s = snap.val() || {};
       Object.assign(_stats, s);
       _stats.areasClaimed = s.areasClaimed || {};
+      // FIX: Restore dayClaimCount from Firebase (was resetting to 0 on every login)
+      const today = new Date().toISOString().slice(0, 10);
+      if (s.lastClaimDay === today) {
+        _dayClaimCount = s.dayClaimCount || 0;
+      } else {
+        // New day — reset
+        _dayClaimCount = 0;
+        _stats.lastClaimDay = today;
+        _stats.dayClaimCount = 0;
+      }
     }).catch(() => {});
   }
 }
