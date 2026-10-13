@@ -208,9 +208,17 @@
   <!-- Bottom nav pill -->
   <div id="bottom-nav" class="hideable">
     <button class="nav-btn active" data-nav="home"><span class="nav-icon">🏠</span>Home</button>
-    <button class="nav-btn disabled" data-nav="buy"><span class="nav-icon">🛋</span>Buy</button>
+    <button class="nav-btn" data-nav="chat"><span class="nav-icon">💬</span>Talk</button>
     <button class="nav-btn" data-nav="map"><span class="nav-icon">🗺️</span>Map</button>
     <button class="nav-btn" data-nav="phone"><span class="nav-icon">📱</span>Phone</button>
+  </div>
+
+  <!-- FIX: Quick chat input bar (appears when Talk is tapped) -->
+  <div id="quick-chat-bar" style="display:none;position:fixed;left:50%;bottom:calc(70px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:35;width:min(340px,92vw);pointer-events:auto;">
+    <div style="display:flex;gap:6px;background:var(--glass);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid var(--glass-border);border-radius:16px;padding:6px;box-shadow:var(--warm-shadow);">
+      <input id="quick-chat-input" type="text" placeholder="Type message..." style="flex:1;padding:10px 12px;border:1px solid rgba(0,0,0,0.1);border-radius:10px;font-family:inherit;font-size:13px;outline:none;background:rgba(255,255,255,0.9);" />
+      <button id="quick-chat-send" style="background:var(--green);color:#fff;border:none;border-radius:10px;padding:8px 16px;cursor:pointer;font-weight:600;font-size:13px;">Send</button>
+    </div>
   </div>
 
   <button class="btn" id="eye-solo" aria-label="Show UI"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><path d="M4 4l16 16"/></svg></button>
