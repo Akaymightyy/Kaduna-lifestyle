@@ -26,6 +26,7 @@ import { ORIGINS, HOUSE_TIERS, getRentInfo, payRent, checkRentDue, applyOrigin, 
 import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
 import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
 import { celebrate } from "./celebrate.js";
+import { initGraphics, updateSky, tickGraphics, applyQuality, autoDetectQuality, getQuality, QUALITY_PRESETS } from "./graphics.js";
 import { AREAS, getArea, claimPlot, getMyHouse, canPickArea, getPlotPosition } from "./areas.js";
 import { initMessages, searchUsers, openDM, sendMessage, openChat, closeChat, getChatList, getPresence, listenToPresence, sendMoney, createGroup, leaveGroup, blockUser, reportUser, getChatMeta, cleanupMessages } from "./messages.js";
 import { initEvents, tickNepa, isNepaCut, getNepaStatus, hasPowerBackup, getModifiedDrain, tickMoodlets, addMoodlet, getActiveMoodlets, getConsequences, getWalkSpeedMultiplier, MOODLET_DEFS } from "./events.js";
@@ -106,7 +107,7 @@ const npcs = createNPCs(scene);
 const missionState = createMissionState();
 let _activeMission = null;
 
-// ---- day/night ----
+// ---- day/night (real cycle, not forced daytime) ----
 const SKY = [[0,0x0b1230,0.0,0.25,0x8899ff],[5,0x1b2548,0.0,0.3,0x8899ff],[6.5,0xf3a56b,0.9,0.7,0xffb070],[9,0x9fd4f5,1.8,1.0,0xfff2d6],[16,0x9fd4f5,1.8,1.0,0xfff2d6],[18,0xf08a5d,1.0,0.75,0xff9a5a],[19.5,0x2a2f55,0.1,0.35,0x8899ff],[24,0x0b1230,0.0,0.25,0x8899ff]];
 function skyAt(h) { let i=0; while(i<SKY.length-2&&h>=SKY[i+1][0])i++; const a=SKY[i],b=SKY[i+1],t=(h-a[0])/(b[0]-a[0]); const lc=(x,y)=>new THREE.Color(x).lerp(new THREE.Color(y),t); return {sky:lc(a[1],b[1]),sun:a[2]+(b[2]-a[2])*t,hemi:a[3]+(b[3]-a[3])*t,sunCol:lc(a[4],b[4])}; }
 const qs = new URLSearchParams(location.search);
@@ -114,27 +115,39 @@ const fixedHour = qs.has("t") ? parseFloat(qs.get("t")) : null;
 const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const INTERIOR_BG = new THREE.Color(0x1a1510);
 let lastClock = "";
-// ALWAYS DAYTIME: the clock still runs (for opening hours) but the sky/light stay bright.
-const DAY_SKY = skyAt(12);
-let _dayApplied = false;
+let _graphicsInited = false;
 function applyTime() {
   const mins = Date.now()/60000; const hour = fixedHour ?? (mins%24);
-  if (!_dayApplied) {
-    _dayApplied = true;
-    scene.background = DAY_SKY.sky; scene.fog.color.copy(DAY_SKY.sky);
-    sun.intensity = DAY_SKY.sun; sun.color.copy(DAY_SKY.sunCol); hemi.intensity = DAY_SKY.hemi;
+  // ---- Init graphics once (after scene/sun/hemi are ready) ----
+  if (!_graphicsInited) {
+    _graphicsInited = true;
+    const autoQ = autoDetectQuality();
+    // Fire and forget — the Sky addon loads async, but the game continues without it
+    initGraphics({ renderer, scene, sun, hemi, quality: autoQ }).then(() => {
+      applyQuality(autoQ, { renderer, sun, scene });
+    });
+  }
+  // ---- Update sky + sun + clouds based on hour ----
+  updateSky(hour);
+  const night = hour < 6.5 || hour > 19.5;
+  // sun follows the player (shadows) — position set by updateSky, but we offset to follow player
+  sun.position.x += player.pos.x;
+  sun.position.z += player.pos.z;
+  sun.target.position.set(player.pos.x, 0, player.pos.z);
+  // Lamp lights at night
+  if (night) {
+    traffic.setNight(true);
+    world.lamps.material.color.set(0xffd070);
+    if (world.lampLights) for (const pl of world.lampLights) { pl.intensity = 0.8; pl.visible = true; }
+  } else {
     traffic.setNight(false);
     world.lamps.material.color.set(0x555555);
     if (world.lampLights) for (const pl of world.lampLights) { pl.intensity = 0; pl.visible = false; }
   }
-  // sun follows the player (shadows) at a fixed high angle
-  sun.position.set(player.pos.x + 25, 55, player.pos.z + 20);
-  sun.target.position.set(player.pos.x, 0, player.pos.z);
-  const night = false;
   const hh=Math.floor(hour),mm=Math.floor((hour-hh)*60);
   const txt = `${DAYS[Math.floor(mins/24)%7]} · ${((hh+11)%12)+1}:${String(mm).padStart(2,"0")} ${hh<12?"AM":"PM"}`;
   if(txt!==lastClock){lastClock=txt;const cEl=$("clock");if(cEl)cEl.textContent=txt;const sEl=$("sun");if(sEl)sEl.textContent=night?"🌙":"☀️";
-    const tpClock=$("tp-clock");if(tpClock){const hh2=Math.floor(hour),mm2=Math.floor((hour-hh2)*60);tpClock.textContent="☀ "+((hh2+11)%12+1)+":"+String(mm2).padStart(2,"0")+" "+(hh2<12?"AM":"PM");}}
+    const tpClock=$("tp-clock");if(tpClock){const hh2=Math.floor(hour),mm2=Math.floor((hour-hh2)*60);tpClock.textContent=(night?"🌙":"☀")+" "+((hh2+11)%12+1)+":"+String(mm2).padStart(2,"0")+" "+(hh2<12?"AM":"PM");}}
 }
 
 const player = { pos: new THREE.Vector3(-9,0,11), heading: Math.PI, speed: 0 };
@@ -890,7 +903,18 @@ function _showPhoneApp(appId) {
   }
   if(appId==="settings"){
     const s=game.state;
+    const curQ = getQuality();
     c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">⚙️ Settings</div>'+
+      '<div style="background:var(--cream);border-radius:10px;padding:12px;margin-bottom:8px;">'+
+        '<div style="font-size:12px;font-weight:600;margin-bottom:8px;">🎨 Graphics Quality</div>'+
+        '<div style="font-size:10px;color:#666;margin-bottom:8px;">Current: <b>'+curQ.toUpperCase()+'</b>. Lower = faster on slow phones. Higher = prettier.</div>'+
+        '<div style="display:flex;gap:4px;">'+
+          '<button onclick="window._setGraphicsQuality(\'low\')" style="flex:1;background:'+(curQ==='low'?'var(--green)':'#fff')+';color:'+(curQ==='low'?'#fff':'var(--green)')+';border:2px solid var(--green);border-radius:8px;padding:8px;cursor:pointer;font:600 11px Poppins,sans-serif;">Low</button>'+
+          '<button onclick="window._setGraphicsQuality(\'medium\')" style="flex:1;background:'+(curQ==='medium'?'var(--green)':'#fff')+';color:'+(curQ==='medium'?'#fff':'var(--green)')+';border:2px solid var(--green);border-radius:8px;padding:8px;cursor:pointer;font:600 11px Poppins,sans-serif;">Medium</button>'+
+          '<button onclick="window._setGraphicsQuality(\'high\')" style="flex:1;background:'+(curQ==='high'?'var(--green)':'#fff')+';color:'+(curQ==='high'?'#fff':'var(--green)')+';border:2px solid var(--green);border-radius:8px;padding:8px;cursor:pointer;font:600 11px Poppins,sans-serif;">High</button>'+
+        '</div>'+
+        '<div style="font-size:10px;color:#999;margin-top:6px;">Low: no shadows, simple sky. Medium: shadows + clouds. High: shadows + clouds + sun disc.</div>'+
+      '</div>'+
       '<div style="background:var(--cream);border-radius:10px;padding:12px;margin-bottom:8px;">'+
         '<div style="font-size:12px;font-weight:600;margin-bottom:8px;">Game</div>'+
         '<button onclick="window.saveGame()" style="width:100%;background:var(--green);color:#fff;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:13px;font-weight:600;margin-bottom:6px;">💾 Save Game</button>'+
@@ -904,7 +928,7 @@ function _showPhoneApp(appId) {
       '</div>'+
       '<div style="background:var(--cream);border-radius:10px;padding:12px;">'+
         '<div style="font-size:12px;font-weight:600;margin-bottom:6px;">About</div>'+
-        '<div style="font-size:11px;color:#666;line-height:1.5;">Kaduna Lifestyle v0.3 — A 3D multiplayer life-sim set in Kaduna, Nigeria. Built with Three.js + Firebase.</div>'+
+        '<div style="font-size:11px;color:#666;line-height:1.5;">Kaduna Lifestyle v0.3 — A 3D multiplayer life-sim set in Kaduna, Nigeria. Built with Three.js + Firebase. © OpenStreetMap contributors for road data.</div>'+
       '</div>'+backBtn;
     return;
   }
@@ -1032,6 +1056,11 @@ window.sendMessage=(uid,name)=>{
   toast("Waved at "+name);
 };
 window.saveGame=()=>{game.save?.();toast("Game saved!");};
+window._setGraphicsQuality = (q) => {
+  applyQuality(q, { renderer, sun, scene });
+  toast("🎨 Graphics set to " + q.toUpperCase() + ". Reload to see full effect.");
+  showPhoneApp("settings");
+};
 // ---- HomeStore: buy furniture + category filter ----
 window._hsSetCat = (cat) => { window._hsCat = cat; showPhoneApp("homestore"); };
 window._buyFurniture = async (itemId) => {
@@ -1938,7 +1967,7 @@ function frame() {
   if (rig) { rig.group.position.copy(player.pos); rig.group.rotation.y = player.heading; rig.animate(dt, player.speed); }
   updateCamera(camera, ctl, player.pos, active ? (active.handle.colliders || []) : world.colliders, dt);
   applyTime();
-  if (active) { scene.background = INTERIOR_BG; scene.fog.color.copy(INTERIOR_BG); sun.intensity = 0; hemi.intensity = 0.8; _dayApplied = false; }
+  if (active) { scene.background = INTERIOR_BG; scene.fog.color.copy(INTERIOR_BG); sun.intensity = 0; hemi.intensity = 0.8; }
   renderer.shadowMap.autoUpdate = !active;   // no shadow pass inside buildings
   // ---- Phase 2+9: Calculate modified drain rates (NEPA + moodlets + weather) ----
   const homeHandle = getActivePlace();
@@ -2015,6 +2044,8 @@ function frame() {
   hudT += dt; if (hudT > 0.5) { hudT = 0; updateHUD(); }
   // ---- Money Hunt tick: update instance positions + claim prompt ----
   tickMoneyHunt(Date.now());
+  // ---- Graphics tick: cloud drift ----
+  tickGraphics(dt);
   if (!active) savePos(dt);
   sendPosition(player.pos.x, player.pos.z, player.heading);
   setMyPosition(player.pos.x, player.pos.z);
