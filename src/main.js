@@ -27,6 +27,7 @@ import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpots
 import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
 import { celebrate } from "./celebrate.js";
 import { AREAS, getArea, claimPlot, getMyHouse, canPickArea, getPlotPosition } from "./areas.js";
+import { initMessages, searchUsers, openDM, sendMessage, openChat, closeChat, getChatList, getPresence, listenToPresence, sendMoney, createGroup, leaveGroup, blockUser, reportUser, getChatMeta, cleanupMessages } from "./messages.js";
 import { initEvents, tickNepa, isNepaCut, getNepaStatus, hasPowerBackup, getModifiedDrain, tickMoodlets, addMoodlet, getActiveMoodlets, getConsequences, getWalkSpeedMultiplier, MOODLET_DEFS } from "./events.js";
 import { SKILLS, CAREERS, SHIFT_TONES, initCareers, getSkills, getCareer, getCareerDef, canJoinCareer, canPromote, joinCareer, promote, doShift, trainSkill } from "./careers.js";
 import { WISH_POOL, PERKS, initWishes, getTodaysWishes, getWishPoints, getPerks, hasPerk, checkWishes, buyPerk } from "./wishes.js";
@@ -277,11 +278,12 @@ function _showPhoneApp(appId) {
       {id:"boutique",icon:"👕",label:"Boutique"},
       {id:"myoutfits",icon:"👜",label:"My Outfits"},
       {id:"wardrobe",icon:"👔",label:"Wardrobe"},
+      {id:"messages",icon:"💬",label:"Messages"},
       {id:"contacts",icon:"📲",label:"Contacts"},
       {id:"settings",icon:"⚙️",label:"Settings"}
     ];
     if(isAdmin()) apps.push({id:"admin",icon:"🔐",label:"Admin"});
-    const COL={food:["#f59e0b","#f97316"],jobs:["#8b5cf6","#6366f1"],bank:["#3b82f6","#2563eb"],ride:["#10b981","#059669"],chat:["#22c55e","#16a34a"],map:["#06b6d4","#0891b2"],daily:["#ec4899","#db2777"],health:["#ef4444","#dc2626"],richlist:["#f59e0b","#d97706"],profile:["#6366f1","#4f46e5"],events:["#d946ef","#c026d3"],news:["#64748b","#475569"],boutique:["#d946ef","#a855f7"],myoutfits:["#f97316","#ea580c"],wardrobe:["#14b8a6","#0d9488"],contacts:["#6366f1","#818cf8"],settings:["#64748b","#475569"],admin:["#ef4444","#b91c1c"],hunt:["#f2b134","#d97706"],missions:["#dc2626","#b91c1c"],realestate:["#16a34a","#15803d"],homestore:["#ea580c","#c2410c"],storage:["#0891b2","#0e7490"]};
+    const COL={food:["#f59e0b","#f97316"],jobs:["#8b5cf6","#6366f1"],bank:["#3b82f6","#2563eb"],ride:["#10b981","#059669"],chat:["#22c55e","#16a34a"],map:["#06b6d4","#0891b2"],daily:["#ec4899","#db2777"],health:["#ef4444","#dc2626"],richlist:["#f59e0b","#d97706"],profile:["#6366f1","#4f46e5"],events:["#d946ef","#c026d3"],news:["#64748b","#475569"],boutique:["#d946ef","#a855f7"],myoutfits:["#f97316","#ea580c"],wardrobe:["#14b8a6","#0d9488"],contacts:["#6366f1","#818cf8"],settings:["#64748b","#475569"],admin:["#ef4444","#b91c1c"],hunt:["#f2b134","#d97706"],missions:["#dc2626","#b91c1c"],realestate:["#16a34a","#15803d"],homestore:["#ea580c","#c2410c"],storage:["#0891b2","#0e7490"],messages:["#22c55e","#16a34a"]};
     const now=new Date(), hh=String(now.getHours()).padStart(2,"0"), mm=String(now.getMinutes()).padStart(2,"0");
     const dateTxt=now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})+" · Kaduna";
     c.innerHTML='<div class="ph-home-clock">'+hh+':'+mm+'</div><div class="ph-home-date">'+dateTxt+'</div><div class="ph-home-bal"><span>₦'+(game.state.money||0).toLocaleString()+'</span></div>'+
@@ -497,15 +499,6 @@ function _showPhoneApp(appId) {
   if(appId==="realestate"){
     const rentInfo = getRentInfo(game.state);
     let h = '<div style="font-size:15px;margin-bottom:8px;font-weight:700;color:#f2f2f4;">🏡 Real Estate & Rent</div>';
-    // Current home info
-    const myArea = game.state.homeArea ? getArea(game.state.homeArea) : null;
-    if (myArea) {
-      h += '<div style="background:#1a2a1a;border:1px solid #4ade80;border-radius:10px;padding:10px;margin-bottom:10px;">';
-      h += '<div style="font-size:12px;font-weight:600;color:#4ade80;">📍 Your Home</div>';
-      h += '<div style="font-size:13px;color:#f2f2f4;margin-top:2px;">' + myArea.name + ' · Plot ' + (game.state.homePlot ?? '?') + '</div>';
-      h += '<div style="font-size:10px;color:#9b9ba4;margin-top:2px;">' + myArea.desc + '</div>';
-      h += '</div>';
-    }
     // Rent status
     h += '<div style="background:'+(rentInfo.due?'#3a1a1a':'#1a2a1a')+';border-radius:10px;padding:10px;margin-bottom:10px;border:1px solid '+(rentInfo.due?'#e11d48':'#2e7d4f')+';">';
     h += '<div style="font-size:12px;font-weight:600;color:'+(rentInfo.due?'#e11d48':'#4ade80')+';">'+(rentInfo.due?'🔔 RENT DUE!':'✅ Rent paid')+'</div>';
@@ -515,25 +508,9 @@ function _showPhoneApp(appId) {
     h += '</div>';
     if (rentInfo.due) h += '<button onclick="window._payRent()" style="width:100%;margin-top:6px;background:#f2b134;color:#000;border:none;border-radius:8px;padding:8px;cursor:pointer;font-size:12px;font-weight:600;">Pay Rent ₦'+rentInfo.amount.toLocaleString()+'</button>';
     h += '</div>';
-    // Browse areas to move
-    h += '<div style="font-size:12px;font-weight:600;margin-bottom:6px;color:#f2b134;">🏘️ Move to Another Area</div>';
-    h += '<div style="font-size:11px;color:#6b7280;margin-bottom:8px;">Balance: ₦'+game.state.money.toLocaleString()+' · Moving carries your furniture to storage</div>';
-    for (const a of AREAS) {
-      const isCurrent = game.state.homeArea === a.id;
-      const canBuy = game.state.money >= a.buyPrice;
-      const canRent = game.state.money >= a.rentPrice * 2;
-      h += '<div style="display:flex;align-items:center;gap:8px;padding:10px;background:#17181b;border-radius:10px;margin-bottom:6px;'+(isCurrent?'border:2px solid #4ade80;':'')+'">';
-      h += '<div style="flex:1;"><div style="font-size:13px;font-weight:600;color:'+(isCurrent?'#4ade80':'#f2f2f4')+';">' + a.name + (isCurrent ? ' ✅' : '') + '</div>';
-      h += '<div style="font-size:10px;color:#9b9ba4;">' + a.desc + '</div>';
-      h += '<div style="font-size:10px;color:#9b9ba4;margin-top:2px;">Rent ₦'+a.rentPrice.toLocaleString()+'/wk · Buy ₦'+a.buyPrice.toLocaleString()+'</div></div>';
-      if (!isCurrent) {
-        if (canBuy) h += '<button onclick="window._moveToArea(\''+a.id+'\')" style="background:#f2b134;color:#000;border:none;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:11px;font-weight:600;">Move</button>';
-        else h += '<span style="font-size:10px;color:#6b7280;">₦'+a.buyPrice.toLocaleString()+'</span>';
-      }
-      h += '</div>';
-    }
-    // Housing tiers (upgrade)
-    h += '<div style="font-size:12px;font-weight:600;margin:12px 0 6px;color:#f2b134;">🏠 Upgrade House Tier</div>';
+    // Housing tiers
+    h += '<div style="font-size:12px;font-weight:600;margin-bottom:6px;color:#f2b134;">🏠 Housing Tiers</div>';
+    h += '<div style="font-size:11px;color:#6b7280;margin-bottom:8px;">Balance: ₦'+game.state.money.toLocaleString()+'</div>';
     for (const ht of HOUSE_TIERS) {
       const canAfford = game.state.money >= ht.buyPrice;
       const isCurrent = (game.state.homeTier || 1) === ht.tier;
@@ -657,9 +634,16 @@ function _showPhoneApp(appId) {
       }
       h += '</div>';
     }
-    h += '<div style="font-size:10px;color:#6b7280;margin-top:10px;text-align:center;line-height:1.4;">💡 Listen for the beep — it speeds up as you get closer. Press <b>E</b> when you see the prompt to claim.</div>';
+    h += '<div style="font-size:10px;color:#6b7280;margin-top:10px;text-align:center;line-height:1.4;">💡 Listen for the beep — it speeds up as you get closer. Tap the prompt when you see it to claim.</div>';
     h += backBtn;
     c.innerHTML = h;
+    return;
+  }
+  if(appId==="messages"){
+    _showingApp = "messages";
+    // If a chat is open, render the chat screen; otherwise render the list
+    if (window._openChatId) { _renderChatScreen(c, window._openChatId, window._openChatName || "Chat"); return; }
+    _renderMessagesList(c);
     return;
   }
   if(appId==="careers"){
@@ -999,7 +983,6 @@ window._openCreator = () => {
       toast("Welcome to Kaduna! 🎉");
       // Show origin selection if not yet chosen
       if (!game.state.origin) { setTimeout(() => _showOriginScreen(), 500); }
-      // Show area selection if origin chosen but no home area yet
       else if (!game.state.homeArea) { setTimeout(() => _showAreaScreen(), 500); }
     },
   });
@@ -1095,52 +1078,6 @@ window._buyHouse = async (tier, price, name) => {
   celebrate("🏠 " + name, "Welcome to your new home!");
   showPhoneApp("realestate");
 };
-// ---- Move to a new area (carries furniture to storage) ----
-window._moveToArea = async (areaId) => {
-  const area = getArea(areaId);
-  if (!area) { toast("Unknown area"); return; }
-  if (game.state.homeArea === areaId) { toast("You already live here"); return; }
-  const uid = getMyUid();
-  if (!uid) { toast("Sign in first"); return; }
-  // Check money — moving costs the buy price of the new area
-  if (game.state.money < area.buyPrice) { toast("Need ₦" + area.buyPrice.toLocaleString() + " to move to " + area.name); return; }
-  // Move existing furniture to storage first
-  try {
-    const { ref, get, set } = await import("firebase/database");
-    const furnitureSnap = await get(ref(db, "players/" + uid + "/homeFurniture"));
-    const oldFurniture = furnitureSnap.val() || [];
-    if (oldFurniture.length > 0) {
-      const storageSnap = await get(ref(db, "players/" + uid + "/storage"));
-      const storage = storageSnap.val() || [];
-      for (const f of oldFurniture) {
-        storage.push({ id: f.id, color: f.color });
-      }
-      await set(ref(db, "players/" + uid + "/storage"), storage);
-      // Clear old home furniture
-      await set(ref(db, "players/" + uid + "/homeFurniture"), []);
-    }
-  } catch (e) { console.warn("move furniture failed", e); }
-  // Claim a new plot in the target area
-  const name = (typeof getMyName === "function" ? getMyName() : "Player");
-  const r = await claimPlot(areaId, uid, name, game.state.origin);
-  if (!r.ok) { toast("❌ " + r.reason); return; }
-  // Deduct money
-  game.state.money -= area.buyPrice;
-  game.state.homeArea = areaId;
-  game.state.homePlot = r.plotNo;
-  game.state.lastRentPaid = Date.now();
-  game.save?.();
-  await update(ref(db, "economy/" + uid), { balance: game.state.money });
-  await update(ref(db, "players/" + uid), { homeArea: areaId, homePlot: r.plotNo, lastRentPaid: game.state.lastRentPaid });
-  toast("📦 Moved to " + area.name + "! Your furniture is in storage. Place it in your new home.");
-  celebrate("🏠 " + area.name, "Plot " + r.plotNo + " is yours!");
-  // Teleport to new home
-  const pos = getPlotPosition(area, r.plotNo);
-  player.pos.set(pos.x, 0, pos.z + 4);
-  player.heading = Math.PI;
-  updateHUD();
-  showPhoneApp("realestate");
-};
 // ---- Pay rent ----
 window._payRent = async () => {
   const uid = getMyUid();
@@ -1180,7 +1117,6 @@ window._pickOrigin = (originId) => {
     }
     toast("🎉 You chose " + r.origin.name + "! Check your Storage for starter items.");
     try { updateHUD(); } catch (e) { console.warn("[origin] updateHUD failed", e); }
-    // Show area selection after origin is picked
     if (!game.state.homeArea) { setTimeout(() => _showAreaScreen(), 600); }
   } catch (e) {
     console.error("[origin] _pickOrigin failed", e);
@@ -1217,9 +1153,172 @@ function _showOriginScreen() {
   el.innerHTML = h;
   document.body.appendChild(el);
 }
-// ---- Area selection screen (shown once after origin) ----
+// ---- Messages app rendering ----
+let _showingApp = null;
+function _renderMessagesList(c) {
+  const backBtnMsg = '<button onclick="window.showApp(\'home\')" style="margin-top:14px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;font-weight:600;">← Back to Phone</button>';
+  const chats = getChatList();
+  let h = '<div style="font-size:15px;margin-bottom:8px;font-weight:700;color:#f2f2f4;">💬 Messages</div>';
+  // Search box
+  h += '<div style="display:flex;gap:4px;margin-bottom:10px;"><input id="msg-search" type="text" placeholder="Message someone: @username" style="flex:1;padding:8px 10px;border:1px solid #26272b;border-radius:8px;background:#0b0b0c;color:#fff;font-size:12px;outline:none;" oninput="window._searchUsers(this.value)" /><button onclick="window._newGroup()" style="background:#f2b134;color:#000;border:none;border-radius:8px;padding:8px 12px;cursor:pointer;font:600 11px Poppins,sans-serif;white-space:nowrap;">+ Group</button></div>';
+  // Search results
+  h += '<div id="msg-search-results" style="margin-bottom:8px;"></div>';
+  // Chat list
+  h += '<div style="font-size:12px;font-weight:600;margin:8px 0 6px;color:#f2b134;">📋 Chats (' + chats.length + ')</div>';
+  if (chats.length === 0) {
+    h += '<div style="text-align:center;padding:20px;color:#6b7280;font-size:12px;">No chats yet. Search for someone by @username to start chatting!</div>';
+  } else {
+    for (const chat of chats) {
+      const unread = chat.unread || 0;
+      const time = chat.lastTs ? new Date(chat.lastTs).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "";
+      h += '<div onclick="window._openChatView(\'' + chat.chatId + '\')" style="display:flex;align-items:center;gap:8px;padding:10px;background:' + (unread > 0 ? '#1a2a1a' : '#17181b') + ';border-radius:10px;margin-bottom:4px;cursor:pointer;">';
+      h += '<div style="width:36px;height:36px;background:#0f4d3a;color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;">💬</div>';
+      h += '<div style="flex:1;min-width:0;"><div style="font-size:12px;font-weight:600;color:#f2f2f4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (chat.lastText || "Tap to chat") + '</div>';
+      h += '<div style="font-size:10px;color:#9b9ba4;">' + time + '</div></div>';
+      if (unread > 0) h += '<span style="background:#e11d48;color:#fff;border-radius:10px;padding:2px 7px;font-size:10px;font-weight:700;">' + unread + '</span>';
+      h += '</div>';
+    }
+  }
+  h += backBtnMsg;
+  c.innerHTML = h;
+}
+function _renderChatScreen(c, chatId, otherName) {
+  let h = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">';
+  h += '<button onclick="window._closeChatView()" style="background:none;border:none;color:#f2b134;font-size:18px;cursor:pointer;padding:4px;">←</button>';
+  h += '<div style="flex:1;font-size:14px;font-weight:700;color:#f2f2f4;">' + otherName + '</div>';
+  h += '</div>';
+  // Quick actions
+  h += '<div style="display:flex;gap:4px;margin-bottom:10px;">';
+  h += '<button onclick="window._chatInvite()" style="flex:1;background:#17181b;color:#f2f2f4;border:1px solid #26272b;border-radius:8px;padding:6px;cursor:pointer;font:600 10px Poppins,sans-serif;">🏠 Invite</button>';
+  h += '<button onclick="window._chatVisit()" style="flex:1;background:#17181b;color:#f2f2f4;border:1px solid #26272b;border-radius:8px;padding:6px;cursor:pointer;font:600 10px Poppins,sans-serif;">🚪 Visit</button>';
+  h += '<button onclick="window._chatSendMoney()" style="flex:1;background:#17181b;color:#f2b134;border:1px solid #f2b134;border-radius:8px;padding:6px;cursor:pointer;font:600 10px Poppins,sans-serif;">💸 Send money</button>';
+  h += '</div>';
+  // Messages container
+  h += '<div id="msg-bubbles" style="min-height:200px;max-height:45vh;overflow-y:auto;margin-bottom:10px;"></div>';
+  // Input row
+  h += '<div style="display:flex;gap:4px;align-items:center;">';
+  h += '<input id="msg-input" type="text" placeholder="Message..." style="flex:1;padding:10px;border:1px solid #26272b;border-radius:10px;background:#0b0b0c;color:#fff;font-size:13px;outline:none;" onkeydown="if(event.key===\'Enter\')window._sendMsg()" />';
+  h += '<button onclick="window._sendMsg()" style="background:#f2b134;color:#000;border:none;border-radius:10px;padding:10px 14px;cursor:pointer;font:700 13px Poppins,sans-serif;">Send</button>';
+  h += '</div>';
+  c.innerHTML = h;
+  // Listen to messages
+  openChat(chatId, (msgs) => {
+    const container = document.getElementById("msg-bubbles");
+    if (!container) return;
+    container.innerHTML = "";
+    for (const m of msgs) {
+      const isMe = m.from === getMyUid();
+      const time = new Date(m.ts || 0).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+      if (m.type === "system") {
+        const div = document.createElement("div");
+        div.style.cssText = "text-align:center;margin:6px 0;";
+        div.textContent = m.text;
+        container.appendChild(div);
+      } else if (m.type === "money") {
+        const div = document.createElement("div");
+        div.style.cssText = "text-align:center;margin:6px 0;background:#1a2a1a;border:1px solid #4ade80;border-radius:12px;padding:6px 12px;color:#4ade80;font-size:12px;font-weight:600;";
+        div.textContent = "💸 " + (isMe ? "You sent" : "You received") + " ₦" + (m.amount || 0).toLocaleString();
+        container.appendChild(div);
+      } else {
+        const div = document.createElement("div");
+        div.style.cssText = "display:flex;justify-content:" + (isMe ? "flex-end" : "flex-start") + ";margin:4px 0;";
+        const bubble = document.createElement("div");
+        bubble.style.cssText = "max-width:75%;padding:8px 12px;border-radius:14px;font-size:13px;word-break:break-word;" + (isMe ? "background:#0f4d3a;color:#fff;border-bottom-right-radius:4px;" : "background:#26272b;color:#f2f2f4;border-bottom-left-radius:4px;");
+        bubble.textContent = m.text; // textContent — never innerHTML (blocks injection)
+        const timeSpan = document.createElement("div");
+        timeSpan.style.cssText = "font-size:9px;color:#9b9ba4;margin-top:2px;text-align:right;";
+        timeSpan.textContent = time + (isMe ? " ✓" : "");
+        bubble.appendChild(timeSpan);
+        div.appendChild(bubble);
+        container.appendChild(div);
+      }
+    }
+    container.scrollTop = container.scrollHeight;
+  });
+}
+// ---- Messages window functions ----
+window._searchUsers = async (q) => {
+  const results = await searchUsers(q);
+  const el = document.getElementById("msg-search-results");
+  if (!el) return;
+  if (!results.length) { el.innerHTML = ""; return; }
+  el.innerHTML = results.map(r => '<div onclick="window._startChat(\'' + r.uid + '\',\'' + (r.name || r.username).replace(/'/g, "") + '\')" style="display:flex;align-items:center;gap:8px;padding:8px;background:#17181b;border-radius:8px;margin-bottom:4px;cursor:pointer;"><div style="width:28px;height:28px;background:#0f4d3a;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:700;">' + (r.name || r.username).charAt(0).toUpperCase() + '</div><div><div style="font-size:12px;font-weight:600;color:#f2f2f4;">' + r.name + '</div><div style="font-size:10px;color:#9b9ba4;">@' + r.username + '</div></div></div>').join("");
+};
+window._startChat = async (uid, name) => {
+  const r = await openDM(uid, name);
+  if (r) {
+    window._openChatId = r.chatId;
+    window._openChatName = name;
+    window._openChatOtherUid = uid;
+    showPhoneApp("messages");
+  }
+};
+window._openChatView = (chatId) => {
+  // Get chat meta to determine the name
+  getChatMeta(chatId).then((meta) => {
+    if (meta && meta.type === "group") {
+      window._openChatId = chatId;
+      window._openChatName = (meta.icon || "👥") + " " + (meta.name || "Group");
+      window._openChatOtherUid = null;
+    } else if (meta) {
+      // DM — find the other person's uid
+      const members = Object.keys(meta.members || {});
+      const otherUid = members.find(u => u !== getMyUid());
+      window._openChatId = chatId;
+      window._openChatOtherUid = otherUid;
+      // Get their name
+      if (otherUid) {
+        import("firebase/database").then(({ ref, get }) => {
+          get(ref(db, "players/" + otherUid + "/name")).then((snap) => {
+            window._openChatName = snap.val() || "Chat";
+            showPhoneApp("messages");
+          });
+        });
+      } else {
+        window._openChatName = "Chat";
+        showPhoneApp("messages");
+      }
+    }
+  });
+};
+window._closeChatView = () => {
+  closeChat();
+  window._openChatId = null;
+  window._openChatName = null;
+  window._openChatOtherUid = null;
+  showPhoneApp("messages");
+};
+window._sendMsg = async () => {
+  const input = document.getElementById("msg-input");
+  if (!input || !input.value.trim()) return;
+  await sendMessage(window._openChatId, input.value);
+  input.value = "";
+};
+window._chatSendMoney = () => {
+  const amt = prompt("Send money to " + (window._openChatName || "user") + " — Enter amount ₦:");
+  if (!amt) return;
+  sendMoney(window._openChatId, window._openChatOtherUid, parseInt(amt), "", game.state).then((r) => {
+    toast(r.msg);
+    if (r.ok) updateHUD();
+  });
+};
+window._chatInvite = () => { toast("🏠 Invite sent to " + (window._openChatName || "user")); };
+window._chatVisit = () => { toast("🚪 Visiting " + (window._openChatName || "user") + "'s home..."); };
+window._newGroup = () => {
+  const name = prompt("Group name:");
+  if (!name) return;
+  const members = prompt("Add members by @username (comma-separated):");
+  if (!members) return;
+  // Parse usernames -> uids
+  const usernames = members.split(",").map(s => s.trim().toLowerCase().replace(/^@/, "")).filter(Boolean);
+  Promise.all(usernames.map(u => import("firebase/database").then(({ ref, get }) => get(ref(db, "usernames/" + u)).then(s => s.val())))).then((uids) => {
+    const validUids = uids.filter(Boolean);
+    if (validUids.length === 0) { toast("No valid usernames found"); return; }
+    createGroup(name, "👥", validUids).then((r) => { toast(r.ok ? "🎉 Group created!" : r.msg); if (r.ok) showPhoneApp("messages"); });
+  });
+};
 function _showAreaScreen() {
-  if (game.state.homeArea) return;  // already picked
+  if (game.state.homeArea) return;
   let el = document.getElementById("area-sheet");
   if (el) el.remove();
   el = document.createElement("div");
@@ -1227,9 +1326,8 @@ function _showAreaScreen() {
   el.style.cssText = "position:fixed;inset:0;z-index:65;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;padding:16px;";
   let h = '<div style="background:#0b0b0c;border-radius:20px;padding:24px;width:min(420px,92vw);max-height:85vh;overflow-y:auto;color:#f2f2f4;">';
   h += '<div style="font-size:20px;font-weight:800;text-align:center;margin-bottom:6px;">📍 Where do you want to live?</div>';
-  h += '<div style="font-size:12px;color:#9b9ba4;text-align:center;margin-bottom:16px;">Pick your area. Each area has different prices and vibes. You can move later.</div>';
+  h += '<div style="font-size:12px;color:#9b9ba4;text-align:center;margin-bottom:16px;">Pick your area. You can move later.</div>';
   const origin = game.state.origin || "talaka";
-  // Group areas by tier
   const tiers = [
     { id: "cheap",  label: "🏠 Budget Areas",   color: "#4ade80" },
     { id: "middle", label: "🏡 Mid-Tier Areas",  color: "#f2b134" },
@@ -1241,19 +1339,14 @@ function _showAreaScreen() {
     h += '<div style="font-size:13px;font-weight:700;color:' + t.color + ';margin:12px 0 6px;">' + t.label + '</div>';
     for (const a of areaList) {
       const canPick = canPickArea(origin, a);
-      const tierLabel = a.tier === "rich" ? "Upscale" : a.tier === "middle" ? "Mid" : "Budget";
       h += '<div onclick="' + (canPick ? "window._pickArea('" + a.id + "')" : "") + '" style="background:#17181b;border:2px solid ' + (canPick ? t.color : "#333") + ';border-radius:14px;padding:14px;margin-bottom:8px;cursor:' + (canPick ? "pointer" : "not-allowed") + ';opacity:' + (canPick ? "1" : "0.5") + ';">';
-      h += '<div style="display:flex;justify-content:space-between;align-items:center;">';
       h += '<div style="font-size:15px;font-weight:700;color:' + (canPick ? t.color : "#666") + ';">' + a.name + '</div>';
-      h += '<span style="font-size:10px;background:#26272b;padding:3px 8px;border-radius:6px;color:' + t.color + ';">' + tierLabel + '</span>';
-      h += '</div>';
       h += '<div style="font-size:11px;color:#9b9ba4;line-height:1.4;margin-top:4px;">' + a.desc + '</div>';
       h += '<div style="font-size:10px;margin-top:6px;display:flex;gap:8px;flex-wrap:wrap;">';
       h += '<span style="background:#26272b;padding:3px 8px;border-radius:6px;">💰 Rent ₦' + a.rentPrice.toLocaleString() + '/wk</span>';
       h += '<span style="background:#26272b;padding:3px 8px;border-radius:6px;">🏠 Buy ₦' + a.buyPrice.toLocaleString() + '</span>';
-      h += '<span style="background:#26272b;padding:3px 8px;border-radius:6px;">📍 ' + a.plots + ' plots</span>';
       h += '</div>';
-      if (!canPick) h += '<div style="font-size:10px;color:#e11d48;margin-top:4px;">🔒 Dan Talaka no fit start here. Hustle first!</div>';
+      if (!canPick) h += '<div style="font-size:10px;color:#e11d48;margin-top:4px;">🔒 Dan Talaka no fit start here</div>';
       h += '</div>';
     }
   }
@@ -1265,25 +1358,51 @@ window._pickArea = async (areaId) => {
   const uid = getMyUid();
   if (!uid) { toast("Sign in first"); return; }
   const area = getArea(areaId);
-  if (!area) { toast("Unknown area"); return; }
+  if (!area) return;
   if (!canPickArea(game.state.origin, area)) { toast("🔒 Your origin no fit start for this area"); return; }
   toast("🏠 Claiming your plot in " + area.name + "...");
   const name = (typeof getMyName === "function" ? getMyName() : "Player");
   const r = await claimPlot(areaId, uid, name, game.state.origin);
   if (r.ok) {
-    game.state.homeArea = areaId;
-    game.state.homePlot = r.plotNo;
-    game.save?.();
-    toast("🎉 You got Plot " + r.plotNo + " in " + area.name + "!");
-    celebrate("🏠 " + area.name, "Plot " + r.plotNo + " is yours!");
+    game.state.homeArea = areaId; game.state.homePlot = r.plotNo; game.save?.();
+    toast("🎉 Plot " + r.plotNo + " in " + area.name + " is yours!");
+    celebrate("🏠 " + area.name, "Plot " + r.plotNo);
     document.getElementById("area-sheet")?.remove();
-    // Teleport player to their new home entrance
     const pos = getPlotPosition(area, r.plotNo);
-    player.pos.set(pos.x, 0, pos.z + 4);
-    player.heading = Math.PI;
-  } else {
-    toast("❌ " + r.reason);
-  }
+    player.pos.set(pos.x, 0, pos.z + 4); player.heading = Math.PI;
+  } else { toast("❌ " + r.reason); }
+};
+window._moveToArea = async (areaId) => {
+  const area = getArea(areaId);
+  if (!area) return;
+  if (game.state.homeArea === areaId) { toast("You already live here"); return; }
+  const uid = getMyUid(); if (!uid) return;
+  if (game.state.money < area.buyPrice) { toast("Need ₦" + area.buyPrice.toLocaleString()); return; }
+  try {
+    const { ref, get, set } = await import("firebase/database");
+    const fSnap = await get(ref(db, "players/" + uid + "/homeFurniture"));
+    const oldF = fSnap.val() || [];
+    if (oldF.length > 0) {
+      const sSnap = await get(ref(db, "players/" + uid + "/storage"));
+      const storage = sSnap.val() || [];
+      for (const f of oldF) storage.push({ id: f.id, color: f.color });
+      await set(ref(db, "players/" + uid + "/storage"), storage);
+      await set(ref(db, "players/" + uid + "/homeFurniture"), []);
+    }
+  } catch (e) {}
+  const name = (typeof getMyName === "function" ? getMyName() : "Player");
+  const r = await claimPlot(areaId, uid, name, game.state.origin);
+  if (!r.ok) { toast("❌ " + r.reason); return; }
+  game.state.money -= area.buyPrice;
+  game.state.homeArea = areaId; game.state.homePlot = r.plotNo;
+  game.state.lastRentPaid = Date.now(); game.save?.();
+  await update(ref(db, "economy/" + uid), { balance: game.state.money });
+  await update(ref(db, "players/" + uid), { homeArea: areaId, homePlot: r.plotNo, lastRentPaid: game.state.lastRentPaid });
+  toast("📦 Moved to " + area.name + "! Furniture in storage.");
+  celebrate("🏠 " + area.name, "Plot " + r.plotNo);
+  const pos = getPlotPosition(area, r.plotNo);
+  player.pos.set(pos.x, 0, pos.z + 4); player.heading = Math.PI;
+  updateHUD(); showPhoneApp("realestate");
 };
 // ---- Money Hunt HUD update (called by moneyhunt.js after a successful claim) ----
 function _updateHuntHud() {
@@ -1363,7 +1482,7 @@ window._placeInRoom = (storageIdx) => {
     if (homeDef) {
       player.pos.set(homeDef.entranceX, 0, homeDef.entranceZ);
       player.heading = homeDef.entranceFacing;
-      toast("Walked to your home. Press E to enter, then place furniture.");
+      toast("Walked to your home. Tap the prompt to enter, then place furniture.");
     }
     return;
   }
@@ -1560,6 +1679,9 @@ initAuth((user) => {
   initWishes(user.uid, () => {});
   initElection(user.uid, () => {});
   initSocial(user.uid, () => {});
+  // ---- Init Messages app ----
+  const myName = user.displayName || user.email?.split("@")[0] || "Player";
+  initMessages(user.uid, myName, toast, () => { if (_showingApp === "messages") showPhoneApp("messages"); });
   initFlavour((headline) => { if (headline) toast("📰 " + headline.text); });
   // Check for visit link (?v=username)
   checkVisitLink((username) => {
@@ -1638,7 +1760,6 @@ initAuth((user) => {
         if (!game.state.origin) {
           const t = setInterval(() => { if (!rig) return; clearInterval(t); _showOriginScreen(); }, 400);
         } else if (!game.state.homeArea) {
-          // Origin picked but no area yet — show area screen after reload
           const t = setInterval(() => { if (!rig) return; clearInterval(t); _showAreaScreen(); }, 400);
         }
       }
