@@ -3,6 +3,9 @@
 // Bought items saved to Firebase: players/{uid}/storage = [{id, color}]
 // Placed items saved to Firebase: players/{uid}/homeFurniture = [{id, x, z, rot, color}]
 
+import * as THREE from "three";
+import { buildProp } from "./art/props.js";
+
 export const FURNITURE_CATALOG = [
   // Bedroom
   { id: "bed_single", name: "Single Bed", cat: "Bedroom", price: 5000, comfort: 15, w: 2, d: 3, emoji: "🛏️", colors: ["#8b5a3c", "#1a1a2e", "#2d3a4a"] },
@@ -48,51 +51,17 @@ export const CATEGORIES = ["Bedroom", "Living", "Kitchen", "Power", "Decor", "Ou
 
 export function getItem(id) { return FURNITURE_CATALOG.find(f => f.id === id); }
 
-// Build a simple furniture mesh from primitives (box/cylinder)
+// Build a furniture mesh (stylised low-poly look, see src/art/props.js).
+// Same return shape as before: THREE.Group with userData {furnitureId,w,d,comfort}.
 export function makeFurnitureMesh(item, color) {
-  // Returns a THREE.Group with the furniture
-  // This is a simplified version — just a colored box with the right dimensions
-  const group = new THREE.Group();
-  const c = color || item.colors[0];
-  const w = item.w * 0.8, d = item.d * 0.8;
-  let h = 0.5; // default height
-
-  // Height varies by type
-  if (item.id.includes("bed")) h = 0.6;
-  else if (item.id.includes("sofa")) h = 0.9;
-  else if (item.id.includes("wardrobe")) h = 2.0;
-  else if (item.id.includes("fridge")) h = 1.8;
-  else if (item.id.includes("tv")) h = 1.2;
-  else if (item.id.includes("plant")) h = 1.0;
-  else if (item.id.includes("palm")) h = 3.0;
-  else if (item.id.includes("gate")) h = 2.5;
-  else if (item.id.includes("generator")) h = 0.8;
-  else if (item.id.includes("toilet")) h = 0.5;
-  else if (item.id.includes("shower")) h = 2.0;
-
-  // Main body
-  const body = new THREE.Mesh(
-    new THREE.BoxGeometry(w, h, d),
-    new THREE.MeshLambertMaterial({ color: c })
-  );
-  body.position.y = h / 2;
-  body.castShadow = false;
-  body.receiveShadow = true;
-  group.add(body);
-
-  // Add a label sprite (emoji) above
-  const labelCanvas = document.createElement("canvas");
-  labelCanvas.width = 64; labelCanvas.height = 64;
-  const ctx = labelCanvas.getContext("2d");
-  ctx.font = "40px Arial";
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText(item.emoji, 32, 32);
-  const tex = new THREE.CanvasTexture(labelCanvas);
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
-  sprite.position.y = h + 0.3;
-  sprite.scale.set(0.5, 0.5, 1);
-  group.add(sprite);
-
+  let group;
+  try { group = buildProp(item, color); }
+  catch (e) {
+    console.warn("[art] buildProp failed, using box", e);
+    group = new THREE.Group();
+    const m = new THREE.Mesh(new THREE.BoxGeometry(item.w * 0.8, 0.8, item.d * 0.8), new THREE.MeshLambertMaterial({ color: color || item.colors[0] }));
+    m.position.y = 0.4; group.add(m);
+  }
   group.userData = { furnitureId: item.id, w: item.w, d: item.d, comfort: item.comfort };
   return group;
 }

@@ -12,6 +12,7 @@
 // - No per-frame cube camera renders (the official example re-renders reflections
 //   every frame; we skip that entirely — it's for reflective water, which we don't have).
 
+import { setArtQuality } from "./art/style.js";
 import * as THREE from "three";
 // Sky addon is loaded lazily inside initGraphics() so the game doesn't crash
 // if the addon fails to load (e.g. on older browsers or bundler issues).
@@ -239,6 +240,7 @@ export function applyQuality(q, { renderer, sun, scene }) {
   const preset = QUALITY_PRESETS[q];
   if (!preset) return;
   _quality = q;
+  try { setArtQuality(q); } catch (e) {}
 
   renderer.setPixelRatio(Math.min(preset.pixelRatio, devicePixelRatio));
   renderer.shadowMap.enabled = preset.shadows;

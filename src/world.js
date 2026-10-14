@@ -3,6 +3,8 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { ROAD_HALF, WORLD_HALF_X, CROSSINGS, SIDE_STREETS, rng } from "./config.js";
 
+import { stylize } from "./art/style.js";
+const OL = (o) => stylize(new THREE.MeshLambertMaterial(o), { pat: false, ao: true, fake: false });
 const C = (hex) => new THREE.Color(hex);
 
 function windowTexture() {
@@ -39,7 +41,14 @@ export function labelTexture(text, w = 512, h = 128, bg = "#0f4d3a", fg = "#ffff
   return t;
 }
 
-function windowBox(w, h, d, color) {
+function withPat(g, code) {
+  const n = g.attributes.position.count, a = new Float32Array(n).fill(code);
+  g.setAttribute("aPat", new THREE.BufferAttribute(a, 1));
+  return g;
+}
+const OLP = (o) => stylize(new THREE.MeshLambertMaterial(o), { pat: true, ao: true, fake: false });
+
+function windowBox(w, h, d, color, code = 0) {
   const g = new THREE.BoxGeometry(w, h, d);
   const uv = g.attributes.uv, pos = g.attributes.position, nor = g.attributes.normal;
   for (let i = 0; i < uv.count; i++) {
@@ -51,17 +60,17 @@ function windowBox(w, h, d, color) {
   const col = new Float32Array(pos.count * 3);
   for (let i = 0; i < pos.count; i++) { col[i*3] = color.r; col[i*3+1] = color.g; col[i*3+2] = color.b; }
   g.setAttribute("color", new THREE.BufferAttribute(col, 3));
-  return g;
+  return withPat(g, code);
 }
 
-function part(w, h, d, x, y, z, hex) {
+function part(w, h, d, x, y, z, hex, code = 0) {
   const g = new THREE.BoxGeometry(w, h, d);
   g.translate(x, y, z);
   const c = new THREE.Color(hex);
   const n = g.attributes.position.count, col = new Float32Array(n * 3);
   for (let i = 0; i < n; i++) { col[i*3] = c.r; col[i*3+1] = c.g; col[i*3+2] = c.b; }
   g.setAttribute("color", new THREE.BufferAttribute(col, 3));
-  return g;
+  return withPat(g, code);
 }
 
 export function buildWorld(scene) {
@@ -72,35 +81,35 @@ export function buildWorld(scene) {
   scene.add(world);
 
   // ---- ground ----
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(1400, 700), new THREE.MeshLambertMaterial({ color: 0x9aab62 }));
+  const ground = new THREE.Mesh(withPat(new THREE.PlaneGeometry(1400, 700), 12), OLP({ color: 0x9aab62 }));
   ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
   world.add(ground);
 
   // ---- road ----
-  const asphalt = new THREE.MeshLambertMaterial({ color: 0x3a3d43 });
-  const road = new THREE.Mesh(new THREE.PlaneGeometry(WORLD_HALF_X * 2 + 200, ROAD_HALF * 2), asphalt);
+  const asphalt = OLP({ color: 0x3a3d43 });
+  const road = new THREE.Mesh(withPat(new THREE.PlaneGeometry(WORLD_HALF_X * 2 + 200, ROAD_HALF * 2), 13), asphalt);
   road.rotation.x = -Math.PI / 2; road.position.y = 0.01; road.receiveShadow = true;
   world.add(road);
 
   for (const sx of SIDE_STREETS) {
-    const sp = new THREE.Mesh(new THREE.PlaneGeometry(12, 120), asphalt);
+    const sp = new THREE.Mesh(withPat(new THREE.PlaneGeometry(12, 120), 13), asphalt);
     sp.rotation.x = -Math.PI / 2; sp.position.set(sx, 0.012, 0); sp.receiveShadow = true;
     world.add(sp);
   }
 
   // sidewalks with kerb edge
-  const paveMat = new THREE.MeshLambertMaterial({ color: 0xd2bf9c });
+  const paveMat = OLP({ color: 0xd2bf9c });
   for (const side of [1, -1]) {
-    const s = new THREE.Mesh(new THREE.BoxGeometry(WORLD_HALF_X * 2 + 200, 0.16, 6), paveMat);
+    const s = new THREE.Mesh(withPat(new THREE.BoxGeometry(WORLD_HALF_X * 2 + 200, 0.16, 6), 1), paveMat);
     s.position.set(0, 0.08, side * (ROAD_HALF + 3)); s.receiveShadow = true; world.add(s);
     // kerb edge
-    const ke = new THREE.Mesh(new THREE.BoxGeometry(WORLD_HALF_X * 2 + 200, 0.22, 0.3), new THREE.MeshLambertMaterial({ color: 0xaaa49a }));
+    const ke = new THREE.Mesh(new THREE.BoxGeometry(WORLD_HALF_X * 2 + 200, 0.22, 0.3), OL({ color: 0xaaa49a }));
     ke.position.set(0, 0.11, side * ROAD_HALF); world.add(ke);
   }
   // median
-  const kerb = new THREE.Mesh(new THREE.BoxGeometry(WORLD_HALF_X * 2 + 200, 0.2, 2.3), new THREE.MeshLambertMaterial({ color: 0xcfcfc8 }));
+  const kerb = new THREE.Mesh(new THREE.BoxGeometry(WORLD_HALF_X * 2 + 200, 0.2, 2.3), OL({ color: 0xcfcfc8 }));
   kerb.position.y = 0.1; world.add(kerb);
-  const medGrass = new THREE.Mesh(new THREE.BoxGeometry(WORLD_HALF_X * 2 + 200, 0.05, 1.8), new THREE.MeshLambertMaterial({ color: 0x5f9a45 }));
+  const medGrass = new THREE.Mesh(new THREE.BoxGeometry(WORLD_HALF_X * 2 + 200, 0.05, 1.8), OL({ color: 0x5f9a45 }));
   medGrass.position.y = 0.22; world.add(medGrass);
 
   // lane markings
@@ -130,6 +139,11 @@ export function buildWorld(scene) {
     geos.push(windowBox(w, h, d, color).translate(x, h / 2, z));
     // roof parapet
     geos.push(windowBox(w + 0.3, 0.5, d + 0.3, C(0xb5a68b)).translate(x, h + 0.25, z));
+    // corrugated zinc roof sheet (common in Kaduna), red / grey / brown
+    if (R() < 0.6) {
+      const zc = [0xa8483a, 0x8c9399, 0x7a4a32, 0xb5603f][Math.floor(R() * 4)];
+      geos.push(part(w + 0.7, 0.3, d + 0.7, x, h + 0.62, z, zc, 4));
+    }
     // rooftop water tank (common in Kaduna)
     if (R() < 0.4) {
       geos.push(part(1.5, 1.5, 1.5, x + (R()-0.5)*w*0.5, h + 1.5, z + (R()-0.5)*d*0.5, 0x4a90d9));
@@ -167,7 +181,7 @@ export function buildWorld(scene) {
     }
   }
   for (const sx of SIDE_STREETS) for (const side of [1, -1]) addBuilding(sx, side * 62, 26, 12, 16, C(0xe8d3b0), side);
-  const bMat = new THREE.MeshLambertMaterial({ map: windowTexture(), vertexColors: true });
+  const bMat = OLP({ map: windowTexture(), vertexColors: true });
   const buildings = new THREE.Mesh(mergeGeometries(geos), bMat);
   buildings.castShadow = false; buildings.receiveShadow = true; // big merged mesh — only receive, don't cast (saves shadow map cost)
   world.add(buildings);
@@ -175,17 +189,17 @@ export function buildWorld(scene) {
   // ---- Central Mosque ----
   {
     const mx = 48, mz = 34;
-    const hall = new THREE.Mesh(new THREE.BoxGeometry(34, 8, 22), new THREE.MeshLambertMaterial({ color: 0xf4f1ea }));
+    const hall = new THREE.Mesh(new THREE.BoxGeometry(34, 8, 22), OL({ color: 0xf4f1ea }));
     hall.position.set(mx, 4, mz); hall.castShadow = true; hall.receiveShadow = true; world.add(hall);
-    const dome = new THREE.Mesh(new THREE.SphereGeometry(8, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x1f7a5a }));
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(8, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2), OL({ color: 0x1f7a5a }));
     dome.position.set(mx, 8, mz); dome.castShadow = true; world.add(dome);
     // crescent on top
-    const crescent = new THREE.Mesh(new THREE.TorusGeometry(0.8, 0.15, 8, 16, Math.PI), new THREE.MeshLambertMaterial({ color: 0xf2b134 }));
+    const crescent = new THREE.Mesh(new THREE.TorusGeometry(0.8, 0.15, 8, 16, Math.PI), OL({ color: 0xf2b134 }));
     crescent.position.set(mx, 17, mz); crescent.rotation.x = Math.PI / 2; world.add(crescent);
     for (const dx of [-20, 20]) {
-      const tw = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.8, 26, 10), new THREE.MeshLambertMaterial({ color: 0xf4f1ea }));
+      const tw = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.8, 26, 10), OL({ color: 0xf4f1ea }));
       tw.position.set(mx + dx, 13, mz - 8); tw.castShadow = true; world.add(tw);
-      const cap = new THREE.Mesh(new THREE.ConeGeometry(2, 4, 10), new THREE.MeshLambertMaterial({ color: 0x1f7a5a }));
+      const cap = new THREE.Mesh(new THREE.ConeGeometry(2, 4, 10), OL({ color: 0x1f7a5a }));
       cap.position.set(mx + dx, 28, mz - 8); world.add(cap);
     }
     colliders.push({ minX: mx - 17, maxX: mx + 17, minZ: mz - 11, maxZ: mz + 11 });
@@ -208,7 +222,7 @@ export function buildWorld(scene) {
         part(3.8, 1.8, 0.1, sx, 1.6, sz + 1.5, 0xf4f1ea),
         part(3.5, 0.8, 1, sx, 0.8, sz, 0xd2bf9c)
       ]);
-      const stall = new THREE.Mesh(merged, new THREE.MeshLambertMaterial({ vertexColors: true }));
+      const stall = new THREE.Mesh(merged, OL({ vertexColors: true }));
       stall.castShadow = true; world.add(stall);
       colliders.push({ minX: sx - 2, maxX: sx + 2, minZ: sz - 1.5, maxZ: sz + 1.5 });
       mapShapes.stalls.push({ x: sx, z: sz });
@@ -234,7 +248,7 @@ export function buildWorld(scene) {
       part(0.8, 1.5, 0.6, px + 3, 0.75, pz, 0xe11d48),
     ]);
     const merged = mergeGeometries([canopy, canopyLegs, pumps]);
-    const station = new THREE.Mesh(merged, new THREE.MeshLambertMaterial({ vertexColors: true }));
+    const station = new THREE.Mesh(merged, OL({ vertexColors: true }));
     station.castShadow = true; world.add(station);
     colliders.push({ minX: px - 8, maxX: px + 8, minZ: pz - 4, maxZ: pz + 4 });
     mapShapes.buildings.push({ x: px, z: pz, w: 16, d: 8, landmark: true });
@@ -253,7 +267,7 @@ export function buildWorld(scene) {
       part(0.3, 2.8, 0.3, kx + 3.5, 1.4, kz + 1.5, 0x555a60),
       part(7, 1.5, 0.1, kx, 1.5, kz + 2, 0xbfd8e6),
     ]);
-    const parkMesh = new THREE.Mesh(shelter, new THREE.MeshLambertMaterial({ vertexColors: true }));
+    const parkMesh = new THREE.Mesh(shelter, OL({ vertexColors: true }));
     parkMesh.castShadow = true; world.add(parkMesh);
     const ksign = new THREE.Mesh(new THREE.PlaneGeometry(5, 1.2), new THREE.MeshBasicMaterial({ map: labelTexture("KEKE PARK", 256, 64, "#f2b134", "#12261e", 32) }));
     ksign.position.set(kx, 3.2, kz - 2.1); world.add(ksign);
@@ -276,13 +290,13 @@ export function buildWorld(scene) {
     }
   }
   {
-    const tm = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.7, 1, 1, 6).translate(0, 0.5, 0), new THREE.MeshLambertMaterial({ color: 0x7a5a3a }), trunks.length);
+    const tm = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.7, 1, 1, 6).translate(0, 0.5, 0), OL({ color: 0x7a5a3a }), trunks.length);
     trunks.forEach(([x, z, , h, r], i) => {
       m4.compose(new THREE.Vector3(x, 0, z), new THREE.Quaternion(), new THREE.Vector3(r, h, r));
       tm.setMatrixAt(i, m4);
     });
     tm.castShadow = false; tm.receiveShadow = true; world.add(tm);
-    const cm = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), new THREE.MeshLambertMaterial({ color: 0xffffff }), crowns.length);
+    const cm = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), OL({ color: 0xffffff }), crowns.length);
     crowns.forEach(([x, y, z, s, col, flat], i) => {
       m4.compose(new THREE.Vector3(x, y, z), new THREE.Quaternion(), new THREE.Vector3(s, s * (flat === 0.5 ? 0.45 : 0.8), s));
       cm.setMatrixAt(i, m4); cm.setColorAt(i, C(col));
@@ -299,7 +313,7 @@ export function buildWorld(scene) {
   // Lamps at every crossing
   for (const cx of CROSSINGS) for (const side of [1, -1]) lampPos.push([cx, side * (ROAD_HALF + 0.7), side]);
 
-  const poles = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.07, 0.1, 6.2, 6).translate(0, 3.1, 0), new THREE.MeshLambertMaterial({ color: 0x4a4f55 }), lampPos.length);
+  const poles = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.07, 0.1, 6.2, 6).translate(0, 3.1, 0), OL({ color: 0x4a4f55 }), lampPos.length);
   // Lamp head — emissive warm yellow so it glows at night even without the point light
   const headMat = new THREE.MeshStandardMaterial({ color: 0xfff0b0, emissive: 0xffd070, emissiveIntensity: 0.6 });
   const heads = new THREE.InstancedMesh(new THREE.BoxGeometry(1.5, 0.18, 0.45).translate(-0.6, 0, 0), headMat, lampPos.length);
@@ -339,16 +353,16 @@ export function buildWorld(scene) {
   const busStopTex = labelTexture("BUS STOP", 256, 64, "#f2b134", "#12261e", 36);
   for (const [bx, side] of [[-40, 1], [30, -1], [120, 1], [-130, -1]]) {
     const z = side * (ROAD_HALF + 4.6);
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(5, 0.2, 2.2), new THREE.MeshLambertMaterial({ color: 0x0f4d3a })); roof.position.set(bx, 2.6, z);
-    const back = new THREE.Mesh(new THREE.BoxGeometry(5, 2.4, 0.1), new THREE.MeshLambertMaterial({ color: 0xbfd8e6, transparent: true, opacity: 0.55 })); back.position.set(bx, 1.3, z + side * 1);
-    const bench = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.15, 0.6), new THREE.MeshLambertMaterial({ color: 0x8a6a45 })); bench.position.set(bx, 0.55, z + side * 0.5);
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(5, 0.2, 2.2), OL({ color: 0x0f4d3a })); roof.position.set(bx, 2.6, z);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(5, 2.4, 0.1), OL({ color: 0xbfd8e6, transparent: true, opacity: 0.55 })); back.position.set(bx, 1.3, z + side * 1);
+    const bench = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.15, 0.6), OL({ color: 0x8a6a45 })); bench.position.set(bx, 0.55, z + side * 0.5);
     const sg = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.6), new THREE.MeshBasicMaterial({ map: busStopTex })); sg.position.set(bx, 3.0, z - side * 1.12); sg.rotation.y = side > 0 ? Math.PI : 0;
     world.add(roof, back, bench, sg);
   }
   const boards = [["WELCOME TO KADUNA", "#0f4d3a", -60, 1], ["CENTRE OF LEARNING", "#1d5fa8", 100, -1], ["KADUNA LIFESTYLE", "#c0392b", -150, 1], ["EAT WELL LIVE WELL", "#7a3b8f", 10, -1]];
   for (const [txt, bg, bx, side] of boards) {
     const z = side * (ROAD_HALF + 10.5);
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.25, 5, 6), new THREE.MeshLambertMaterial({ color: 0x555a60 })); post.position.set(bx, 2.5, z);
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.25, 5, 6), OL({ color: 0x555a60 })); post.position.set(bx, 2.5, z);
     const panel = new THREE.Mesh(new THREE.PlaneGeometry(9, 3.4), new THREE.MeshBasicMaterial({ map: labelTexture(txt, 512, 192, bg, "#ffffff", 54), side: THREE.DoubleSide })); panel.position.set(bx, 6.4, z);
     world.add(post, panel);
     colliders.push({ minX: bx - 0.3, maxX: bx + 0.3, minZ: z - 0.3, maxZ: z + 0.3 });
@@ -406,7 +420,7 @@ export function buildWorld(scene) {
       // Post for the sign
       const post = new THREE.Mesh(
         new THREE.CylinderGeometry(0.08, 0.1, 4, 6),
-        new THREE.MeshLambertMaterial({ color: 0x4a4f55 })
+        OL({ color: 0x4a4f55 })
       );
       post.position.set(m.x, 2, m.z);
       world.add(post);
