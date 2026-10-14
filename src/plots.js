@@ -41,6 +41,14 @@ const LABEL_RANGE = 60;       // metres — only show owner-name labels within t
 const LABEL_POOL_SIZE = 12;   // max simultaneous label sprites (recycled LRU)
 const KNOCK_RANGE = 6;         // metres — within this, show knock/enter prompt
 
+// FEATURE 3: chunk-streamed plot grids. Each nearby area renders a grid of
+// small plot-boundary markers (cheap InstancedMesh of cubes). Only plots within
+// AREA_GRID_RANGE of the player get markers. The whole grid is hidden when the
+// player is too far away. ONE InstancedMesh per area, allocated once when the
+// area first becomes nearby, disposed when the area unsubscribes.
+const AREA_GRID_RANGE = 220;  // metres — show plot grid markers within this of area center
+const AREA_NAME_RANGE = 320;  // metres — show the area name sign within this of area center
+
 // ---- State ----
 let _scene = null;
 let _doorMesh = null;          // InstancedMesh of the door-gate geometry
@@ -56,6 +64,11 @@ let _toast = null;
 let _onPromptUpdate = null;    // callback to update the prompt UI
 let _pendingKnock = null;      // { knockId, ownerUid } when waiting for a knock reply
 let _unsubKnockReply = null;
+
+// FEATURE 3: per-area chunk-streamed plot grids + name signs
+let _areaGridMeshes = new Map(); // areaId -> { mesh: InstancedMesh, allocated: int }
+let _areaNameSprites = new Map(); // areaId -> { sprite, canvas, ctx, texture }
+let _labelTextureCache = new Map(); // text -> CanvasTexture (for area name signs)
 
 // ---- Build the door-gate geometry (merged, reused for every plot) ----
 // Two posts + top beam + sign board, all in one merged BufferGeometry.
@@ -122,7 +135,6 @@ const _v = new THREE.Vector3();
 const _scl = new THREE.Vector3(1, 1, 1);
 
 export function tickPlotDoors(playerX, playerZ) {
-  if (!_doorMesh) return; // not initialised yet (e.g. before sign-in) — nothing to draw
   _player.x = playerX;
   _player.z = playerZ;
 
@@ -150,7 +162,29 @@ export function tickPlotDoors(playerX, playerZ) {
       _subscriptions.delete(areaId);
       _nearbyAreas.delete(areaId);
       delete _houses[areaId];
+      // FEATURE 3: dispose this area's grid mesh + name sign
+      _disposeAreaGrid(areaId);
+      _disposeAreaName(areaId);
     }
+  }
+
+  // FEATURE 3: For each nearby area, ensure a chunk-streamed plot grid
+  // InstancedMesh + a name sign billboard exist. Then update visibility
+  // based on player distance.
+  for (const areaId of _nearbyAreas) {
+    const area = getArea(areaId);
+    if (!area) continue;
+    const dx = area.x - playerX, dz = area.z - playerZ;
+    const distToArea = Math.sqrt(dx * dx + dz * dz);
+    // Ensure grid mesh exists
+    if (!_areaGridMeshes.has(areaId)) _buildAreaGrid(areaId, area);
+    // Update grid visibility + instance positions
+    _updateAreaGrid(areaId, area, playerX, playerZ);
+    // Ensure name sign exists
+    if (!_areaNameSprites.has(areaId)) _buildAreaName(areaId, area);
+    // Toggle visibility based on distance
+    const nameEntry = _areaNameSprites.get(areaId);
+    if (nameEntry) nameEntry.sprite.visible = distToArea < AREA_NAME_RANGE;
   }
 
   // 2. Collect all occupied plots within RENDER_RANGE
@@ -317,6 +351,9 @@ export function disposePlotDoors() {
     _doorMesh.material?.dispose();
     _doorMesh = null;
   }
+  // FEATURE 3: dispose all area grids + name signs
+  for (const areaId of Array.from(_areaGridMeshes.keys())) _disposeAreaGrid(areaId);
+  for (const areaId of Array.from(_areaNameSprites.keys())) _disposeAreaName(areaId);
   if (_labelGroup) {
     _scene?.remove(_labelGroup);
     for (const lp of _labelPool) {
@@ -326,4 +363,140 @@ export function disposePlotDoors() {
     _labelPool = [];
     _labelGroup = null;
   }
+}
+
+// ---- FEATURE 3: per-area plot grid (chunk-streamed) ----
+// Each nearby area gets ONE InstancedMesh of small plot-boundary markers
+// (4 thin posts forming a square). Capacity = area.plots. The mesh is
+// allocated once when the area first becomes nearby, disposed when the
+// area unsubscribes. Per-frame we just update visibility based on distance.
+function _buildAreaGrid(areaId, area) {
+  // 4 thin posts per plot — merged into one geometry, instanced
+  const postGeo = new THREE.BoxGeometry(0.12, 0.6, 0.12);
+  // Translate to 4 corners of a 7m x 7m square (plot size minus 1m gap)
+  const cornerPositions = [
+    [-3.5, 0.3, -3.5],
+    [ 3.5, 0.3, -3.5],
+    [-3.5, 0.3,  3.5],
+    [ 3.5, 0.3,  3.5],
+  ];
+  const parts = cornerPositions.map(([x, y, z]) => {
+    const g = postGeo.clone();
+    g.translate(x, y, z);
+    return g;
+  });
+  const merged = mergeGeometries(parts, true);
+  // Color by area tier: cheap=grey, middle=green, rich=gold
+  const tierCol = area.tier === "rich" ? 0xf2b134 :
+                  area.tier === "middle" ? 0x4a9a5a :
+                  0x8a8f96;
+  const mat = new THREE.MeshLambertMaterial({ color: tierCol });
+  // Capacity: 4 posts per plot × area.plots
+  const capacity = area.plots * 4;
+  const mesh = new THREE.InstancedMesh(merged, mat, capacity);
+  mesh.frustumCulled = false;
+  mesh.count = 0; // start with 0 — _updateAreaGrid will place them
+  // Initialize all matrices to hidden
+  const hide = new THREE.Matrix4().makeScale(0, 0, 0);
+  for (let i = 0; i < capacity; i++) mesh.setMatrixAt(i, hide);
+  mesh.instanceMatrix.needsUpdate = true;
+  _scene.add(mesh);
+  _areaGridMeshes.set(areaId, { mesh, capacity });
+  console.log("[plots] Built area grid for " + areaId + " (" + area.plots + " plots, capacity " + capacity + ")");
+}
+
+const _gridM4 = new THREE.Matrix4();
+const _gridV = new THREE.Vector3();
+const _gridQ = new THREE.Quaternion();
+const _gridS = new THREE.Vector3(1, 1, 1);
+function _updateAreaGrid(areaId, area, playerX, playerZ) {
+  const entry = _areaGridMeshes.get(areaId);
+  if (!entry) return;
+  const { mesh, capacity } = entry;
+  // Distance from area center to player — if too far, hide the whole grid
+  const dxArea = area.x - playerX, dzArea = area.z - playerZ;
+  const distToArea = Math.sqrt(dxArea * dxArea + dzArea * dzArea);
+  if (distToArea > AREA_GRID_RANGE) {
+    mesh.visible = false;
+    return;
+  }
+  mesh.visible = true;
+  // Place 4 corner instances per plot. We only render plots within
+  // AREA_GRID_RANGE of the PLAYER (chunk streaming — close plots only).
+  let idx = 0;
+  for (let plotNo = 0; plotNo < area.plots; plotNo++) {
+    const pos = getPlotPosition(area, plotNo);
+    const dx = pos.x - playerX, dz = pos.z - playerZ;
+    if (dx * dx + dz * dz > AREA_GRID_RANGE * AREA_GRID_RANGE) continue;
+    // 4 corners per plot
+    const rotY = pos.rot || 0;
+    for (let corner = 0; corner < 4; corner++) {
+      if (idx >= capacity) break;
+      _gridV.set(pos.x, 0, pos.z);
+      _gridQ.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
+      _gridM4.compose(_gridV, _gridQ, _gridS);
+      mesh.setMatrixAt(idx, _gridM4);
+      idx++;
+    }
+  }
+  // Hide the rest
+  const hide = new THREE.Matrix4().makeScale(0, 0, 0);
+  for (let i = idx; i < mesh.count; i++) mesh.setMatrixAt(i, hide);
+  mesh.count = Math.min(idx, capacity);
+  mesh.instanceMatrix.needsUpdate = true;
+}
+
+function _disposeAreaGrid(areaId) {
+  const entry = _areaGridMeshes.get(areaId);
+  if (!entry) return;
+  _scene?.remove(entry.mesh);
+  entry.mesh.geometry?.dispose();
+  entry.mesh.material?.dispose();
+  _areaGridMeshes.delete(areaId);
+}
+
+// ---- FEATURE 3: per-area name sign billboard ----
+// A canvas-textured sprite showing "<Name> · <tier emoji> · rent ₦X / buy ₦Y".
+// Always faces the camera. Only visible within AREA_NAME_RANGE.
+function _buildAreaName(areaId, area) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 512; canvas.height = 128;
+  const ctx = canvas.getContext("2d");
+  const tierEmoji = area.tier === "rich" ? "💎" : area.tier === "middle" ? "🏠" : "🏘️";
+  const text = area.name + " " + tierEmoji;
+  const subtext = "Rent ₦" + area.rentPrice.toLocaleString() + " · Buy ₦" + area.buyPrice.toLocaleString();
+  // Background
+  const bgCol = area.tier === "rich" ? "#1a1a2e" : area.tier === "middle" ? "#0f4d3a" : "#3a2a1a";
+  const accentCol = area.tier === "rich" ? "#f2b134" : area.tier === "middle" ? "#4ade80" : "#9aa0a6";
+  ctx.fillStyle = bgCol;
+  ctx.fillRect(0, 0, 512, 128);
+  ctx.fillStyle = accentCol;
+  ctx.fillRect(0, 0, 6, 128);
+  // Name
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 36px Poppins, Arial, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, 256, 42, 500);
+  // Subtext (prices)
+  ctx.fillStyle = accentCol;
+  ctx.font = "600 22px Poppins, Arial, sans-serif";
+  ctx.fillText(subtext, 256, 88, 500);
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+  const sprite = new THREE.Sprite(mat);
+  sprite.position.set(area.x, 12, area.z);
+  sprite.scale.set(16, 4, 1);
+  sprite.visible = false; // tickPlotDoors will toggle based on distance
+  _scene.add(sprite);
+  _areaNameSprites.set(areaId, { sprite, canvas, ctx, texture: tex });
+}
+
+function _disposeAreaName(areaId) {
+  const entry = _areaNameSprites.get(areaId);
+  if (!entry) return;
+  _scene?.remove(entry.sprite);
+  entry.texture?.dispose();
+  entry.sprite.material?.dispose();
+  _areaNameSprites.delete(areaId);
 }
