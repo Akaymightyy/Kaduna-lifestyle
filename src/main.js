@@ -5,7 +5,7 @@ import { loadPlayer, collide } from "./player.js";
 import { createControls, updateCamera } from "./controls.js";
 import { createMinimap } from "./minimap.js";
 import { addCity } from "./city.js";
-import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAILY_QUESTS, DAILY_REWARDS } from "./config.js";
+import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAILY_QUESTS, DAILY_REWARDS, TIME_SCALE, REAL_MS_PER_GAME_HOUR } from "./config.js";
 import { createGameState } from "./needs.js";
 import { auth, db } from "./firebase.js";
 import { initAuth, showAuthModal, wireAuthUI, logout, isAuthed } from "./auth.js";
@@ -117,7 +117,10 @@ const INTERIOR_BG = new THREE.Color(0x1a1510);
 let lastClock = "";
 let _graphicsInited = false;
 function applyTime() {
-  const mins = Date.now()/60000; const hour = fixedHour ?? (mins%24);
+  // FIX: time scale — 5 real minutes = 1 game hour (was 1 real minute = 1 game hour,
+  // which made a full day cycle in 24 minutes — too fast). Now one game day = 2 real hours.
+  const mins = Date.now() / REAL_MS_PER_GAME_HOUR; // game-hours since epoch
+  const hour = fixedHour ?? (mins % 24);
   // ---- Init graphics once (after scene/sun/hemi are ready) ----
   if (!_graphicsInited) {
     _graphicsInited = true;
@@ -138,11 +141,30 @@ function applyTime() {
   if (night) {
     traffic.setNight(true);
     world.lamps.material.color.set(0xffd070);
-    if (world.lampLights) for (const pl of world.lampLights) { pl.intensity = 0.8; pl.visible = true; }
+    // FIX: brighter lamp pool (was 0.8 — too dim, streets felt unlit between lamps).
+    // 1.3 gives a warm pool of light around each lamp post that overlaps with
+    // the next one, so the player always has a lit path.
+    if (world.lampLights) for (const pl of world.lampLights) { pl.intensity = 1.3; pl.visible = true; }
   } else {
     traffic.setNight(false);
     world.lamps.material.color.set(0x555555);
     if (world.lampLights) for (const pl of world.lampLights) { pl.intensity = 0; pl.visible = false; }
+  }
+  // FIX: Reposition the lamp pool to the 6 nearest lamp posts around the player
+  // every frame. The pool of 6 PointLights follows the player so the streets
+  // around them look lit no matter where they walk. Without this, the pool
+  // was stuck at the world origin (0, 6, 0) and only lit a 22m circle there.
+  if (world.lampPositions && world.lampLights && night) {
+    const px = player.pos.x, pz = player.pos.z;
+    // Compute distance to each lamp post once, pick the 6 nearest
+    const sorted = world.lampPositions
+      .map(([lx, lz, side]) => ({ lx, lz, side, d2: (lx - px) * (lx - px) + (lz - pz) * (lz - pz) }))
+      .sort((a, b) => a.d2 - b.d2);
+    for (let i = 0; i < world.lampLights.length; i++) {
+      const pl = world.lampLights[i];
+      const tgt = sorted[i] || sorted[sorted.length - 1];
+      if (tgt) pl.position.set(tgt.lx, 6.0, tgt.lz);
+    }
   }
   const hh=Math.floor(hour),mm=Math.floor((hour-hh)*60);
   const txt = `${DAYS[Math.floor(mins/24)%7]} · ${((hh+11)%12)+1}:${String(mm).padStart(2,"0")} ${hh<12?"AM":"PM"}`;
@@ -191,7 +213,8 @@ bindInteractKey(
 );
 function _gameHour() {
   if (fixedHour != null) return fixedHour;
-  return (Date.now() / 60000) % 24;
+  // FIX: same time scale as applyTime() — 5 real min = 1 game hour
+  return (Date.now() / REAL_MS_PER_GAME_HOUR) % 24;
 }
 function _renderPlaceActions(def) {
   let bar = document.getElementById("place-actions");

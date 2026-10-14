@@ -167,8 +167,10 @@ export function updateSky(hour) {
     const isNight = elevation < 0.05;
     const isDawnDusk = elevation > 0.05 && elevation < 0.25;
     if (isNight) {
-      _sun.intensity = 0.1;
-      _sun.color.setHex(0x4a5a8a); // moonlight blue
+      // FIX: brighter moonlight (was 0.1, too dim). 0.18 lets the player see
+      // building silhouettes + the road ahead without killing the night mood.
+      _sun.intensity = 0.18;
+      _sun.color.setHex(0x6a7aaa); // moonlight blue, slightly brighter
     } else if (isDawnDusk) {
       _sun.intensity = 1.2;
       _sun.color.setHex(0xff9a5a); // warm orange
@@ -182,9 +184,13 @@ export function updateSky(hour) {
   if (_hemi) {
     const isNight = elevation < 0.05;
     if (isNight) {
-      _hemi.intensity = 0.3;
-      _hemi.color.setHex(0x3a4a6a);
-      _hemi.groundColor.setHex(0x1a1a2a);
+      // FIX: brighter night hemi (was 0.3, too dark — streets were pitch black
+      // even with lamps on, players couldn't see anything beyond 10m).
+      // Bumped to 0.55 so the player can always see the road, building shapes,
+      // and other players, while still feeling like night.
+      _hemi.intensity = 0.55;
+      _hemi.color.setHex(0x4a5a8a);   // brighter sky-blue
+      _hemi.groundColor.setHex(0x2a2a3a);  // less black ground tint
     } else {
       _hemi.intensity = 0.6 + elevation * 0.5;
       _hemi.color.setHex(0xdfeeff);

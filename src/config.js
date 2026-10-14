@@ -6,6 +6,17 @@ export const PLAYER_LIMIT_Z = 55;
 export const CROSSINGS = [-80, 0, 80];
 export const SIDE_STREETS = [-90, 90];
 
+// ---- Time scale: 5 real minutes = 1 game hour, so 1 game day = 2 real hours ----
+// (was 1 real minute = 1 game hour, which made a full day cycle in 24 minutes —
+//  way too fast: stores open + close in seconds, sun races across the sky, the
+//  clock on screen updates constantly and the player can't keep up.)
+//
+// TIME_SCALE = how many REAL minutes make ONE GAME hour.
+// The game-hour formula becomes:
+//   gameHour = (Date.now() / (TIME_SCALE * 60 * 1000)) % 24
+export const TIME_SCALE = 5;  // 5 real minutes per game hour
+export const REAL_MS_PER_GAME_HOUR = TIME_SCALE * 60 * 1000;  // 300000 ms
+
 export const LANES = [
   { z: 2.75, dir: 1, speed: 8.5 },
   { z: 6.25, dir: 1, speed: 12.5 },
