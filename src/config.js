@@ -9,16 +9,21 @@ export const PLAYER_LIMIT_Z = 100;
 export const CROSSINGS = [-80, 0, 80];
 export const SIDE_STREETS = [-90, 90];
 
-// ---- Time scale: 5 real minutes = 1 game hour, so 1 game day = 2 real hours ----
-// (was 1 real minute = 1 game hour, which made a full day cycle in 24 minutes —
-//  way too fast: stores open + close in seconds, sun races across the sky, the
-//  clock on screen updates constantly and the player can't keep up.)
-//
-// TIME_SCALE = how many REAL minutes make ONE GAME hour.
-// The game-hour formula becomes:
-//   gameHour = (Date.now() / (TIME_SCALE * 60 * 1000)) % 24
-export const TIME_SCALE = 5;  // 5 real minutes per game hour
-export const REAL_MS_PER_GAME_HOUR = TIME_SCALE * 60 * 1000;  // 300000 ms
+// ---- Time scale: REAL-TIME clock (1 real hour = 1 game hour) ----
+// FEATURE: was 5 real min = 1 game hour (too fast — messages + shops flashing
+// open/close, time running away from the player). Now 1 real hour = 1 game hour
+// so the in-game clock matches the player's real-life wall clock. Shops open
+// at 8am and close at 10pm in REAL time, so a player who plays in the evening
+// sees evening in-game too.
+export const TIME_SCALE = 1;  // 1 real minute per game minute (real-time)
+export const REAL_MS_PER_GAME_HOUR = TIME_SCALE * 60 * 1000;  // 60000 ms = 1 minute real = 1 minute game
+
+// FEATURE: lock the game to EVENING (golden hour) always. The player said they
+// don't want night, only evening. We force the game-hour to 17.5 (5:30pm) which
+// is the warmest part of golden hour in Kaduna. The sun is low + warm, the sky
+// is orange-pink, lamp posts glow softly — but it's never pitch-black night.
+// The user can still override with `?t=9` in URL for morning if they want.
+export const FIXED_HOUR = 17.5;
 
 export const LANES = [
   { z: 2.75, dir: 1, speed: 8.5 },
@@ -125,7 +130,11 @@ export const ECONOMY = {
 };
 
 // Kaduna map locations (for Map feature)
+// FEATURE: spread out across the expanded world (X ±250, Z ±100). Was cramped
+// on one street near the main road. Now each district has its actual area
+// position (matching areas.js), and landmarks are placed in their districts.
 export const MAP_LOCATIONS = [
+  // ---- Main road + road-adjacent landmarks ----
   { name: "Ahmadu Bello Way", type: "road", x: 0, z: 0, major: true, desc: "Main road — where it all starts" },
   { name: "Kawo Market", type: "market", x: -30, z: -25, major: true, desc: "Bustling market — best suya on weekends" },
   { name: "Central Mosque", type: "landmark", x: 48, z: 34, major: true, desc: "The heart of Kaduna" },
@@ -135,21 +144,33 @@ export const MAP_LOCATIONS = [
   { name: "Bus Stop (South)", type: "transport", x: 30, z: -13, major: false, desc: "Bus stop heading south" },
   { name: "Bus Stop (Far North)", type: "transport", x: 120, z: 13, major: false, desc: "Bus stop at city edge" },
   { name: "Bus Stop (Far South)", type: "transport", x: -130, z: -13, major: false, desc: "Bus stop at city edge" },
-  // Real Kaduna areas (shown on map for travel)
-  { name: "Kawo", type: "district", x: 0, z: 0, major: true, desc: "Bustling market district" },
-  { name: "Sabon Tasha", type: "district", x: 0, z: 0, major: true, desc: "Residential area with shops" },
-  { name: "Barnawa", type: "district", x: 0, z: 0, major: true, desc: "Riverside leisure zone" },
-  { name: "Kakuri", type: "district", x: 0, z: 0, major: false, desc: "Industrial area" },
-  { name: "Tudun Wada", type: "district", x: 0, z: 0, major: false, desc: "Dense residential" },
-  { name: "Narayi", type: "district", x: 0, z: 0, major: false, desc: "Growing suburb" },
-  { name: "High Court", type: "landmark", x: 0, z: 0, major: false, desc: "Kaduna State High Court" },
-  { name: "Murtala Square", type: "landmark", x: 0, z: 0, major: true, desc: "Sports & events ground" },
-  { name: "Kaduna Polytechnic", type: "landmark", x: 0, z: 0, major: true, desc: "Centre of Learning" },
-  { name: " Ahmadu Bello Stadium", type: "landmark", x: 0, z: 0, major: false, desc: "Football stadium" },
-  { name: "Railway Station", type: "transport", x: 0, z: 0, major: true, desc: "Kaduna train station" },
-  { name: " Lugard Hall", type: "landmark", x: 0, z: 0, major: false, desc: "Historic government building" },
-  { name: "Golf Club", type: "landmark", x: 0, z: 0, major: false, desc: "Kaduna Golf Club" },
+  // ---- Real Kaduna areas (positions match areas.js so the minimap matches reality) ----
+  // Cheap / rent areas
+  { name: "Rigasa", type: "district", x: -120, z: 80, major: false, desc: "Working-class area, near the railway" },
+  { name: "Kakuri", type: "district", x: 120, z: 80, major: false, desc: "Industrial area" },
+  { name: "Tudun Wada", type: "district", x: -120, z: -80, major: false, desc: "Dense residential" },
+  { name: "Mando", type: "district", x: 120, z: -80, major: false, desc: "Outskirts with big compounds" },
+  { name: "Kabala Costain", type: "district", x: -140, z: 0, major: false, desc: "Old neighbourhood near the railway" },
+  // Middle areas
+  { name: "Kawo", type: "district", x: -60, z: 60, major: true, desc: "Bustling market district" },
+  { name: "Sabon Tasha", type: "district", x: 60, z: 60, major: true, desc: "Residential with shops + schools" },
+  { name: "Gonin Gora", type: "district", x: -60, z: -60, major: false, desc: "Growing suburb" },
+  { name: "Television", type: "district", x: 60, z: -60, major: false, desc: "Modern area near the TV station" },
+  { name: "Ungwan Sarki", type: "district", x: -100, z: 40, major: false, desc: "Established neighbourhood" },
+  // Rich areas (GRA-style)
+  { name: "Barnawa", type: "district", x: 100, z: 40, major: true, desc: "GRA-style. Big houses, riverside" },
+  { name: "Malali", type: "district", x: 100, z: -40, major: true, desc: "Upscale. Diplomats live here" },
+  { name: "Ungwan Rimi", type: "district", x: -100, z: -40, major: true, desc: "GRA. Spacious compounds + gardens" },
+  { name: "Badarawa", type: "district", x: 140, z: 0, major: false, desc: "Quiet upscale riverside area" },
+  // ---- Spread-out landmarks (in their actual districts) ----
+  { name: "Murtala Square", type: "landmark", x: 0, z: 38, major: true, desc: "Sports & events ground" },
+  { name: "Kaduna Polytechnic", type: "landmark", x: 60, z: -28, major: true, desc: "Centre of Learning (in Sabon Tasha)" },
+  { name: "Ahmadu Bello Stadium", type: "landmark", x: -100, z: 40, major: false, desc: "Football stadium (in Ungwan Sarki)" },
+  { name: "Railway Station", type: "transport", x: -140, z: 0, major: true, desc: "Kaduna train station (in Kabala Costain)" },
+  { name: "Lugard Hall", type: "landmark", x: 100, z: 40, major: false, desc: "Historic government building (in Barnawa)" },
+  { name: "Golf Club", type: "landmark", x: 100, z: -40, major: false, desc: "Kaduna Golf Club (in Malali)" },
   { name: "Hamdala Hotel", type: "landmark", x: 0, z: 0, major: true, desc: "Historic hotel on Ahmadu Bello Way" },
+  { name: "High Court", type: "landmark", x: -60, z: 60, major: false, desc: "Kaduna State High Court (in Kawo)" },
 ];
 
 // Daily quest definitions

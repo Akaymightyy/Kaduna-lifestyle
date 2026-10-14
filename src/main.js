@@ -5,7 +5,7 @@ import { loadPlayer, collide } from "./player.js";
 import { createControls, updateCamera } from "./controls.js";
 import { createMinimap } from "./minimap.js";
 import { addCity } from "./city.js";
-import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAILY_QUESTS, DAILY_REWARDS, TIME_SCALE, REAL_MS_PER_GAME_HOUR } from "./config.js";
+import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAILY_QUESTS, DAILY_REWARDS, TIME_SCALE, REAL_MS_PER_GAME_HOUR, FIXED_HOUR } from "./config.js";
 import { createGameState } from "./needs.js";
 import { auth, db } from "./firebase.js";
 import { initAuth, showAuthModal, wireAuthUI, logout, isAuthed } from "./auth.js";
@@ -130,7 +130,7 @@ let _activeMission = null;
 const SKY = [[0,0x0b1230,0.0,0.25,0x8899ff],[5,0x1b2548,0.0,0.3,0x8899ff],[6.5,0xf3a56b,0.9,0.7,0xffb070],[9,0x9fd4f5,1.8,1.0,0xfff2d6],[16,0x9fd4f5,1.8,1.0,0xfff2d6],[18,0xf08a5d,1.0,0.75,0xff9a5a],[19.5,0x2a2f55,0.1,0.35,0x8899ff],[24,0x0b1230,0.0,0.25,0x8899ff]];
 function skyAt(h) { let i=0; while(i<SKY.length-2&&h>=SKY[i+1][0])i++; const a=SKY[i],b=SKY[i+1],t=(h-a[0])/(b[0]-a[0]); const lc=(x,y)=>new THREE.Color(x).lerp(new THREE.Color(y),t); return {sky:lc(a[1],b[1]),sun:a[2]+(b[2]-a[2])*t,hemi:a[3]+(b[3]-a[3])*t,sunCol:lc(a[4],b[4])}; }
 const qs = new URLSearchParams(location.search);
-const fixedHour = qs.has("t") ? parseFloat(qs.get("t")) : null;
+const fixedHour = qs.has("t") ? parseFloat(qs.get("t")) : FIXED_HOUR;  // FEATURE: default = evening (17.5)
 const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const INTERIOR_BG = new THREE.Color(0x1a1510);
 let lastClock = "";
@@ -438,9 +438,11 @@ function _showPhoneApp(appId) {
     // Visual drone-style top-down map (canvas) + place list below
     const places = listPlaces();
     const gameHour = _gameHour();
-    // Map bounds: x from -160 to 160, z from -50 to 50
-    const MAP_W = 300, MAP_H = 120;
-    const minWX = -160, maxWX = 160, minWZ = -50, maxWZ = 50;
+    // FEATURE: expanded map bounds to match the new walkable world (±250 X, ±100 Z).
+    // Was ±160 / ±50 which cramped everything onto one street. Now we can see
+    // all 14 districts spread across the city, plus the road + landmarks.
+    const MAP_W = 320, MAP_H = 180;
+    const minWX = -250, maxWX = 250, minWZ = -100, maxWZ = 100;
     const toMapX = (wx) => ((wx - minWX) / (maxWX - minWX)) * MAP_W;
     const toMapZ = (wz) => ((wz - minWZ) / (maxWZ - minWZ)) * MAP_H;
     // Player position
@@ -455,23 +457,42 @@ function _showPhoneApp(appId) {
     for (const sx of [-90, 90]) {
       svg += '<rect x="'+(toMapX(sx)-2)+'" y="0" width="4" height="'+MAP_H+'" fill="#555a62"/>';
     }
-    // Buildings strip (top + bottom)
+    // Buildings strip (top + bottom near the road)
     svg += '<rect x="0" y="0" width="'+MAP_W+'" height="'+toMapZ(-12)+'" fill="#8f7a5e"/>';
     svg += '<rect x="0" y="'+toMapZ(12)+'" width="'+MAP_W+'" height="'+(MAP_H-toMapZ(12))+'" fill="#8f7a5e"/>';
-    // Place markers (tappable)
+    // FEATURE: draw district markers + names (spread across the city)
+    // Each district gets a colored disc + label, sized by tier (rich=large gold,
+    // middle=medium green, cheap=small grey). Tappable to travel there.
+    const districts = MAP_LOCATIONS.filter(m => m.type === "district");
+    for (const d of districts) {
+      const area = getArea(d.name.toLowerCase().replace(/\s/g, "_")) || AREAS.find(a => a.name === d.name);
+      const tier = area ? area.tier : "middle";
+      const r = tier === "rich" ? 5 : tier === "middle" ? 4 : 3;
+      const col = tier === "rich" ? "#f2b134" : tier === "middle" ? "#4a9a5a" : "#8a8f96";
+      const mx = toMapX(d.x), mz = toMapZ(d.z);
+      svg += '<g style="cursor:pointer;" onclick="window.travelToArea(\''+(area?area.id:'')+'\')">';
+      svg += '<circle cx="'+mx+'" cy="'+mz+'" r="'+(r+2)+''+'" fill="'+col+'" opacity="0.2"/>';
+      svg += '<circle cx="'+mx+'" cy="'+mz+'" r="'+r+'" fill="'+col+'" stroke="#fff" stroke-width="1.2"/>';
+      svg += '<text x="'+mx+'" y="'+(mz-r-2)+'" text-anchor="middle" font-size="6" font-weight="700" fill="#fff" style="paint-order:stroke;stroke:#000;stroke-width:1.5;">'+d.name+'</text>';
+      svg += '</g>';
+    }
+    // Place markers (tappable) — these are the existing places on/around the road
     for (const p of places) {
       const mx = toMapX(p.entranceX), mz = toMapZ(p.entranceZ);
       const open = (p.hours == null) ? true : (gameHour >= p.hours.open && gameHour < p.hours.close);
       const color = "#" + (p.minimapColor || 0xc0392b).toString(16).padStart(6, "0");
       svg += '<g style="cursor:pointer;" onclick="window.travelToPlace(\''+p.id+'\')">';
       // Glow ring (open only)
-      if (open) svg += '<circle cx="'+mx+'" cy="'+mz+'" r="7" fill="'+color+'" opacity="0.25"/>';
+      if (open) svg += '<circle cx="'+mx+'" cy="'+mz+'" r="6" fill="'+color+'" opacity="0.25"/>';
       // Main dot
-      svg += '<circle cx="'+mx+'" cy="'+mz+'" r="4.5" fill="'+color+'" stroke="#fff" stroke-width="1.5"/>';
-      // Label (short)
-      const shortName = p.name.split(" ").slice(0, 2).join(" ");
-      svg += '<text x="'+mx+'" y="'+(mz-7)+'" text-anchor="middle" font-size="6" font-weight="700" fill="#fff" style="paint-order:stroke;stroke:#000;stroke-width:1.5;">'+shortName+'</text>';
+      svg += '<circle cx="'+mx+'" cy="'+mz+'" r="4" fill="'+color+'" stroke="#fff" stroke-width="1.2"/>';
       svg += '</g>';
+    }
+    // "My Home" marker on the map
+    if (window._myHomePos) {
+      const mx = toMapX(window._myHomePos.x), mz = toMapZ(window._myHomePos.z);
+      svg += '<circle cx="'+mx+'" cy="'+mz+'" r="5" fill="#2e7d4f" stroke="#fff" stroke-width="1.5"/>';
+      svg += '<text x="'+mx+'" y="'+(mz-7)+'" text-anchor="middle" font-size="5" font-weight="700" fill="#fff" style="paint-order:stroke;stroke:#000;stroke-width:1.2;">🏠</text>';
     }
     // Player position (pulsing red dot)
     const pmx = toMapX(px), pmz = toMapZ(pz);
@@ -483,9 +504,10 @@ function _showPhoneApp(appId) {
     // Legend
     const legend = '<div style="display:flex;gap:10px;font-size:9px;color:#666;margin:6px 0 10px;flex-wrap:wrap;">'+
       '<span><span style="display:inline-block;width:8px;height:8px;background:#ff6a3d;border-radius:50%;border:1px solid #fff;"></span> You</span>'+
-      '<span><span style="display:inline-block;width:8px;height:8px;background:#2e7d4f;border-radius:50%;"></span> Open place</span>'+
-      '<span><span style="display:inline-block;width:8px;height:8px;background:#e11d48;border-radius:50%;"></span> Closed place</span>'+
-      '<span>👆 Tap a place to travel</span>'+
+      '<span><span style="display:inline-block;width:8px;height:8px;background:#f2b134;border-radius:50%;"></span> Rich area</span>'+
+      '<span><span style="display:inline-block;width:8px;height:8px;background:#4a9a5a;border-radius:50%;"></span> Middle area</span>'+
+      '<span><span style="display:inline-block;width:8px;height:8px;background:#8a8f96;border-radius:50%;"></span> Cheap area</span>'+
+      '<span>👆 Tap a place or area to travel</span>'+
     '</div>';
     // Place list (tappable)
     const placeList = places.map(p => {
@@ -495,6 +517,16 @@ function _showPhoneApp(appId) {
       return '<div onclick="window.travelToPlace(\''+p.id+'\')" style="padding:8px;background:'+(open?'#e8f5e9':'#f5e8e8')+';border-radius:8px;margin-bottom:5px;font-size:12px;font-weight:600;color:var(--green);cursor:pointer;border-left:4px solid '+color+';">'+p.minimapIcon+' '+p.name+' '+openBadge+'<div style="font-size:10px;color:#666;font-weight:400;margin-top:2px;">'+(p.type==='interior'?'Interior':'Outdoor')+' · '+p.activities.length+' activities</div></div>';
     }).join("");
     c.innerHTML='<div style="font-size:14px;margin-bottom:8px;font-weight:700;color:var(--green);">🗺️ Kaduna Map</div>'+svg+legend+'<div style="font-size:11px;font-weight:600;margin:8px 0 6px;color:#666;">All Places:</div>'+placeList+backBtn;
+    // FEATURE: wire the area-travel handler so tapping a district disc teleports
+    // the player to that area's center (free, no keke — just for quick navigation).
+    window.travelToArea = (areaId) => {
+      if (!areaId) { toast("Unknown area"); return; }
+      const a = getArea(areaId);
+      if (!a) { toast("Unknown area"); return; }
+      player.pos.set(a.x, 0, a.z);
+      player.heading = 0;
+      toast("📍 Travelled to " + a.name);
+    };
     return;
   }
   if(appId==="daily"){
@@ -1053,7 +1085,20 @@ window.buyMed=(id)=>{
   game.save?.(); updateHUD(); toast("Medicine taken! Feel better now.");
   showPhoneApp("health");
 };
-function _pushLook(){ clearTimeout(window._lookT); window._lookT=setTimeout(()=>{const u=getMyUid(); if(u) update(ref(db,"players/"+u+"/look"),game.state.look).catch(()=>{});},300); }
+function _pushLook(){
+  // FEATURE: push outfit/look changes IMMEDIATELY to Firebase (no debounce).
+  // The old 300ms debounce meant if the user changed outfit and quickly
+  // closed the phone, the change might not sync — and other devices would
+  // still see the old outfit. Now we write synchronously so the change
+  // is in Firebase before the next Firebase read can happen.
+  const u = getMyUid();
+  if (!u) return;
+  try {
+    update(ref(db, "players/" + u + "/look"), game.state.look).catch((e) => {
+      console.warn("[look] push failed:", e.message);
+    });
+  } catch (e) { console.warn("[look] push exception:", e.message); }
+}
 window.buyClothing=(id)=>{
   const it=SHOP.find(x=>x.id===id); if(!it) return;
   const L=game.state.look; L.owned=L.owned||[];
