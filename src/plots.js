@@ -270,6 +270,15 @@ export function tickPlotDoors(playerX, playerZ) {
 
 export function getNearestFriendPlot() { return _nearestFriendPlot; }
 
+// FEATURE 3b: expose the cached houses data so areas_world.js can render
+// house exteriors ONLY at occupied plots (not every plot in the area).
+// Without this, areas_world.js would place a house at every plot —
+// choking the screen and tanking perf.
+// Returns the house record object for the area, or {} if not subscribed yet.
+export function getAreaHouses(areaId) {
+  return _houses[areaId] || {};
+}
+
 // ---- Draw a label onto a canvas (called only when the label changes) ----
 function _drawLabel(canvas, ctx, text, accent) {
   ctx.fillStyle = "rgba(15,15,15,0.85)";

@@ -36,6 +36,11 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { AREAS, getArea, getPlotPosition } from "./areas.js";
+// FEATURE 3b: get the cached houses data from plots.js so we only render
+// house exteriors at OCCUPIED plots. Without this, every plot gets a house
+// (up to 100 per area × 5 nearby areas = 500 houses visible at once,
+// choking the screen + tanking perf).
+import { getAreaHouses } from "./plots.js";
 
 // ---- Tunables ----
 const AREA_RENDER_RANGE = 250;   // metres — render area content within this of the player
@@ -166,6 +171,11 @@ function _buildArea(area) {
 
   _areasBuilt.set(area.id, {
     houseMesh, lampMesh, roadMesh, swL, swR, capacity, lampCount, roadW,
+    // PERF FIX: track which house instance slots have been colored + the
+    // last reported colored count. Used to skip setColorAt + instanceColor
+    // upload when nothing changed frame-to-frame.
+    coloredSlots: 0,
+    lastColoredSlots: 0,
   });
   console.log("[areas_world] Built area " + area.id + " (" + area.plots + " plots)");
 }
@@ -191,14 +201,18 @@ function _updateArea(area, playerX, playerZ, distToArea) {
   entry.swL.visible = true;
   entry.swR.visible = true;
 
-  // ---- Place house instances for plots within chunk range of the player ----
+  // ---- Place house instances for OCCUPIED plots within chunk range of the player ----
+  // PERF FIX: previously placed a house at EVERY plot (up to 100 per area),
+  // which choked the screen with houses and tanked perf. Now we only place
+  // houses at occupied plots (player-owned). Empty plots are just bare grass.
+  // The "FOR RENT / FOR SALE boards on empty plots" is Feature 2 (separate step).
+  const houses = getAreaHouses(area.id);
   let idx = 0;
   const wallCol = new THREE.Color(area.wallCol);
-  const roofCol = new THREE.Color(area.roofCol);
-  const doorCol = new THREE.Color(0x4a3a2a);
-  const abandonedCol = new THREE.Color(0x6a6a6a);
-  for (let plotNo = 0; plotNo < area.plots; plotNo++) {
+  for (const [plotNoStr, houseRec] of Object.entries(houses)) {
     if (idx >= capacity) break;
+    if (!houseRec || !houseRec.ownerUid) continue; // not actually occupied
+    const plotNo = parseInt(plotNoStr, 10);
     const pos = getPlotPosition(area, plotNo);
     const dx = pos.x - playerX, dz = pos.z - playerZ;
     if (dx * dx + dz * dz > PLOT_CHUNK_RANGE * PLOT_CHUNK_RANGE) continue;
@@ -206,19 +220,34 @@ function _updateArea(area, playerX, playerZ, distToArea) {
     _q.setFromAxisAngle(_up, pos.rot || 0);
     _m4.compose(_v, _q, _scl);
     houseMesh.setMatrixAt(idx, _m4);
-    // Per-instance color: full area colors (so occupied + unoccupied look
-    // the same visually until step 3c adds FOR RENT / FOR SALE boards).
-    // We use setColorAt — first vertex color group (body) is wallCol, then
-    // roof, then door. The geometry uses vertex colors so this is overridden
-    // by the instance color (instanceColor takes priority over vertexColors).
-    houseMesh.setColorAt(idx, wallCol);
+    // PERF FIX: only set the instance color ONCE per slot. We track which
+    // slots have been colored via entry.coloredSlots. If this slot was
+    // already colored (we're re-using it from a previous frame's plot),
+    // skip the setColorAt call. This avoids forcing instanceColor upload
+    // to GPU every frame.
+    if (entry.coloredSlots < idx + 1) {
+      houseMesh.setColorAt(idx, wallCol);
+      entry.coloredSlots = idx + 1;
+    }
     idx++;
   }
-  // Hide leftover instances
+  // Hide leftover instances from the previous frame (if any)
   for (let i = idx; i < houseMesh.count; i++) houseMesh.setMatrixAt(i, _hide);
   houseMesh.count = Math.min(idx, capacity);
   houseMesh.instanceMatrix.needsUpdate = true;
-  if (houseMesh.instanceColor) houseMesh.instanceColor.needsUpdate = true;
+  // PERF FIX: only mark instanceColor dirty if we actually wrote a NEW color
+  // this frame. (When the slot count didn't grow, the GPU color buffer is
+  // unchanged — no need to re-upload it.)
+  if (entry.coloredSlots > entry.lastColoredSlots) {
+    if (houseMesh.instanceColor) houseMesh.instanceColor.needsUpdate = true;
+    entry.lastColoredSlots = entry.coloredSlots;
+  }
+  // PERF FIX: if the houses data shrunk (player left and someone moved out),
+  // reset the colored tracker so the next grow re-colors fresh slots.
+  if (idx < entry.lastColoredSlots) {
+    entry.coloredSlots = idx;
+    entry.lastColoredSlots = idx;
+  }
 
   // ---- Lamp posts: one per 4 plots, placed at the corner of the plot grid ----
   let lampIdx = 0;
