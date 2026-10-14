@@ -18,7 +18,7 @@ import { checkDailyReward, getDailyStatus, claimQuestReward } from "./daily.js";
 import { ref, onValue, update } from "firebase/database";
 import { openCreator } from "./creator.js";
 import { outfitsFor, BUILDS, SHOP, SLOT_KEYS } from "./outfits.js";
-import { initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, getActivePlace, enterPlace, enterPlaceAsVisitor, exitPlace, sendUIEvent } from "./places/manager.js";
+import { initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, getActivePlace, enterPlace, exitPlace, sendUIEvent } from "./places/manager.js";
 import { listPlaces, getPlace, updateHomeEntrance } from "./places/registry.js";
 import { initMissions, getActiveMission, getAllChapters, getDailyMissions, getWeeklyMissions, checkStep, createMissionState, claimDailyReward, claimWeeklyReward, setCelebrateCallback } from "./missions.js";
 import { FURNITURE_CATALOG, CATEGORIES, getItem, calcComfort } from "./furniture.js";
@@ -26,21 +26,9 @@ import { ORIGINS, HOUSE_TIERS, getRentInfo, payRent, checkRentDue, applyOrigin, 
 import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
 import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
 import { celebrate } from "./celebrate.js";
-import { perfFrameStart, perfBeforeRender, perfAfterRender } from "./perf.js";
-import { initGraphics, updateSky, tickGraphics, tickShadows, applyQuality, autoDetectQuality, getQuality, QUALITY_PRESETS } from "./graphics.js";
+import { initGraphics, updateSky, tickGraphics, applyQuality, autoDetectQuality, getQuality, QUALITY_PRESETS } from "./graphics.js";
 import { AREAS, getArea, claimPlot, getMyHouse, canPickArea, getPlotPosition } from "./areas.js";
-import { resolvePlayerHouseKey, loadHouse, listenForKnocks, respondToKnock } from "./houses.js";
-import {
-  initPlotDoors,
-  tickPlotDoors,
-  knockOnNearest,
-  listenForKnockReplyNow,
-  getUnlockedVisitInfo,
-  getNearestFriendPlot,
-  disposePlotDoors,
-} from "./plots.js";
-import { initAreaWorld, tickAreaWorld, setAreaLampsNight, disposeAreaWorld } from "./areas_world.js";
-import { initMessages, searchUsers, openDM, sendMessage, sendHouseInvite, openChat, closeChat, getChatList, sendMoney, createGroup, leaveGroup, blockUser, reportUser, getChatMeta, cleanupMessages, getPresence, listenToPresence } from "./messages.js";
+import { initMessages, searchUsers, openDM, sendMessage, openChat, closeChat, getChatList, sendMoney, createGroup, leaveGroup, blockUser, reportUser, getChatMeta, cleanupMessages, getPresence, listenToPresence } from "./messages.js";
 import { initEvents, tickNepa, isNepaCut, getNepaStatus, hasPowerBackup, getModifiedDrain, tickMoodlets, addMoodlet, getActiveMoodlets, getConsequences, getWalkSpeedMultiplier, MOODLET_DEFS } from "./events.js";
 import { SKILLS, CAREERS, SHIFT_TONES, initCareers, getSkills, getCareer, getCareerDef, canJoinCareer, canPromote, joinCareer, promote, doShift, trainSkill } from "./careers.js";
 import { WISH_POOL, PERKS, initWishes, getTodaysWishes, getWishPoints, getPerks, hasPerk, checkWishes, buyPerk } from "./wishes.js";
@@ -96,10 +84,6 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: Q.antialias, power
 renderer.setPixelRatio(Q.pixelRatio);
 renderer.shadowMap.enabled = Q.shadows;
 renderer.shadowMap.type = THREE.PCFShadowMap;  // cheaper than PCFSoft on phones
-// FIX: turn off autoUpdate so the shadow map doesn't re-render every frame.
-// tickShadows() (in graphics.js) re-renders it only when the player moves
-// >4m or the sun noticeably shifts. This is the #1 lag fix for Medium/High.
-renderer.shadowMap.autoUpdate = false;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0xa9d6f2, Q.fogNear, Q.fogFar);
@@ -110,9 +94,6 @@ sun.castShadow = Q.shadows;
 if (Q.shadows) sun.shadow.mapSize.set(Q.shadowMap, Q.shadowMap);
 Object.assign(sun.shadow.camera, { left: -25, right: 25, top: 25, bottom: -25, near: 1, far: 100 });
 sun.shadow.bias = -0.0004; scene.add(sun, sun.target);
-// FEATURE 3b: init the chunk-streamed area world (roads + NPC houses + lamp posts).
-// The meshes are allocated lazily when an area becomes nearby (in tickAreaWorld).
-initAreaWorld(scene);
 
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
 addEventListener("resize", resize); resize();
@@ -135,54 +116,6 @@ const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const INTERIOR_BG = new THREE.Color(0x1a1510);
 let lastClock = "";
 let _graphicsInited = false;
-
-// ---- Lamp pool repositioning (pre-allocated buffers, no per-frame GC) ----
-// PERF: the old code created 30 new objects + a new array every frame, which
-// built up GC pressure until the game stuttered. We pre-allocate one Float32Array
-// of (lampPositions.length × 3) entries: [lx, lz, d2] per lamp. On every re-sort
-// we reuse this array, compute fresh d2 values, then pick the 6 smallest.
-let _lampReposT = 0;
-let _lampDistBuf = null;        // Float32Array [lx0, lz0, d2_0, lx1, lz1, d2_1, ...]
-let _lampIdxBuf = null;         // Uint16Array of indices, sorted by d2 ascending
-function _repositionLampPool(px, pz) {
-  if (!world.lampPositions || !world.lampLights) return;
-  const n = world.lampPositions.length;
-  if (!_lampDistBuf || _lampDistBuf.length !== n * 3) {
-    _lampDistBuf = new Float32Array(n * 3);
-    _lampIdxBuf = new Uint16Array(n);
-  }
-  // Fill distances
-  for (let i = 0; i < n; i++) {
-    const lp = world.lampPositions[i];
-    const lx = lp[0], lz = lp[1];
-    const dx = lx - px, dz = lz - pz;
-    _lampDistBuf[i * 3] = lx;
-    _lampDistBuf[i * 3 + 1] = lz;
-    _lampDistBuf[i * 3 + 2] = dx * dx + dz * dz;
-    _lampIdxBuf[i] = i;
-  }
-  // Selection sort the first 6 entries (k=6, n=~30 — selection sort is O(kn)
-  // which is faster than quicksort for small k).
-  for (let i = 0; i < 6 && i < n; i++) {
-    let minIdx = i;
-    let minD2 = _lampDistBuf[_lampIdxBuf[i] * 3 + 2];
-    for (let j = i + 1; j < n; j++) {
-      const d2 = _lampDistBuf[_lampIdxBuf[j] * 3 + 2];
-      if (d2 < minD2) { minD2 = d2; minIdx = j; }
-    }
-    if (minIdx !== i) {
-      const tmp = _lampIdxBuf[i];
-      _lampIdxBuf[i] = _lampIdxBuf[minIdx];
-      _lampIdxBuf[minIdx] = tmp;
-    }
-  }
-  // Place the 6 nearest lamps onto the 6 PointLights
-  for (let i = 0; i < world.lampLights.length && i < 6; i++) {
-    const lampIdx = _lampIdxBuf[i];
-    const pl = world.lampLights[i];
-    pl.position.set(_lampDistBuf[lampIdx * 3], 6.0, _lampDistBuf[lampIdx * 3 + 1]);
-  }
-}
 function applyTime() {
   // FIX: time scale — 5 real minutes = 1 game hour (was 1 real minute = 1 game hour,
   // which made a full day cycle in 24 minutes — too fast). Now one game day = 2 real hours.
@@ -212,28 +145,25 @@ function applyTime() {
     // 1.3 gives a warm pool of light around each lamp post that overlaps with
     // the next one, so the player always has a lit path.
     if (world.lampLights) for (const pl of world.lampLights) { pl.intensity = 1.3; pl.visible = true; }
-    // FEATURE 3b: area lamp posts glow at night too
-    setAreaLampsNight(true);
   } else {
     traffic.setNight(false);
     world.lamps.material.color.set(0x555555);
     if (world.lampLights) for (const pl of world.lampLights) { pl.intensity = 0; pl.visible = false; }
-    setAreaLampsNight(false);
   }
-  // FIX: Reposition the lamp pool to the 6 nearest lamp posts around the player.
-  // The pool of 6 PointLights follows the player so the streets around them look
-  // lit no matter where they walk. Without this, the pool was stuck at the world
-  // origin (0, 6, 0) and only lit a 22m circle there.
-  //
-  // PERF: throttled to every 0.3s (was every frame, which created 30 throwaway
-  // objects + 1 array per frame = ~1800 allocations/sec, causing GC pressure
-  // that built up until the game stuttered). Now we reuse one pre-allocated
-  // array + index array, and only re-sort 3x per second.
+  // FIX: Reposition the lamp pool to the 6 nearest lamp posts around the player
+  // every frame. The pool of 6 PointLights follows the player so the streets
+  // around them look lit no matter where they walk. Without this, the pool
+  // was stuck at the world origin (0, 6, 0) and only lit a 22m circle there.
   if (world.lampPositions && world.lampLights && night) {
-    _lampReposT += 1/60; // approx dt — close enough for throttling
-    if (_lampReposT >= 0.3) {
-      _lampReposT = 0;
-      _repositionLampPool(player.pos.x, player.pos.z);
+    const px = player.pos.x, pz = player.pos.z;
+    // Compute distance to each lamp post once, pick the 6 nearest
+    const sorted = world.lampPositions
+      .map(([lx, lz, side]) => ({ lx, lz, side, d2: (lx - px) * (lx - px) + (lz - pz) * (lz - pz) }))
+      .sort((a, b) => a.d2 - b.d2);
+    for (let i = 0; i < world.lampLights.length; i++) {
+      const pl = world.lampLights[i];
+      const tgt = sorted[i] || sorted[sorted.length - 1];
+      if (tgt) pl.position.set(tgt.lx, 6.0, tgt.lz);
     }
   }
   const hh=Math.floor(hour),mm=Math.floor((hour-hh)*60);
@@ -1151,7 +1081,7 @@ window.sendMessage=(uid,name)=>{
 window.saveGame=()=>{game.save?.();toast("Game saved!");};
 window._setGraphicsQuality = (q) => {
   applyQuality(q, { renderer, sun, scene });
-  toast("🎨 Graphics set to " + q.toUpperCase());
+  toast("🎨 Graphics set to " + q.toUpperCase() + ". Reload to see full effect.");
   showPhoneApp("settings");
 };
 // ---- HomeStore: buy furniture + category filter ----
@@ -1389,49 +1319,6 @@ function _renderChatScreen(c, chatId, otherName) {
         div.style.cssText = "text-align:center;margin:6px 0;background:#1a2a1a;border:1px solid #4ade80;border-radius:12px;padding:6px 12px;color:#4ade80;font-size:12px;font-weight:600;";
         div.textContent = "💸 " + (isMe ? "You sent" : "You received") + " ₦" + (m.amount || 0).toLocaleString();
         container.appendChild(div);
-      } else if (m.type === "house_invite") {
-        // FEATURE: house invite bubble — shows the inviter's name + a Visit button.
-        // The button stores the invite payload globally so _visitFromInvite can use it.
-        const div = document.createElement("div");
-        div.style.cssText = "text-align:center;margin:6px 0;background:#1a2a1a;border:1px solid #f2b134;border-radius:12px;padding:8px 12px;color:#f2f2f4;font-size:12px;";
-        const label = document.createElement("div");
-        label.style.cssText = "font-weight:600;margin-bottom:6px;";
-        const inviterName = (m.extra && m.extra.ownerName) || (isMe ? "You" : "Friend");
-        label.textContent = "🏠 " + inviterName + " invited you to their home";
-        div.appendChild(label);
-        if (!isMe && m.extra) {
-          // Only show the Visit button to the invitee (not the inviter)
-          const visitBtn = document.createElement("button");
-          visitBtn.textContent = "🚪 Visit now";
-          visitBtn.style.cssText = "background:#f2b134;color:#000;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font:700 11px Poppins,sans-serif;";
-          // Stash the invite payload on a global so the click handler can read it
-          window._pendingVisitInvite = m.extra;
-          visitBtn.onclick = () => {
-            const invite = window._pendingVisitInvite;
-            if (!invite || !invite.areaId || invite.plotNo == null || !invite.ownerUid) {
-              toast("Stale invite — ask them to send a new one");
-              return;
-            }
-            // Close the phone first so we see the world fade transition
-            closePhone();
-            setTimeout(async () => {
-              try {
-                const ok = await enterPlaceAsVisitor(invite, { pos: player.pos, heading: player.heading });
-                if (!ok) toast("Could not visit — try again");
-              } catch (e) {
-                console.error("Visit failed:", e);
-                toast("Visit failed: " + e.message);
-              }
-            }, 200);
-          };
-          div.appendChild(visitBtn);
-        } else if (isMe) {
-          const note = document.createElement("div");
-          note.style.cssText = "font-size:10px;color:#9b9ba4;margin-top:4px;";
-          note.textContent = "Waiting for them to accept...";
-          div.appendChild(note);
-        }
-        container.appendChild(div);
       } else {
         const div = document.createElement("div");
         div.style.cssText = "display:flex;justify-content:" + (isMe ? "flex-end" : "flex-start") + ";margin:4px 0;";
@@ -1515,36 +1402,8 @@ window._chatSendMoney = () => {
     if (r.ok) updateHUD();
   });
 };
-window._chatInvite = async () => {
-  // FEATURE: send a house invite message in this chat. The recipient sees a
-  // "🚪 Visit now" button that calls enterPlaceAsVisitor with the embedded
-  // house key (areaId, plotNo, ownerUid, ownerName).
-  if (!window._openChatId) { toast("Open a chat first"); return; }
-  const myUid = getMyUid();
-  if (!myUid) { toast("Sign in first"); return; }
-  // Resolve my own house key
-  const houseKey = await resolvePlayerHouseKey(myUid);
-  if (!houseKey) {
-    toast("🏠 You haven't claimed a house yet. Pick an area first.");
-    return;
-  }
-  // Look up the house record (for tier/colors if we want to show them later)
-  const house = await loadHouse(houseKey.areaId, houseKey.plotNo);
-  const ownerName = getMyName() || "Friend";
-  const ok = await sendHouseInvite(window._openChatId, {
-    areaId: houseKey.areaId,
-    plotNo: houseKey.plotNo,
-    ownerUid: myUid,
-    ownerName: ownerName,
-  });
-  if (ok) toast("🏠 Invite sent to " + (window._openChatName || "user"));
-  else toast("Could not send invite — try again");
-};
-window._chatVisit = () => {
-  // Visitor taps the 🚪 Visit now button on a house_invite message.
-  // The actual handler is set per-button in the chat bubble rendering below.
-  toast("Tap the 🚪 Visit button on the latest house invite in this chat");
-};
+window._chatInvite = () => { toast("🏠 Invite sent to " + (window._openChatName || "user")); };
+window._chatVisit = () => { toast("🚪 Visiting " + (window._openChatName || "user") + "'s home..."); };
 window._newGroup = () => {
   const name = prompt("Group name:");
   if (!name) return;
@@ -2036,14 +1895,6 @@ initAuth((user) => {
   // ---- Also write player's name to economy node so admin shows it ----
   const playerName = user.displayName || user.email?.split("@")[0] || "Player";
   update(ref(db, "economy/" + user.uid), { name: playerName, balance: game.state.money });
-  // FEATURE: per-plot world doors + knock/invite flow (step 2c).
-  // initPlotDoors subscribes to nearby areas' house records and renders door
-  // markers. listenForKnocks lets the OWNER hear knocks from visitors in
-  // real-time and respond with accept/deny prompts.
-  try {
-    initPlotDoors(scene, user.uid, toast, (info) => _onPlotPromptUpdate(info));
-    listenForKnocks(user.uid, (knocks) => _onIncomingKnocks(knocks));
-  } catch (e) { console.warn("[plots] init failed", e); }
   // ---- Sync look across devices: the account's saved outfit in Firebase WINS over this device's local copy ----
   let _lookFirst = true;
   onValue(ref(db, "players/" + user.uid + "/look"), (snap) => {
@@ -2116,131 +1967,6 @@ function _syncHomeEntrance() {
   // Update minimap home marker
   _updateHomeMinimapMarker(pos.x, pos.z);
 }
-
-// ---- FEATURE (step 2c): per-plot knock/enter prompt ----
-// Fires when the player walks within KNOCK_RANGE of a friend's plot door.
-// Shows a prompt like "🏠 @username's Home — Press here to knock" (locked)
-// or "Press here to enter" (unlocked).
-let _plotPromptEl = null;
-let _currentPlotInfo = null;  // { areaId, plotNo, ownerUid, ownerName, locked, dist }
-function _onPlotPromptUpdate(info) {
-  _currentPlotInfo = info;
-  if (!info) { if (_plotPromptEl) _plotPromptEl.style.display = "none"; return; }
-  if (!_plotPromptEl) {
-    _plotPromptEl = document.createElement("div");
-    _plotPromptEl.id = "plot-knock-prompt";
-    _plotPromptEl.style.cssText =
-      "position:fixed;left:50%;bottom:calc(38% + env(safe-area-inset-bottom));" +
-      "transform:translateX(-50%);background:rgba(15,77,58,.92);color:#fff;" +
-      "padding:10px 18px;border-radius:14px;font:600 13px Poppins,sans-serif;" +
-      "box-shadow:0 4px 14px rgba(0,0,0,.3);display:none;z-index:30;" +
-      "border:1px solid rgba(255,255,255,.2);text-align:center;max-width:90vw;cursor:pointer;";
-    document.body.appendChild(_plotPromptEl);
-    _plotPromptEl.addEventListener("click", () => _onPlotPromptTap());
-  }
-  if (info.locked) {
-    _plotPromptEl.innerHTML = '🏠 <b style="color:#f2b134;">' + info.ownerName + '</b>\'s Home<br><span style="color:#4ade80;font-weight:600;">Press here to knock</span>';
-  } else {
-    _plotPromptEl.innerHTML = '🚪 Enter <b style="color:#f2b134;">' + info.ownerName + '</b>\'s Home &nbsp;<span style="color:#4ade80;font-weight:600;">Press here 🟢</span>';
-  }
-  _plotPromptEl.style.display = "block";
-}
-function _onPlotPromptTap() {
-  if (!_currentPlotInfo) return;
-  const info = _currentPlotInfo;
-  if (info.locked) {
-    // Knock flow
-    const myName = getMyName() || "Visitor";
-    knockOnNearest(myName).then((ok) => {
-      if (!ok) return;
-      // Listen for the reply
-      listenForKnockReplyNow((reply) => {
-        if (reply.status === "accepted") {
-          toast("✅ " + reply.ownerName + " accepted! Entering...");
-          // Enter as visitor using the house info from the current plot
-          if (_currentPlotInfo) {
-            setTimeout(async () => {
-              try {
-                await enterPlaceAsVisitor({
-                  ownerUid: _currentPlotInfo.ownerUid,
-                  ownerName: _currentPlotInfo.ownerName,
-                  areaId: _currentPlotInfo.areaId,
-                  plotNo: _currentPlotInfo.plotNo,
-                }, { pos: player.pos, heading: player.heading });
-              } catch (e) { console.error(e); toast("Visit failed: " + e.message); }
-            }, 800);
-          }
-        } else if (reply.status === "denied") {
-          toast("🚫 " + reply.ownerName + " said not now.");
-        } else if (reply.status === "timeout") {
-          toast("⏳ " + reply.ownerName + " didn't answer. Try again later.");
-        }
-      });
-    });
-  } else {
-    // Unlocked — enter directly
-    const visitInfo = getUnlockedVisitInfo();
-    if (!visitInfo) { toast("Could not enter — try again"); return; }
-    enterPlaceAsVisitor(visitInfo, { pos: player.pos, heading: player.heading })
-      .catch(e => { console.error(e); toast("Visit failed: " + e.message); });
-  }
-}
-
-// ---- FEATURE (step 2c): owner-side knock prompt ----
-// Fires when a visitor knocks on OUR house. Shows a toast + Accept/Deny buttons.
-let _knockPromptEl = null;
-let _knockPromptT = 0;
-function _onIncomingKnocks(knocks) {
-  // knocks = { knockId: { visitorUid, visitorName, ts, areaId, plotNo, status } }
-  // We only show the prompt for PENDING knocks we haven't seen yet.
-  for (const [knockId, knock] of Object.entries(knocks)) {
-    if (knock.status !== "pending") continue;
-    if (window._seenKnocks && window._seenKnocks.has(knockId)) continue;
-    window._seenKnocks = window._seenKnocks || new Set();
-    window._seenKnocks.add(knockId);
-    _showOwnerKnockPrompt(knockId, knock);
-  }
-}
-function _showOwnerKnockPrompt(knockId, knock) {
-  if (!_knockPromptEl) {
-    _knockPromptEl = document.createElement("div");
-    _knockPromptEl.id = "owner-knock-prompt";
-    _knockPromptEl.style.cssText =
-      "position:fixed;left:50%;top:calc(20% + env(safe-area-inset-top));" +
-      "transform:translateX(-50%);background:rgba(15,77,58,.95);color:#fff;" +
-      "padding:14px 18px;border-radius:16px;font:600 13px Poppins,sans-serif;" +
-      "box-shadow:0 4px 18px rgba(0,0,0,.5);display:flex;flex-direction:column;" +
-      "align-items:center;gap:10px;z-index:40;border:2px solid #f2b134;max-width:90vw;";
-    document.body.appendChild(_knockPromptEl);
-  }
-  _knockPromptEl.innerHTML =
-    '<div style="text-align:center;">🚪 <b style="color:#f2b134;">' + (knock.visitorName || "Visitor") +
-    '</b> is knocking on your door</div>' +
-    '<div style="display:flex;gap:8px;">' +
-    '<button id="kp-accept" style="background:#4ade80;color:#000;border:none;border-radius:8px;padding:8px 18px;cursor:pointer;font:700 12px Poppins,sans-serif;">✓ Accept</button>' +
-    '<button id="kp-deny" style="background:#e11d48;color:#fff;border:none;border-radius:8px;padding:8px 18px;cursor:pointer;font:700 12px Poppins,sans-serif;">✕ Deny</button>' +
-    '</div>';
-  _knockPromptEl.style.display = "flex";
-  const acceptBtn = document.getElementById("kp-accept");
-  const denyBtn = document.getElementById("kp-deny");
-  acceptBtn.onclick = () => {
-    respondToKnock(getMyUid(), knockId, true).then(() => {
-      toast("✅ You accepted " + (knock.visitorName || "visitor"));
-    });
-    _knockPromptEl.style.display = "none";
-  };
-  denyBtn.onclick = () => {
-    respondToKnock(getMyUid(), knockId, false).then(() => {
-      toast("🚫 You denied " + (knock.visitorName || "visitor"));
-    });
-    _knockPromptEl.style.display = "none";
-  };
-  // Auto-hide after 30 seconds if no response
-  clearTimeout(_knockPromptT);
-  _knockPromptT = setTimeout(() => {
-    if (_knockPromptEl) _knockPromptEl.style.display = "none";
-  }, 30000);
-}
 function _updateHomeMinimapMarker(x, z) {
   // The minimap draws markers from MAP_LOCATIONS. We add/update a "My Home" marker.
   // This is a lightweight approach — just store it on window for the minimap to pick up.
@@ -2306,7 +2032,6 @@ function governor(raw) {
 }
 
 function frame() {
-  perfFrameStart();
   // Nothing runs until the player has signed in / signed up.
   if (!isAuthed && !window.__bypassAuth) { clock.getDelta(); renderer.render(scene, camera); requestAnimationFrame(frame); return; }
   const _raw = clock.getDelta(); governor(_raw);
@@ -2359,11 +2084,7 @@ function frame() {
   updateCamera(camera, ctl, player.pos, active ? (active.handle.colliders || []) : world.colliders, dt);
   applyTime();
   if (active) { scene.background = INTERIOR_BG; scene.fog.color.copy(INTERIOR_BG); sun.intensity = 0; hemi.intensity = 0.8; }
-  // FIX: shadow map is updated by tickShadows() (in graphics.js) — only when
-  // the player moves >4m OR the sun noticeably shifts. This is what makes
-  // Medium/High quality not lag. Inside buildings, skip the shadow update
-  // entirely (sun is set to 0 above).
-  if (!active) tickShadows(player.pos.x, player.pos.z, _gameHour(), renderer);
+  renderer.shadowMap.autoUpdate = !active;   // no shadow pass inside buildings
   // ---- Phase 2+9: Calculate modified drain rates (NEPA + moodlets + weather) ----
   const homeHandle = getActivePlace();
   const placedFurniture = homeHandle?.handle?.getPlaced?.() || [];
@@ -2441,18 +2162,11 @@ function frame() {
   tickMoneyHunt(Date.now());
   // ---- Graphics tick: cloud drift ----
   tickGraphics(dt);
-  // ---- Plot doors tick: render doors at nearby occupied plots + detect knock range (step 2c) ----
-  // Only tick when NOT inside a place (otherwise we waste cycles on doors the player can't see)
-  if (!active) tickPlotDoors(player.pos.x, player.pos.z);
-  // FEATURE 3b: area world tick — chunk-streamed area roads + houses + lamp posts
-  if (!active) tickAreaWorld(player.pos.x, player.pos.z);
   if (!active) savePos(dt);
   sendPosition(player.pos.x, player.pos.z, player.heading);
   setMyPosition(player.pos.x, player.pos.z);
   mmT += dt; if (mmT > 0.1) { mmT = 0; mmDraw(player.pos.x, player.pos.z, ctl.yaw, player.heading, traffic.positions); }
-  perfBeforeRender();
   renderer.render(scene, camera);
-  perfAfterRender(renderer, getQuality());
   requestAnimationFrame(frame);
 }
 
