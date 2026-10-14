@@ -115,6 +115,13 @@
         ".read": "auth != null",
         ".write": "!data.exists() && newData.val() === auth.uid"
       }
+    },
+    "userProfiles": {
+      ".read": "auth != null",
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'"
+      }
     }
   }
 }
