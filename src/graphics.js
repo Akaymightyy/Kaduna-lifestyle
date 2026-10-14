@@ -245,14 +245,30 @@ export function tickGraphics(dt) {
 export function applyQuality(q, { renderer, sun, scene }) {
   const preset = QUALITY_PRESETS[q];
   if (!preset) return;
+  const prev = _quality;
   _quality = q;
   try { setArtQuality(q); } catch (e) {}
 
+  // The sky shader / clouds / sun disc are the heaviest "pretty" parts: switch them off live on Low (no reload needed)
+  if (_sky) _sky.visible = !!preset.skyShader;
+  if (_clouds) _clouds.visible = !!preset.clouds;
+  if (_sunSphere) _sunSphere.visible = q === "high";
   renderer.setPixelRatio(Math.min(preset.pixelRatio, devicePixelRatio));
   renderer.shadowMap.enabled = preset.shadows;
   if (preset.shadows && sun) {
+    // FIX: dispose the old shadow map texture BEFORE changing mapSize, otherwise
+    // Three.js keeps the old GPU texture alive and allocates a new one — every
+    // quality switch leaks one full shadow map texture (1MB at 1024, 4MB at 2048).
+    // This was a major cause of "lag returns shortly after refresh" on Medium/High.
+    if (sun.shadow && sun.shadow.map) {
+      try { sun.shadow.map.dispose(); } catch (e) { /* non-critical */ }
+      sun.shadow.map = null;
+    }
     sun.castShadow = true;
     sun.shadow.mapSize.set(preset.shadowMap, preset.shadowMap);
+    // After recreating the shadow map, force a fresh render on the next frame
+    // so the player doesn't see a black shadow for ~30 seconds.
+    _requestShadowUpdate();
   } else if (sun) {
     sun.castShadow = false;
   }
@@ -263,6 +279,54 @@ export function applyQuality(q, { renderer, sun, scene }) {
 
   // Save to localStorage
   try { localStorage.setItem("kaduna-graphics", q); } catch (e) {}
+}
+
+// ---- Shadow update throttling ----
+// Shadow map re-render is the single most expensive per-frame cost on phones
+// (a 1024x1024 depth render of the entire scene from the sun's POV). autoUpdate
+// forces this every frame, which on mid-range phones burns ~5-8ms per frame
+// and accumulates GC pressure until the game stutters.
+//
+// We turn autoUpdate OFF and manually trigger a shadow update only when:
+//   1. The player moved more than SHADOW_MOVE_THRESHOLD metres since last update
+//      (shadow camera frustum follows the player, so shadows need to refresh
+//      when the player crosses a threshold)
+//   2. The sun moved (game-time changed enough to noticeably shift the sun)
+//   3. Someone explicitly requested it (e.g. after a quality change)
+//
+// On Low quality (shadows disabled), this is a no-op.
+let _shadowNeedsUpdate = true;     // initial render
+let _lastShadowX = Infinity;
+let _lastShadowZ = Infinity;
+let _lastShadowHour = -1;
+const SHADOW_MOVE_THRESHOLD = 4;   // metres — refresh shadow when player crosses this
+const SHADOW_HOUR_THRESHOLD = 0.2;  // game-hours — refresh when sun moves this much
+
+export function requestShadowUpdate() { _shadowNeedsUpdate = true; }
+function _requestShadowUpdate() { _shadowNeedsUpdate = true; }
+
+// Called from main.js every frame. Decides whether to refresh the shadow map.
+export function tickShadows(playerX, playerZ, gameHour, renderer) {
+  if (!renderer || !renderer.shadowMap) return;
+  if (!renderer.shadowMap.enabled) return;
+  // Reason 1: player moved
+  const dx = playerX - _lastShadowX;
+  const dz = playerZ - _lastShadowZ;
+  if (dx * dx + dz * dz > SHADOW_MOVE_THRESHOLD * SHADOW_MOVE_THRESHOLD) {
+    _shadowNeedsUpdate = true;
+  }
+  // Reason 2: sun moved
+  if (Math.abs(gameHour - _lastShadowHour) >= SHADOW_HOUR_THRESHOLD) {
+    _shadowNeedsUpdate = true;
+  }
+  // Apply
+  if (_shadowNeedsUpdate) {
+    renderer.shadowMap.needsUpdate = true;
+    _shadowNeedsUpdate = false;
+    _lastShadowX = playerX;
+    _lastShadowZ = playerZ;
+    _lastShadowHour = gameHour;
+  }
 }
 
 // ---- Auto-detect quality based on device + first 3 seconds of FPS ----
