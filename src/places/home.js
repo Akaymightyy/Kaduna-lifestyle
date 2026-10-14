@@ -100,61 +100,82 @@ export async function build(scene, ctx) {
     ] }));
   }
 
-  // ---- Furniture container ----
+  // ---- Load furniture ----
+  // FEATURE: If ctx.visitingHouse is set (visitor mode), load the visited
+  // house's furniture from houses/{areaId}/{plotNo}/furniture (readable by
+  // anyone per Firebase rules). Otherwise load the local player's own house
+  // (using their homeArea/homePlot resolved from Firebase).
+  //
+  // Visitor mode disables furniture editing — visitors can look but not touch.
+  const _isVisitor = !!ctx.visitingHouse;
+  let _houseAreaId = null, _housePlotNo = null, _ownerUidForStorage = null;
+  let _visitorName = "";
+  if (_isVisitor) {
+    _houseAreaId = ctx.visitingHouse.areaId;
+    _housePlotNo = ctx.visitingHouse.plotNo;
+    _ownerUidForStorage = ctx.visitingHouse.ownerUid;
+    _visitorName = ctx.visitingHouse.ownerName || "Friend";
+  }
+  let _placedFurniture = [];
   let _furnitureGroup = new THREE.Group();
   group.add(_furnitureGroup);
-  let _placedFurniture = [];
 
-  // ---- Load THIS player's placed furniture from the HOUSE RECORD (not the player node) ----
-  // FEATURE: furniture now lives at houses/{areaId}/{plotNo}/furniture so visitors
-  // can read it (visitors can't read players/{otherUid} — blocked by Firebase rules).
-  // First we migrate any old furniture from players/{uid}/homeFurniture if needed.
-  //
-  // If the player hasn't claimed a plot yet (no homeArea/homePlot), we fall back
-  // to the old path so existing accounts without a plot aren't wiped.
-  const uid = getMyUid();
-  const houseKey = await resolvePlayerHouseKey(uid);  // { areaId, plotNo, area } | null
-  let _houseAreaId = null, _housePlotNo = null;
-  if (houseKey) {
-    _houseAreaId = houseKey.areaId;
-    _housePlotNo = houseKey.plotNo;
-    // One-time migration: copy players/{uid}/homeFurniture → houses/{area}/{plot}/furniture
-    await migrateFurnitureIfNeeded(uid, _houseAreaId, _housePlotNo);
-  }
-  if (uid && _houseAreaId && _housePlotNo != null) {
+  if (_isVisitor) {
+    // Visitor: load furniture from the visited house record
     try {
       _placedFurniture = await loadHouseFurniture(_houseAreaId, _housePlotNo);
-      console.log(`[home] Loaded ${_placedFurniture.length} furniture items from houses/${_houseAreaId}/${_housePlotNo}`);
+      console.log("[home] Visitor loaded " + _placedFurniture.length + " items from " + _visitorName + "'s house (" + _houseAreaId + "/" + _housePlotNo + ")");
       _rebuildFurniture();
-      if (_placedFurniture.length > 0) {
-        const comfort = calcComfort(_placedFurniture);
-        ctx.toast("🏠 " + cfg.name + " · Comfort: " + comfort);
-      } else {
-        ctx.toast("🏠 " + cfg.name + " — " + cfg.desc);
-      }
+      const comfort = calcComfort(_placedFurniture);
+      ctx.toast("🏠 " + _visitorName + "'s Home · Comfort: " + comfort);
     } catch (e) {
-      console.error("[home] Could not load furniture:", e.message);
-      ctx.toast("⚠️ Could not load furniture: " + e.message);
-    }
-  } else if (uid) {
-    // Player hasn't claimed a plot yet — fall back to the old per-player path
-    // so existing accounts aren't left with an empty room.
-    try {
-      const snap = await get(ref(db, "players/" + uid + "/homeFurniture"));
-      const val = snap.val();
-      if (Array.isArray(val)) _placedFurniture = val;
-      else if (val && typeof val === "object") _placedFurniture = Object.values(val);
-      else _placedFurniture = [];
-      console.warn("[home] No house plot claimed — falling back to players/{uid}/homeFurniture (" + _placedFurniture.length + " items).");
-      _rebuildFurniture();
-      ctx.toast("🏠 " + cfg.name + (houseKey ? "" : " — pick an area to save furniture properly"));
-    } catch (e) {
-      console.error("[home] Fallback load failed:", e.message);
-      ctx.toast("🏠 " + cfg.name + " — pick an area to start furnishing");
+      console.error("[home] Visitor furniture load failed:", e.message);
+      ctx.toast("⚠️ Could not load " + _visitorName + "'s furniture");
     }
   } else {
-    console.warn("[home] getMyUid() returned null — furniture will not load");
-    ctx.toast("🏠 " + cfg.name);
+    // Owner: load from own house record (with migration from old per-player path)
+    const uid = getMyUid();
+    const houseKey = await resolvePlayerHouseKey(uid);
+    if (houseKey) {
+      _houseAreaId = houseKey.areaId;
+      _housePlotNo = houseKey.plotNo;
+      _ownerUidForStorage = uid;
+      await migrateFurnitureIfNeeded(uid, _houseAreaId, _housePlotNo);
+    }
+    if (uid && _houseAreaId && _housePlotNo != null) {
+      try {
+        _placedFurniture = await loadHouseFurniture(_houseAreaId, _housePlotNo);
+        console.log("[home] Loaded " + _placedFurniture.length + " furniture items from houses/" + _houseAreaId + "/" + _housePlotNo);
+        _rebuildFurniture();
+        if (_placedFurniture.length > 0) {
+          const comfort = calcComfort(_placedFurniture);
+          ctx.toast("🏠 " + cfg.name + " · Comfort: " + comfort);
+        } else {
+          ctx.toast("🏠 " + cfg.name + " — " + cfg.desc);
+        }
+      } catch (e) {
+        console.error("[home] Could not load furniture:", e.message);
+        ctx.toast("⚠️ Could not load furniture: " + e.message);
+      }
+    } else if (uid) {
+      // Fallback to the old per-player path (no plot claimed yet)
+      try {
+        const snap = await get(ref(db, "players/" + uid + "/homeFurniture"));
+        const val = snap.val();
+        if (Array.isArray(val)) _placedFurniture = val;
+        else if (val && typeof val === "object") _placedFurniture = Object.values(val);
+        else _placedFurniture = [];
+        console.warn("[home] No house plot claimed — falling back to players/{uid}/homeFurniture (" + _placedFurniture.length + " items).");
+        _rebuildFurniture();
+        ctx.toast("🏠 " + cfg.name + " — pick an area to save furniture properly");
+      } catch (e) {
+        console.error("[home] Fallback load failed:", e.message);
+        ctx.toast("🏠 " + cfg.name + " — pick an area to start furnishing");
+      }
+    } else {
+      console.warn("[home] getMyUid() returned null — furniture will not load");
+      ctx.toast("🏠 " + cfg.name);
+    }
   }
 
   function _rebuildFurniture() {
@@ -171,8 +192,11 @@ export async function build(scene, ctx) {
       mesh.rotation.y = p.rot || 0;
       mesh.userData.placedIdx = _placedFurniture.indexOf(p);
       mesh.userData.isFurniture = true;
-      // Make furniture interactive (click to select for move/rotate/remove)
-      mesh.userData.onClick = () => _selectFurniture(mesh.userData.placedIdx);
+      // FEATURE: visitors can't edit furniture — disable the click handler entirely
+      // (the furniture is read-only for them; they just see the owner's setup).
+      if (!_isVisitor) {
+        mesh.userData.onClick = () => _selectFurniture(mesh.userData.placedIdx);
+      }
       _furnitureGroup.add(mesh);
     }
   }
@@ -358,14 +382,18 @@ export async function build(scene, ctx) {
       else if (eid === "tv") _doAction(ctx, "📺 Watched TV. Fun +20", "fun", 20);
       else if (eid === "shower") _doAction(ctx, "🚿 Showered. Hygiene +30", "hygiene", 30);
       else if (eid === "toilet") _doAction(ctx, "🚽 Bladder relieved.", "bladder", 40);
-      else if (eid === "place_furniture") _startPlaceMode(ctx, payload);
-      else if (eid === "rotate_furniture") { if (_pendingItem) _pendingItem.rot = (_pendingItem.rot || 0) + Math.PI / 2; _updateGhost(_pendingItem?.x || 0, _pendingItem?.z || 0); }
-      else if (eid === "confirm_place") _confirmPlace(ctx);
+      // FEATURE: furniture editing actions are blocked for visitors — they can
+      // use the room (sleep/eat/tv) but can't move/remove/place furniture.
+      else if (eid === "place_furniture") { if (_isVisitor) ctx.toast("🔒 Only " + _visitorName + " can rearrange their own furniture"); else _startPlaceMode(ctx, payload); }
+      else if (eid === "rotate_furniture") { if (!_isVisitor && _pendingItem) { _pendingItem.rot = (_pendingItem.rot || 0) + Math.PI / 2; _updateGhost(_pendingItem?.x || 0, _pendingItem?.z || 0); } }
+      else if (eid === "confirm_place") { if (!_isVisitor) _confirmPlace(ctx); }
       else if (eid === "cancel_place") _cancelPlace();
     },
     getComfort() { return calcComfort(_placedFurniture); },
     getPlaced() { return _placedFurniture; },
     isDecorating() { return _decorateMode; },
+    isVisitor() { return _isVisitor; },
+    getOwnerName() { return _visitorName; },
     getTier() { return tier; },
     getTierName() { return cfg.name; },
   };

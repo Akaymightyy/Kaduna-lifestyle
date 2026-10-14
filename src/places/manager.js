@@ -152,6 +152,43 @@ export async function enterPlace(id, playerState) {
   if (_state.ctx.onPlaceChange) _state.ctx.onPlaceChange(def);
 }
 
+// FEATURE: Enter ANOTHER player's house as a visitor.
+// Sets ctx.visitingHouse before building so home.js loads the visited house's
+// furniture (read from houses/{areaId}/{plotNo}/furniture — readable by anyone
+// per the rules). Clears it on exit so the next home entry uses the owner path.
+//
+// `houseInfo` shape: { ownerUid, ownerName, areaId, plotNo }
+export async function enterPlaceAsVisitor(houseInfo, playerState) {
+  if (_state.active) {
+    console.warn("Already inside a place:", _state.active);
+    return false;
+  }
+  if (!houseInfo || !houseInfo.areaId || houseInfo.plotNo == null || !houseInfo.ownerUid) {
+    _state.ctx?.toast?.("⚠️ Cannot visit — no house info.");
+    return false;
+  }
+  // Stash on ctx so home.js picks it up
+  _state.ctx.visitingHouse = {
+    ownerUid: houseInfo.ownerUid,
+    ownerName: houseInfo.ownerName || "Friend",
+    areaId: houseInfo.areaId,
+    plotNo: houseInfo.plotNo,
+  };
+  // The home place's def name shows in the toast + chip — update it
+  const home = getPlace("home");
+  if (home) home.name = houseInfo.ownerName + "'s Home";
+  let ok = false;
+  try {
+    await enterPlace("home", playerState);
+    ok = true;
+  } catch (e) {
+    console.error("Visitor entry failed:", e);
+    _state.ctx.toast("Could not visit — try again");
+    ok = false;
+  }
+  return ok;
+}
+
 export async function exitPlace(playerState) {
   if (!_state.active) return;
   const def = getPlace(_state.active);
@@ -173,6 +210,14 @@ export async function exitPlace(playerState) {
 
   _state.active = null;
   _state.placeHandle = null;
+
+  // FEATURE: clear visitor context on exit so the next home entry uses the
+  // owner path. Also restore the home place name.
+  if (_state.ctx.visitingHouse) {
+    _state.ctx.visitingHouse = null;
+    const home = getPlace("home");
+    if (home) home.name = "My Home";
+  }
 
   await _fadeTo(0);
   if (_state.ctx.onPlaceChange) _state.ctx.onPlaceChange(null);
