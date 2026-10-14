@@ -279,6 +279,12 @@ export function getAreaHouses(areaId) {
   return _houses[areaId] || {};
 }
 
+// FEATURE: expose the area name sprites map so main.js's tap-raycaster can
+// detect when the player taps a floating area name sign → travel there.
+export function getAreaNameSprites() {
+  return _areaNameSprites;
+}
+
 // ---- Draw a label onto a canvas (called only when the label changes) ----
 function _drawLabel(canvas, ctx, text, accent) {
   ctx.fillStyle = "rgba(15,15,15,0.85)";
@@ -497,6 +503,9 @@ function _buildAreaName(areaId, area) {
   sprite.position.set(area.x, 12, area.z);
   sprite.scale.set(16, 4, 1);
   sprite.visible = false; // tickPlotDoors will toggle based on distance
+  // FEATURE: tag the area name sprite with userData so main.js's tap-raycaster
+  // can detect when the player taps an area name → travel there.
+  sprite.userData = { isAreaName: true, areaId: area.id, areaName: area.name };
   _scene.add(sprite);
   _areaNameSprites.set(areaId, { sprite, canvas, ctx, texture: tex });
 }

@@ -16,19 +16,41 @@ export async function searchUsers(q, limit = 10) {
   if (!q || q.length < 2) return [];
   const query = q.toLowerCase().replace(/^@/, "");
   try {
-    const snap = await get(ref(db, "usernames"));
+    // FEATURE: read the world-readable userProfiles node (instead of the admin/
+    // owner-only players/{uid} node which was silently failing for non-admin
+    // searchers). userProfiles/{uid} = { name, username, createdAt } is
+    // readable by any authed user per FIREBASE_RULES.json.
+    //
+    // We match BOTH username AND display name so users can search by either.
+    // Limit to 10 results. Sort: username-prefix matches first, then name
+    // matches, then alphabetical.
+    const snap = await get(ref(db, "userProfiles"));
     const all = snap.val() || {};
     const results = [];
-    for (const [uname, uid] of Object.entries(all)) {
-      if (uname.includes(query)) {
-        try { const pSnap = await get(ref(db, "players/" + uid)); const p = pSnap.val() || {};
-          results.push({ uid, username: uname, name: p.name || uname });
-          if (results.length >= limit) break;
-        } catch (e) {}
-      }
+    for (const [uid, profile] of Object.entries(all)) {
+      if (!profile) continue;
+      const uname = (profile.username || "").toLowerCase();
+      const pname = (profile.name || "").toLowerCase();
+      // Match if query is a substring of username OR name
+      if (!uname.includes(query) && !pname.includes(query)) continue;
+      results.push({
+        uid,
+        username: profile.username || uid,
+        name: profile.name || profile.username || uid,
+        _isUnamePrefix: uname.startsWith(query),  // for sorting
+      });
+      if (results.length >= limit * 3) break;  // gather enough for sort, then trim
     }
-    return results;
-  } catch (e) { return []; }
+    // Sort: username-prefix matches first, then by name (alphabetical)
+    results.sort((a, b) => {
+      if (a._isUnamePrefix !== b._isUnamePrefix) return a._isUnamePrefix ? -1 : 1;
+      return (a.name || "").localeCompare(b.name || "");
+    });
+    return results.slice(0, limit).map(r => ({ uid: r.uid, username: r.username, name: r.name }));
+  } catch (e) {
+    console.warn("[messages] searchUsers failed:", e.message);
+    return [];
+  }
 }
 
 export async function openDM(otherUid, otherName) {

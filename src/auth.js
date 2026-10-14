@@ -130,6 +130,18 @@ export async function signupEmail(email, pass, name, username) {
       await update(dbRef, { name: name, username: username || name, x: -9, z: 11, heading: Math.PI, ts: Date.now() });
       // Also save to economy
       await update(ref(db, "economy/" + uid), { name: name, balance: 5000 });
+      // ---- FEATURE: write a world-readable public profile so other users can
+      // search and find this account by name (the players/{uid} node is admin/
+      // owner-only per Firebase rules, so search couldn't read other players'
+      // names). userProfiles/{uid} = { name, username, createdAt } is world-
+      // readable per the new FIREBASE_RULES.json.
+      try {
+        await set(ref(db, "userProfiles/" + uid), {
+          name: name,
+          username: username || name,
+          createdAt: Date.now(),
+        });
+      } catch (e) { console.warn("userProfiles write failed", e); }
       // ---- Claim the username so nobody else can use it ----
       try {
         const unameKey = username.toLowerCase().replace(/\./g, "_");

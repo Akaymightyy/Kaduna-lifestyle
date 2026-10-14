@@ -69,6 +69,10 @@ async function createAvatarFor(uid, d) {
     const tex = makeNameTag(d.name || "Player", d.color || "#f2b134");
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
     sp.position.y = 2.0; sp.scale.set(1.6, 0.4, 1);
+    // FEATURE: tag the sprite with userData so the main.js tap-raycaster can
+    // detect when the player taps another user's name → open a DM with them.
+    sp.userData = { isRemotePlayer: true, playerUid: uid, playerName: d.name || "Player" };
+    group.userData = { isRemotePlayer: true, playerUid: uid, playerName: d.name || "Player" };
     group.add(sp);
     _scene.add(group);
     _meshes[uid] = { group, model, ch, walker: { animate: (dt, speed, moving) => ch.animate(dt, moving ? speed : 0) }, lastX: d.x||0, lastZ: d.z||0, phase: 0, look: d.look };
@@ -86,6 +90,9 @@ async function createAvatarFor(uid, d) {
     const tex = makeNameTag(d.name || "Player", d.color);
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
     sp.position.y = 1.8; sp.scale.set(1.5, 0.4, 1); g.add(sp);
+    // FEATURE: tag for tap-raycaster (same as the model-loaded branch above)
+    sp.userData = { isRemotePlayer: true, playerUid: uid, playerName: d.name || "Player" };
+    g.userData = { isRemotePlayer: true, playerUid: uid, playerName: d.name || "Player" };
     _scene.add(g);
     _meshes[uid] = { group: g, model: null, walker: null, lastX: d.x||0, lastZ: d.z||0, phase: 0 };
     g.position.set(d.x||0, 0, d.z||0);
@@ -161,3 +168,6 @@ function updateAvatars() {
 
 export function getMyUid(){return _uid;}
 export function getMyName(){return _name;}
+// FEATURE: expose the remote-player meshes map so main.js can raycast against
+// them on tap (for the "click another user's name to DM them" flow).
+export function getRemotePlayers() { return _meshes; }

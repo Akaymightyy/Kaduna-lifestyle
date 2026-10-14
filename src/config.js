@@ -18,12 +18,14 @@ export const SIDE_STREETS = [-90, 90];
 export const TIME_SCALE = 1;  // 1 real minute per game minute (real-time)
 export const REAL_MS_PER_GAME_HOUR = TIME_SCALE * 60 * 1000;  // 60000 ms = 1 minute real = 1 minute game
 
-// FEATURE: lock the game to EVENING (golden hour) always. The player said they
-// don't want night, only evening. We force the game-hour to 17.5 (5:30pm) which
-// is the warmest part of golden hour in Kaduna. The sun is low + warm, the sky
-// is orange-pink, lamp posts glow softly — but it's never pitch-black night.
-// The user can still override with `?t=9` in URL for morning if they want.
-export const FIXED_HOUR = 17.5;
+// FEATURE: time-of-day mode.
+//   null = natural day/night cycle (day default, evening at sunset, night after dark).
+//         The SKY array in main.js already has nice sunset colours at 18:00-19:30.
+//         The brighter night hemi/moonlight fix (graphics.js) ensures night isn't
+//         pitch-black. Lamp posts glow softly at night.
+//   17.5 = locked to 5:30pm evening always (override for testing only).
+// Override per-session with `?t=22` URL param.
+export const FIXED_HOUR = null;  // FEATURE: natural day/night cycle (was 17.5 evening-lock)
 
 export const LANES = [
   { z: 2.75, dir: 1, speed: 8.5 },

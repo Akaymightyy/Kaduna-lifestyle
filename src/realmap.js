@@ -13,11 +13,25 @@ export async function fetchKadunaData() {
     if (!res.ok) return null;
     const data = await res.json();
     if (!data.roads || !data.buildings) return null;
+    // FEATURE: filter out the "Ahmadu Bello Way" main road — it's already
+    // rendered by world.js (the procedural road that runs along X from
+    // -WORLD_HALF_X-100 to +WORLD_HALF_X+100). Keeping it would double-render.
+    // Also filter out any building within ±30 of z=0 (those overlap with
+    // world.js's procedural buildings and would clip).
+    data.roads = data.roads.filter(r => r.name !== "Ahmadu Bello Way");
+    data.buildings = (data.buildings || []).filter(b => Math.abs(b.z) > 35);
     return data;
   } catch (e) { return null; }
 }
 
-export function buildRealMap(scene, data) {
+export function buildRealMap(scene, data, parentGroup) {
+  // FEATURE: parentGroup param — if provided (e.g. world.worldGroup), all the
+  // realmap meshes get added to it instead of to the scene root. This way,
+  // when the place manager hides worldGroup on enterPlace (so the player
+  // doesn't see outside buildings while inside a house), the realmap meshes
+  // hide too. Without this, the realmap roads/buildings stayed visible
+  // inside houses AND the additive-blended glow sprite from art/dress.js
+  // bled through, appearing as a "milk color circle at my back".
   if (!data) return null;
   const group = new THREE.Group();
   group.name = "real_kaduna";
@@ -96,6 +110,6 @@ export function buildRealMap(scene, data) {
     buildingGeos.forEach(g => g.dispose());
   }
 
-  scene.add(group);
-  return { group, colliders, mapShapes, dispose() { scene.remove(group); group.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { const m = Array.isArray(o.material) ? o.material : [o.material]; m.forEach(x => x.dispose()); } }); } };
+  (parentGroup || scene).add(group);
+  return { group, colliders, mapShapes, dispose() { (parentGroup || scene).remove(group); group.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { const m = Array.isArray(o.material) ? o.material : [o.material]; m.forEach(x => x.dispose()); } }); } };
 }

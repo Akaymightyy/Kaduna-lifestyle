@@ -51,6 +51,7 @@ const DOOR_W = 1.0, DOOR_H = 2.0;
 
 // ---- State ----
 let _scene = null;
+let _worldColliders = null;   // FEATURE: ref to world.colliders so we can push house footprints
 let _areasBuilt = new Map();  // areaId -> { houseMesh, lampMesh, roadMesh, capacity }
 
 // ---- Build the merged house geometry (body + roof + door), used for every instance ----
@@ -91,8 +92,9 @@ function _buildLampGeometry() {
 }
 
 // ---- Init ----
-export function initAreaWorld(scene) {
+export function initAreaWorld(scene, worldColliders) {
   _scene = scene;
+  _worldColliders = worldColliders;  // FEATURE: stash the ref so per-area house colliders can be pushed
 }
 
 // ---- Tick: per-frame, manage per-area meshes + chunk positions ----
@@ -169,15 +171,29 @@ function _buildArea(area) {
   swR.receiveShadow = true;
   _scene.add(swR);
 
+  // FEATURE: pre-allocate a per-area collider pool. Each occupied-plot house
+  // gets a collider object. We mutate these in place each frame (avoiding GC
+  // pressure from push/splice on world.colliders). When a house disappears,
+  // we set the collider to a degenerate box (minX=Infinity, maxX=-Infinity)
+  // so it never triggers a collision.
+  const maxHouses = Math.min(64, capacity);  // cap at 64 houses per area
+  const houseColliders = [];
+  for (let i = 0; i < maxHouses; i++) {
+    const c = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity, _areaId: area.id };
+    houseColliders.push(c);
+    if (_worldColliders) _worldColliders.push(c);  // push to world.colliders ONCE
+  }
+
   _areasBuilt.set(area.id, {
     houseMesh, lampMesh, roadMesh, swL, swR, capacity, lampCount, roadW,
+    houseColliders,  // FEATURE: per-area collider pool, mutated in place each frame
     // PERF FIX: track which house instance slots have been colored + the
     // last reported colored count. Used to skip setColorAt + instanceColor
     // upload when nothing changed frame-to-frame.
     coloredSlots: 0,
     lastColoredSlots: 0,
   });
-  console.log("[areas_world] Built area " + area.id + " (" + area.plots + " plots)");
+  console.log("[areas_world] Built area " + area.id + " (" + area.plots + " plots, " + maxHouses + " collider slots)");
 }
 
 // ---- Update an area's chunk positions (called per-frame while the area is nearby) ----
@@ -209,6 +225,9 @@ function _updateArea(area, playerX, playerZ, distToArea) {
   const houses = getAreaHouses(area.id);
   let idx = 0;
   const wallCol = new THREE.Color(area.wallCol);
+  const houseColliders = entry.houseColliders || [];
+  const houseHW = HOUSE_BODY_W / 2;  // 2.5m
+  const houseHD = HOUSE_BODY_D / 2;  // 2.5m
   for (const [plotNoStr, houseRec] of Object.entries(houses)) {
     if (idx >= capacity) break;
     if (!houseRec || !houseRec.ownerUid) continue; // not actually occupied
@@ -229,7 +248,26 @@ function _updateArea(area, playerX, playerZ, distToArea) {
       houseMesh.setColorAt(idx, wallCol);
       entry.coloredSlots = idx + 1;
     }
+    // FEATURE: also update the corresponding house collider to match this
+    // house's footprint. The collider was pre-allocated in _buildArea and
+    // pushed to world.colliders ONCE. We mutate it in place (no GC pressure)
+    // to match the house's current position.
+    if (idx < houseColliders.length) {
+      const c = houseColliders[idx];
+      c.minX = pos.x - houseHW;
+      c.maxX = pos.x + houseHW;
+      c.minZ = pos.z - houseHD;
+      c.maxZ = pos.z + houseHD;
+    }
     idx++;
+  }
+  // FEATURE: deactivate leftover colliders for slots that no longer have a
+  // house (e.g. a player moved out, or a previously-visible house is now
+  // out of chunk range). Set them to a degenerate box that never triggers.
+  for (let i = idx; i < houseColliders.length; i++) {
+    const c = houseColliders[i];
+    c.minX = Infinity; c.maxX = -Infinity;
+    c.minZ = Infinity; c.maxZ = -Infinity;
   }
   // Hide leftover instances from the previous frame (if any)
   for (let i = idx; i < houseMesh.count; i++) houseMesh.setMatrixAt(i, _hide);
@@ -273,12 +311,19 @@ function _updateArea(area, playerX, playerZ, distToArea) {
 function _disposeArea(areaId) {
   const entry = _areasBuilt.get(areaId);
   if (!entry) return;
-  const { houseMesh, lampMesh, roadMesh, swL, swR } = entry;
+  const { houseMesh, lampMesh, roadMesh, swL, swR, houseColliders } = entry;
   _scene.remove(houseMesh); houseMesh.geometry?.dispose(); houseMesh.material?.dispose();
   _scene.remove(lampMesh); lampMesh.geometry?.dispose(); lampMesh.material?.dispose();
   _scene.remove(roadMesh); roadMesh.geometry?.dispose(); roadMesh.material?.dispose();
   _scene.remove(swL); swL.geometry?.dispose(); swL.material?.dispose();
   _scene.remove(swR); swR.geometry?.dispose(); swR.material?.dispose();
+  // FEATURE: remove this area's house colliders from world.colliders.
+  // Filter by _areaId tag so we don't accidentally splice another area's colliders.
+  if (_worldColliders && houseColliders) {
+    for (let i = _worldColliders.length - 1; i >= 0; i--) {
+      if (_worldColliders[i]._areaId === areaId) _worldColliders.splice(i, 1);
+    }
+  }
   _areasBuilt.delete(areaId);
   console.log("[areas_world] Disposed area " + areaId);
 }

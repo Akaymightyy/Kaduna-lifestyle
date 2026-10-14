@@ -9,13 +9,13 @@ import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAIL
 import { createGameState } from "./needs.js";
 import { auth, db } from "./firebase.js";
 import { initAuth, showAuthModal, wireAuthUI, logout, isAuthed } from "./auth.js";
-import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition } from "./multiplayer.js";
+import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition, getRemotePlayers } from "./multiplayer.js";
 import { startRide, travelToZone, travelToPlace, getDestinations } from "./travel.js";
 import { subscribeRichList } from "./economy.js";
 import { createNPCs } from "./npcs.js";
 import { initAdmin, showAdminDashboard, hideAdminDashboard, isAdmin, adminTab } from "./admin.js";
 import { checkDailyReward, getDailyStatus, claimQuestReward } from "./daily.js";
-import { ref, onValue, update } from "firebase/database";
+import { ref, get, onValue, update, set } from "firebase/database";
 import { openCreator } from "./creator.js";
 import { outfitsFor, BUILDS, SHOP, SLOT_KEYS } from "./outfits.js";
 import { initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, getActivePlace, enterPlace, enterPlaceAsVisitor, exitPlace, sendUIEvent } from "./places/manager.js";
@@ -38,8 +38,13 @@ import {
   getUnlockedVisitInfo,
   getNearestFriendPlot,
   disposePlotDoors,
+  getAreaNameSprites,
 } from "./plots.js";
 import { initAreaWorld, tickAreaWorld, setAreaLampsNight, disposeAreaWorld } from "./areas_world.js";
+// FEATURE 3c: load real Kaduna road + river + building data from kaduna.json
+// (a static OSM-derived file shipped in public/data/). The main Ahmadu Bello
+// Way is filtered out (already rendered by world.js) to avoid double-render.
+import { fetchKadunaData, buildRealMap } from "./realmap.js";
 import { initMessages, searchUsers, openDM, sendMessage, sendHouseInvite, openChat, closeChat, getChatList, sendMoney, createGroup, leaveGroup, blockUser, reportUser, getChatMeta, cleanupMessages, getPresence, listenToPresence } from "./messages.js";
 import { initEvents, tickNepa, isNepaCut, getNepaStatus, hasPowerBackup, getModifiedDrain, tickMoodlets, addMoodlet, getActiveMoodlets, getConsequences, getWalkSpeedMultiplier, MOODLET_DEFS } from "./events.js";
 import { SKILLS, CAREERS, SHIFT_TONES, initCareers, getSkills, getCareer, getCareerDef, canJoinCareer, canPromote, joinCareer, promote, doShift, trainSkill } from "./careers.js";
@@ -103,6 +108,84 @@ renderer.shadowMap.autoUpdate = false;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0xa9d6f2, Q.fogNear, Q.fogFar);
+
+// FEATURE: tap-raycaster for clicking remote player name tags (→ open DM)
+// and area name signs (→ travel there). Detects taps on the canvas that
+// aren't part of a drag (joystick) and raycasts against sprites + remote
+// player groups in the scene.
+const _tapRaycaster = new THREE.Raycaster();
+const _tapPointer = new THREE.Vector2();
+let _tapDown = null;  // { x, y, t }
+canvas.addEventListener("pointerdown", (e) => {
+  _tapDown = { x: e.clientX, y: e.clientY, t: Date.now() };
+});
+canvas.addEventListener("pointerup", (e) => {
+  if (!_tapDown) return;
+  const dx = e.clientX - _tapDown.x, dy = e.clientY - _tapDown.y;
+  const moved = Math.sqrt(dx * dx + dy * dy);
+  const elapsed = Date.now() - _tapDown.t;
+  _tapDown = null;
+  // If the pointer moved >10px or took >500ms, treat as a drag (not a tap)
+  if (moved > 10 || elapsed > 500) return;
+  _handleWorldTap(e.clientX, e.clientY);
+});
+function _handleWorldTap(clientX, clientY) {
+  if (!camera || !scene) return;
+  const rect = canvas.getBoundingClientRect();
+  _tapPointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+  _tapPointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+  _tapRaycaster.setFromCamera(_tapPointer, camera);
+  // Build a list of tappable targets: remote player groups + area name sprites.
+  // Each carries userData that tells us what to do when tapped.
+  const targets = [];
+  // Remote players
+  const remotes = getRemotePlayers();
+  for (const uid in remotes) {
+    const m = remotes[uid];
+    if (m.group && m.group.visible) targets.push(m.group);
+  }
+  // Area name sprites
+  const areaSprites = getAreaNameSprites();
+  for (const [areaId, entry] of areaSprites) {
+    if (entry.sprite && entry.sprite.visible) targets.push(entry.sprite);
+  }
+  if (!targets.length) return;
+  // Raycaster.intersectObjects can hit sprites + groups. We need recursive=true
+  // to hit child meshes of remote player groups (the avatar body).
+  const hits = _tapRaycaster.intersectObjects(targets, true);
+  if (!hits.length) return;
+  // Walk up the parent chain from the first hit until we find a target with userData
+  let obj = hits[0].object;
+  while (obj && !obj.userData?.isRemotePlayer && !obj.userData?.isAreaName) obj = obj.parent;
+  if (!obj) return;
+  const ud = obj.userData;
+  if (ud.isRemotePlayer) {
+    // Tap on a remote player's name tag → open a DM with them
+    const otherUid = ud.playerUid;
+    const otherName = ud.playerName || "Player";
+    if (!otherUid || otherUid === getMyUid()) return;
+    toast("💬 Opening chat with " + otherName + "...");
+    openDM(otherUid, otherName).then((r) => {
+      if (r) {
+        window._openChatId = r.chatId;
+        window._openChatOtherUid = otherUid;
+        window._openChatName = otherName;
+        showPhoneApp("messages");
+      } else {
+        toast("Could not open chat — try again");
+      }
+    }).catch((e) => { console.warn("[tap] openDM failed", e); toast("Could not open chat"); });
+  } else if (ud.isAreaName) {
+    // Tap on an area name sign → travel there
+    const areaId = ud.areaId;
+    const areaName = ud.areaName;
+    const a = getArea(areaId);
+    if (!a) { toast("Unknown area"); return; }
+    player.pos.set(a.x, 0, a.z);
+    player.heading = 0;
+    toast("📍 Travelled to " + areaName);
+  }
+}
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 400);
 const hemi = new THREE.HemisphereLight(0xdfeeff, 0x8a7a55, 1.0); scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff2d6, 1.8);
@@ -110,9 +193,6 @@ sun.castShadow = Q.shadows;
 if (Q.shadows) sun.shadow.mapSize.set(Q.shadowMap, Q.shadowMap);
 Object.assign(sun.shadow.camera, { left: -25, right: 25, top: 25, bottom: -25, near: 1, far: 100 });
 sun.shadow.bias = -0.0004; scene.add(sun, sun.target);
-// FEATURE 3b: init the chunk-streamed area world (roads + NPC houses + lamp posts).
-// The meshes are allocated lazily when an area becomes nearby (in tickAreaWorld).
-initAreaWorld(scene);
 
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
 addEventListener("resize", resize); resize();
@@ -120,6 +200,40 @@ addEventListener("resize", resize); resize();
 const world = buildWorld(scene);
 const traffic = createTraffic(scene);
 let mmDraw = createMinimap($("mm"), world.mapShapes);
+// FEATURE 3b: init the chunk-streamed area world (roads + NPC houses + lamp posts).
+// Pass world.colliders so per-area house footprints can be added as colliders
+// (player can't walk through occupied-plot houses). Must be called AFTER
+// buildWorld() so world.colliders exists.
+initAreaWorld(scene, world.colliders);
+// FEATURE 3c: load real Kaduna road/river/building data from kaduna.json and
+// render it on top of the procedural world. The main Ahmadu Bello Way is
+// filtered out (already rendered by world.js) so we don't double-render.
+// The real map adds: Kawo Road, Waff Road, Independence Way, Muhammad Buhari
+// Way, Tudun Wada Road, Sabon Gari Road, Market Road, Station Road, Barnawa
+// Way, Kakuri Road + the Kaduna River (water polyline on the west side).
+// Credit: "© OpenStreetMap contributors" — see CREDITS.md.
+fetchKadunaData().then((kadunaData) => {
+  if (!kadunaData) { console.warn("[realmap] kaduna.json failed to load — using procedural world only"); return; }
+  // FEATURE: pass world.world (the worldGroup) as the parent so the realmap
+  // meshes hide when the player enters a place (places/manager.js sets
+  // worldGroup.visible = false during enterPlace). Without this, the realmap
+  // roads/buildings stayed visible inside houses — that was the
+  // "I still see buildings inside the houses" bug.
+  const realMap = buildRealMap(scene, kadunaData, world.world);
+  if (realMap) {
+    console.log("[realmap] Built " + kadunaData.roads.length + " roads + " + (kadunaData.buildings?.length || 0) + " buildings + " + (kadunaData.water?.length || 0) + " water polygons from kaduna.json");
+    // Merge the real map's colliders + mapShapes into the procedural world's
+    // so the player can't walk through the new buildings + the minimap shows them.
+    if (realMap.colliders) world.colliders.push(...realMap.colliders);
+    if (realMap.mapShapes) {
+      if (realMap.mapShapes.buildings) world.mapShapes.buildings.push(...realMap.mapShapes.buildings);
+      if (realMap.mapShapes.roads) {
+        world.mapShapes.roads = world.mapShapes.roads || [];
+        world.mapShapes.roads.push(...realMap.mapShapes.roads);
+      }
+    }
+  }
+}).catch((e) => console.warn("[realmap] fetch failed:", e.message));
 const ctl = createControls(canvas, camera, { joy: $("joy"), knob: $("knob") });
 const game = createGameState();
 const npcs = createNPCs(scene);
@@ -2026,6 +2140,40 @@ initAuth((user) => {
   // ---- Init Messages app ----
   const myName = user.displayName || user.email?.split("@")[0] || "Player";
   initMessages(user.uid, myName, toast, () => { _updateUnreadBadge(); if (_showingApp === "messages") showPhoneApp("messages"); });
+  // FEATURE: backfill userProfiles/{uid} for accounts that signed up BEFORE the
+  // search fix. Without this, existing accounts won't show up in search results
+  // (their name is only in players/{uid} which is admin/owner-only readable).
+  // We read players/{uid} (allowed since it's our own node), and if
+  // userProfiles/{uid} is missing, write it from the player's name + username.
+  // Wrapped in an IIFE because the surrounding auth callback isn't async.
+  (async () => {
+    try {
+      const profileSnap = await get(ref(db, "userProfiles/" + user.uid));
+      if (!profileSnap.exists()) {
+        const playerSnap = await get(ref(db, "players/" + user.uid));
+        const p = playerSnap.val() || {};
+        const pname = p.name || myName;
+        const puname = p.username || (user.email ? user.email.split("@")[0] : pname);
+        await set(ref(db, "userProfiles/" + user.uid), {
+          name: pname,
+          username: puname,
+          createdAt: p.ts || Date.now(),
+        });
+        console.log("[auth] Backfilled userProfiles for " + user.uid);
+      } else {
+        // Profile exists — but check if name/username is stale and update if so
+        const profile = profileSnap.val();
+        const playerSnap = await get(ref(db, "players/" + user.uid));
+        const p = playerSnap.val() || {};
+        if ((p.name && p.name !== profile.name) || (p.username && p.username !== profile.username)) {
+          await update(ref(db, "userProfiles/" + user.uid), {
+            name: p.name || profile.name,
+            username: p.username || profile.username,
+          });
+        }
+      }
+    } catch (e) { console.warn("[auth] userProfiles backfill failed:", e.message); }
+  })();
   initFlavour((headline) => { if (headline) toast("📰 " + headline.text); });
   // ---- Sync home entrance to player's plot (so Home button + entrance prompt work) ----
   _syncHomeEntrance();
