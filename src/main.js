@@ -26,6 +26,7 @@ import { ORIGINS, HOUSE_TIERS, getRentInfo, payRent, checkRentDue, applyOrigin, 
 import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
 import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
 import { celebrate } from "./celebrate.js";
+import { perfFrameStart, perfBeforeRender, perfAfterRender } from "./perf.js";
 import { initGraphics, updateSky, tickGraphics, tickShadows, applyQuality, autoDetectQuality, getQuality, QUALITY_PRESETS } from "./graphics.js";
 import { AREAS, getArea, claimPlot, getMyHouse, canPickArea, getPlotPosition } from "./areas.js";
 import { resolvePlayerHouseKey, loadHouse, listenForKnocks, respondToKnock } from "./houses.js";
@@ -38,6 +39,7 @@ import {
   getNearestFriendPlot,
   disposePlotDoors,
 } from "./plots.js";
+import { initAreaWorld, tickAreaWorld, setAreaLampsNight, disposeAreaWorld } from "./areas_world.js";
 import { initMessages, searchUsers, openDM, sendMessage, sendHouseInvite, openChat, closeChat, getChatList, sendMoney, createGroup, leaveGroup, blockUser, reportUser, getChatMeta, cleanupMessages, getPresence, listenToPresence } from "./messages.js";
 import { initEvents, tickNepa, isNepaCut, getNepaStatus, hasPowerBackup, getModifiedDrain, tickMoodlets, addMoodlet, getActiveMoodlets, getConsequences, getWalkSpeedMultiplier, MOODLET_DEFS } from "./events.js";
 import { SKILLS, CAREERS, SHIFT_TONES, initCareers, getSkills, getCareer, getCareerDef, canJoinCareer, canPromote, joinCareer, promote, doShift, trainSkill } from "./careers.js";
@@ -108,6 +110,9 @@ sun.castShadow = Q.shadows;
 if (Q.shadows) sun.shadow.mapSize.set(Q.shadowMap, Q.shadowMap);
 Object.assign(sun.shadow.camera, { left: -25, right: 25, top: 25, bottom: -25, near: 1, far: 100 });
 sun.shadow.bias = -0.0004; scene.add(sun, sun.target);
+// FEATURE 3b: init the chunk-streamed area world (roads + NPC houses + lamp posts).
+// The meshes are allocated lazily when an area becomes nearby (in tickAreaWorld).
+initAreaWorld(scene);
 
 function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
 addEventListener("resize", resize); resize();
@@ -207,10 +212,13 @@ function applyTime() {
     // 1.3 gives a warm pool of light around each lamp post that overlaps with
     // the next one, so the player always has a lit path.
     if (world.lampLights) for (const pl of world.lampLights) { pl.intensity = 1.3; pl.visible = true; }
+    // FEATURE 3b: area lamp posts glow at night too
+    setAreaLampsNight(true);
   } else {
     traffic.setNight(false);
     world.lamps.material.color.set(0x555555);
     if (world.lampLights) for (const pl of world.lampLights) { pl.intensity = 0; pl.visible = false; }
+    setAreaLampsNight(false);
   }
   // FIX: Reposition the lamp pool to the 6 nearest lamp posts around the player.
   // The pool of 6 PointLights follows the player so the streets around them look
@@ -1143,7 +1151,7 @@ window.sendMessage=(uid,name)=>{
 window.saveGame=()=>{game.save?.();toast("Game saved!");};
 window._setGraphicsQuality = (q) => {
   applyQuality(q, { renderer, sun, scene });
-  toast("🎨 Graphics set to " + q.toUpperCase() + ". Reload to see full effect.");
+  toast("🎨 Graphics set to " + q.toUpperCase());
   showPhoneApp("settings");
 };
 // ---- HomeStore: buy furniture + category filter ----
@@ -2298,6 +2306,7 @@ function governor(raw) {
 }
 
 function frame() {
+  perfFrameStart();
   // Nothing runs until the player has signed in / signed up.
   if (!isAuthed && !window.__bypassAuth) { clock.getDelta(); renderer.render(scene, camera); requestAnimationFrame(frame); return; }
   const _raw = clock.getDelta(); governor(_raw);
@@ -2435,11 +2444,15 @@ function frame() {
   // ---- Plot doors tick: render doors at nearby occupied plots + detect knock range (step 2c) ----
   // Only tick when NOT inside a place (otherwise we waste cycles on doors the player can't see)
   if (!active) tickPlotDoors(player.pos.x, player.pos.z);
+  // FEATURE 3b: area world tick — chunk-streamed area roads + houses + lamp posts
+  if (!active) tickAreaWorld(player.pos.x, player.pos.z);
   if (!active) savePos(dt);
   sendPosition(player.pos.x, player.pos.z, player.heading);
   setMyPosition(player.pos.x, player.pos.z);
   mmT += dt; if (mmT > 0.1) { mmT = 0; mmDraw(player.pos.x, player.pos.z, ctl.yaw, player.heading, traffic.positions); }
+  perfBeforeRender();
   renderer.render(scene, camera);
+  perfAfterRender(renderer, getQuality());
   requestAnimationFrame(frame);
 }
 

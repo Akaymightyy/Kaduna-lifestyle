@@ -1,11 +1,9 @@
 // src/config.js — constants. Units are metres. Road runs along X.
 export const ROAD_HALF = 8;
 export const WORLD_HALF_X = 200;
-// FEATURE 3: expanded walkable bounds so players can reach all 14 area plot
-// positions (previously PLAYER_LIMIT_Z = 55 which blocked most areas at Z=60/80).
-// Now players can walk from the road (Z=0) all the way to the area plot grids
-// (cheap areas at Z=±80, rich areas at Z=±40). The ground plane (1400x700)
-// already covers this range — we just removed the artificial clamp.
+// FEATURE 3b: expanded walkable bounds so players can reach all 14 area plot
+// positions (cheap areas at Z=±80, rich areas at Z=±40). The ground plane in
+// world.js is already 1400x700 — plenty of room. This is just the player clamp.
 export const PLAYER_LIMIT_X = 250;
 export const PLAYER_LIMIT_Z = 100;
 export const CROSSINGS = [-80, 0, 80];
