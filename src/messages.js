@@ -41,7 +41,7 @@ export async function openDM(otherUid, otherName) {
   return { chatId, otherUid, otherName };
 }
 
-export async function sendMessage(chatId, text, type = "text", amount = 0) {
+export async function sendMessage(chatId, text, type = "text", amount = 0, extra = null) {
   if (!_uid || !chatId) return;
   const now = Date.now();
   if (now - _lastMsgTime < 500) { _toast?.("Too fast — wait small."); return; }
@@ -51,12 +51,17 @@ export async function sendMessage(chatId, text, type = "text", amount = 0) {
   const msgRef = push(ref(db, "chats/" + chatId + "/messages"));
   const msg = { from: _uid, text, ts: now, type };
   if (amount) msg.amount = amount;
+  // FEATURE: optional `extra` payload for typed messages (e.g. house invites with
+  // the owner's areaId/plotNo/ownerUid/ownerName). Stored under `extra` key.
+  if (extra && typeof extra === "object") msg.extra = extra;
   await set(msgRef, msg);
   const metaSnap = await get(ref(db, "chats/" + chatId + "/meta"));
   const meta = metaSnap.val() || {};
   const members = meta.members || {};
   const updates = {};
-  const preview = type === "money" ? "💸 Sent ₦" + (amount || 0).toLocaleString() : text.slice(0, 50);
+  const preview = type === "money" ? "💸 Sent ₦" + (amount || 0).toLocaleString() :
+                  type === "house_invite" ? "🏠 Sent a house invite" :
+                  text.slice(0, 50);
   for (const memberUid of Object.keys(members)) {
     const isMe = memberUid === _uid;
     updates["userChats/" + memberUid + "/" + chatId + "/lastText"] = (isMe ? "You: " : "") + preview;
@@ -65,6 +70,21 @@ export async function sendMessage(chatId, text, type = "text", amount = 0) {
     if (!isMe) { updates["userChats/" + memberUid + "/" + chatId + "/unread"] = (await getUnread(memberUid, chatId)) + 1; }
   }
   await update(ref(db), updates);
+}
+
+// FEATURE: send a house invite message in a chat. The recipient sees a
+// "🚪 Visit now" button in the chat that calls enterPlaceAsVisitor with
+// the embedded house key.
+export async function sendHouseInvite(chatId, houseInfo) {
+  if (!_uid || !chatId) return false;
+  if (!houseInfo || !houseInfo.areaId || houseInfo.plotNo == null || !houseInfo.ownerUid) return false;
+  await sendMessage(chatId, "🏠 Sent you a house invite", "house_invite", 0, {
+    areaId: houseInfo.areaId,
+    plotNo: houseInfo.plotNo,
+    ownerUid: houseInfo.ownerUid,
+    ownerName: houseInfo.ownerName || "Friend",
+  });
+  return true;
 }
 
 async function getUnread(uid, chatId) {

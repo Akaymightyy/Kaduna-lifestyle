@@ -18,7 +18,7 @@ import { checkDailyReward, getDailyStatus, claimQuestReward } from "./daily.js";
 import { ref, onValue, update } from "firebase/database";
 import { openCreator } from "./creator.js";
 import { outfitsFor, BUILDS, SHOP, SLOT_KEYS } from "./outfits.js";
-import { initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, getActivePlace, enterPlace, exitPlace, sendUIEvent } from "./places/manager.js";
+import { initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, getActivePlace, enterPlace, enterPlaceAsVisitor, exitPlace, sendUIEvent } from "./places/manager.js";
 import { listPlaces, getPlace, updateHomeEntrance } from "./places/registry.js";
 import { initMissions, getActiveMission, getAllChapters, getDailyMissions, getWeeklyMissions, checkStep, createMissionState, claimDailyReward, claimWeeklyReward, setCelebrateCallback } from "./missions.js";
 import { FURNITURE_CATALOG, CATEGORIES, getItem, calcComfort } from "./furniture.js";
@@ -26,9 +26,10 @@ import { ORIGINS, HOUSE_TIERS, getRentInfo, payRent, checkRentDue, applyOrigin, 
 import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
 import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
 import { celebrate } from "./celebrate.js";
-import { initGraphics, updateSky, tickGraphics, applyQuality, autoDetectQuality, getQuality, QUALITY_PRESETS } from "./graphics.js";
+import { initGraphics, updateSky, tickGraphics, tickShadows, applyQuality, autoDetectQuality, getQuality, QUALITY_PRESETS } from "./graphics.js";
 import { AREAS, getArea, claimPlot, getMyHouse, canPickArea, getPlotPosition } from "./areas.js";
-import { initMessages, searchUsers, openDM, sendMessage, openChat, closeChat, getChatList, sendMoney, createGroup, leaveGroup, blockUser, reportUser, getChatMeta, cleanupMessages, getPresence, listenToPresence } from "./messages.js";
+import { resolvePlayerHouseKey, loadHouse } from "./houses.js";
+import { initMessages, searchUsers, openDM, sendMessage, sendHouseInvite, openChat, closeChat, getChatList, sendMoney, createGroup, leaveGroup, blockUser, reportUser, getChatMeta, cleanupMessages, getPresence, listenToPresence } from "./messages.js";
 import { initEvents, tickNepa, isNepaCut, getNepaStatus, hasPowerBackup, getModifiedDrain, tickMoodlets, addMoodlet, getActiveMoodlets, getConsequences, getWalkSpeedMultiplier, MOODLET_DEFS } from "./events.js";
 import { SKILLS, CAREERS, SHIFT_TONES, initCareers, getSkills, getCareer, getCareerDef, canJoinCareer, canPromote, joinCareer, promote, doShift, trainSkill } from "./careers.js";
 import { WISH_POOL, PERKS, initWishes, getTodaysWishes, getWishPoints, getPerks, hasPerk, checkWishes, buyPerk } from "./wishes.js";
@@ -84,6 +85,10 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: Q.antialias, power
 renderer.setPixelRatio(Q.pixelRatio);
 renderer.shadowMap.enabled = Q.shadows;
 renderer.shadowMap.type = THREE.PCFShadowMap;  // cheaper than PCFSoft on phones
+// FIX: turn off autoUpdate so the shadow map doesn't re-render every frame.
+// tickShadows() (in graphics.js) re-renders it only when the player moves
+// >4m or the sun noticeably shifts. This is the #1 lag fix for Medium/High.
+renderer.shadowMap.autoUpdate = false;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0xa9d6f2, Q.fogNear, Q.fogFar);
@@ -116,6 +121,54 @@ const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const INTERIOR_BG = new THREE.Color(0x1a1510);
 let lastClock = "";
 let _graphicsInited = false;
+
+// ---- Lamp pool repositioning (pre-allocated buffers, no per-frame GC) ----
+// PERF: the old code created 30 new objects + a new array every frame, which
+// built up GC pressure until the game stuttered. We pre-allocate one Float32Array
+// of (lampPositions.length × 3) entries: [lx, lz, d2] per lamp. On every re-sort
+// we reuse this array, compute fresh d2 values, then pick the 6 smallest.
+let _lampReposT = 0;
+let _lampDistBuf = null;        // Float32Array [lx0, lz0, d2_0, lx1, lz1, d2_1, ...]
+let _lampIdxBuf = null;         // Uint16Array of indices, sorted by d2 ascending
+function _repositionLampPool(px, pz) {
+  if (!world.lampPositions || !world.lampLights) return;
+  const n = world.lampPositions.length;
+  if (!_lampDistBuf || _lampDistBuf.length !== n * 3) {
+    _lampDistBuf = new Float32Array(n * 3);
+    _lampIdxBuf = new Uint16Array(n);
+  }
+  // Fill distances
+  for (let i = 0; i < n; i++) {
+    const lp = world.lampPositions[i];
+    const lx = lp[0], lz = lp[1];
+    const dx = lx - px, dz = lz - pz;
+    _lampDistBuf[i * 3] = lx;
+    _lampDistBuf[i * 3 + 1] = lz;
+    _lampDistBuf[i * 3 + 2] = dx * dx + dz * dz;
+    _lampIdxBuf[i] = i;
+  }
+  // Selection sort the first 6 entries (k=6, n=~30 — selection sort is O(kn)
+  // which is faster than quicksort for small k).
+  for (let i = 0; i < 6 && i < n; i++) {
+    let minIdx = i;
+    let minD2 = _lampDistBuf[_lampIdxBuf[i] * 3 + 2];
+    for (let j = i + 1; j < n; j++) {
+      const d2 = _lampDistBuf[_lampIdxBuf[j] * 3 + 2];
+      if (d2 < minD2) { minD2 = d2; minIdx = j; }
+    }
+    if (minIdx !== i) {
+      const tmp = _lampIdxBuf[i];
+      _lampIdxBuf[i] = _lampIdxBuf[minIdx];
+      _lampIdxBuf[minIdx] = tmp;
+    }
+  }
+  // Place the 6 nearest lamps onto the 6 PointLights
+  for (let i = 0; i < world.lampLights.length && i < 6; i++) {
+    const lampIdx = _lampIdxBuf[i];
+    const pl = world.lampLights[i];
+    pl.position.set(_lampDistBuf[lampIdx * 3], 6.0, _lampDistBuf[lampIdx * 3 + 1]);
+  }
+}
 function applyTime() {
   // FIX: time scale — 5 real minutes = 1 game hour (was 1 real minute = 1 game hour,
   // which made a full day cycle in 24 minutes — too fast). Now one game day = 2 real hours.
@@ -150,20 +203,20 @@ function applyTime() {
     world.lamps.material.color.set(0x555555);
     if (world.lampLights) for (const pl of world.lampLights) { pl.intensity = 0; pl.visible = false; }
   }
-  // FIX: Reposition the lamp pool to the 6 nearest lamp posts around the player
-  // every frame. The pool of 6 PointLights follows the player so the streets
-  // around them look lit no matter where they walk. Without this, the pool
-  // was stuck at the world origin (0, 6, 0) and only lit a 22m circle there.
+  // FIX: Reposition the lamp pool to the 6 nearest lamp posts around the player.
+  // The pool of 6 PointLights follows the player so the streets around them look
+  // lit no matter where they walk. Without this, the pool was stuck at the world
+  // origin (0, 6, 0) and only lit a 22m circle there.
+  //
+  // PERF: throttled to every 0.3s (was every frame, which created 30 throwaway
+  // objects + 1 array per frame = ~1800 allocations/sec, causing GC pressure
+  // that built up until the game stuttered). Now we reuse one pre-allocated
+  // array + index array, and only re-sort 3x per second.
   if (world.lampPositions && world.lampLights && night) {
-    const px = player.pos.x, pz = player.pos.z;
-    // Compute distance to each lamp post once, pick the 6 nearest
-    const sorted = world.lampPositions
-      .map(([lx, lz, side]) => ({ lx, lz, side, d2: (lx - px) * (lx - px) + (lz - pz) * (lz - pz) }))
-      .sort((a, b) => a.d2 - b.d2);
-    for (let i = 0; i < world.lampLights.length; i++) {
-      const pl = world.lampLights[i];
-      const tgt = sorted[i] || sorted[sorted.length - 1];
-      if (tgt) pl.position.set(tgt.lx, 6.0, tgt.lz);
+    _lampReposT += 1/60; // approx dt — close enough for throttling
+    if (_lampReposT >= 0.3) {
+      _lampReposT = 0;
+      _repositionLampPool(player.pos.x, player.pos.z);
     }
   }
   const hh=Math.floor(hour),mm=Math.floor((hour-hh)*60);
@@ -1319,6 +1372,49 @@ function _renderChatScreen(c, chatId, otherName) {
         div.style.cssText = "text-align:center;margin:6px 0;background:#1a2a1a;border:1px solid #4ade80;border-radius:12px;padding:6px 12px;color:#4ade80;font-size:12px;font-weight:600;";
         div.textContent = "💸 " + (isMe ? "You sent" : "You received") + " ₦" + (m.amount || 0).toLocaleString();
         container.appendChild(div);
+      } else if (m.type === "house_invite") {
+        // FEATURE: house invite bubble — shows the inviter's name + a Visit button.
+        // The button stores the invite payload globally so _visitFromInvite can use it.
+        const div = document.createElement("div");
+        div.style.cssText = "text-align:center;margin:6px 0;background:#1a2a1a;border:1px solid #f2b134;border-radius:12px;padding:8px 12px;color:#f2f2f4;font-size:12px;";
+        const label = document.createElement("div");
+        label.style.cssText = "font-weight:600;margin-bottom:6px;";
+        const inviterName = (m.extra && m.extra.ownerName) || (isMe ? "You" : "Friend");
+        label.textContent = "🏠 " + inviterName + " invited you to their home";
+        div.appendChild(label);
+        if (!isMe && m.extra) {
+          // Only show the Visit button to the invitee (not the inviter)
+          const visitBtn = document.createElement("button");
+          visitBtn.textContent = "🚪 Visit now";
+          visitBtn.style.cssText = "background:#f2b134;color:#000;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font:700 11px Poppins,sans-serif;";
+          // Stash the invite payload on a global so the click handler can read it
+          window._pendingVisitInvite = m.extra;
+          visitBtn.onclick = () => {
+            const invite = window._pendingVisitInvite;
+            if (!invite || !invite.areaId || invite.plotNo == null || !invite.ownerUid) {
+              toast("Stale invite — ask them to send a new one");
+              return;
+            }
+            // Close the phone first so we see the world fade transition
+            closePhone();
+            setTimeout(async () => {
+              try {
+                const ok = await enterPlaceAsVisitor(invite, { pos: player.pos, heading: player.heading });
+                if (!ok) toast("Could not visit — try again");
+              } catch (e) {
+                console.error("Visit failed:", e);
+                toast("Visit failed: " + e.message);
+              }
+            }, 200);
+          };
+          div.appendChild(visitBtn);
+        } else if (isMe) {
+          const note = document.createElement("div");
+          note.style.cssText = "font-size:10px;color:#9b9ba4;margin-top:4px;";
+          note.textContent = "Waiting for them to accept...";
+          div.appendChild(note);
+        }
+        container.appendChild(div);
       } else {
         const div = document.createElement("div");
         div.style.cssText = "display:flex;justify-content:" + (isMe ? "flex-end" : "flex-start") + ";margin:4px 0;";
@@ -1402,8 +1498,36 @@ window._chatSendMoney = () => {
     if (r.ok) updateHUD();
   });
 };
-window._chatInvite = () => { toast("🏠 Invite sent to " + (window._openChatName || "user")); };
-window._chatVisit = () => { toast("🚪 Visiting " + (window._openChatName || "user") + "'s home..."); };
+window._chatInvite = async () => {
+  // FEATURE: send a house invite message in this chat. The recipient sees a
+  // "🚪 Visit now" button that calls enterPlaceAsVisitor with the embedded
+  // house key (areaId, plotNo, ownerUid, ownerName).
+  if (!window._openChatId) { toast("Open a chat first"); return; }
+  const myUid = getMyUid();
+  if (!myUid) { toast("Sign in first"); return; }
+  // Resolve my own house key
+  const houseKey = await resolvePlayerHouseKey(myUid);
+  if (!houseKey) {
+    toast("🏠 You haven't claimed a house yet. Pick an area first.");
+    return;
+  }
+  // Look up the house record (for tier/colors if we want to show them later)
+  const house = await loadHouse(houseKey.areaId, houseKey.plotNo);
+  const ownerName = getMyName() || "Friend";
+  const ok = await sendHouseInvite(window._openChatId, {
+    areaId: houseKey.areaId,
+    plotNo: houseKey.plotNo,
+    ownerUid: myUid,
+    ownerName: ownerName,
+  });
+  if (ok) toast("🏠 Invite sent to " + (window._openChatName || "user"));
+  else toast("Could not send invite — try again");
+};
+window._chatVisit = () => {
+  // Visitor taps the 🚪 Visit now button on a house_invite message.
+  // The actual handler is set per-button in the chat bubble rendering below.
+  toast("Tap the 🚪 Visit button on the latest house invite in this chat");
+};
 window._newGroup = () => {
   const name = prompt("Group name:");
   if (!name) return;
@@ -2084,7 +2208,11 @@ function frame() {
   updateCamera(camera, ctl, player.pos, active ? (active.handle.colliders || []) : world.colliders, dt);
   applyTime();
   if (active) { scene.background = INTERIOR_BG; scene.fog.color.copy(INTERIOR_BG); sun.intensity = 0; hemi.intensity = 0.8; }
-  renderer.shadowMap.autoUpdate = !active;   // no shadow pass inside buildings
+  // FIX: shadow map is updated by tickShadows() (in graphics.js) — only when
+  // the player moves >4m OR the sun noticeably shifts. This is what makes
+  // Medium/High quality not lag. Inside buildings, skip the shadow update
+  // entirely (sun is set to 0 above).
+  if (!active) tickShadows(player.pos.x, player.pos.z, _gameHour(), renderer);
   // ---- Phase 2+9: Calculate modified drain rates (NEPA + moodlets + weather) ----
   const homeHandle = getActivePlace();
   const placedFurniture = homeHandle?.handle?.getPlaced?.() || [];
