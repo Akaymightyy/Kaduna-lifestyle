@@ -26,6 +26,7 @@ import { ORIGINS, HOUSE_TIERS, getRentInfo, payRent, checkRentDue, applyOrigin, 
 import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
 import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
 import { celebrate } from "./celebrate.js";
+import { perfFrameStart, perfBeforeRender, perfAfterRender } from "./perf.js";
 import { initGraphics, updateSky, tickGraphics, tickShadows, applyQuality, autoDetectQuality, getQuality, QUALITY_PRESETS } from "./graphics.js";
 import { AREAS, getArea, claimPlot, getMyHouse, canPickArea, getPlotPosition } from "./areas.js";
 import { resolvePlayerHouseKey, loadHouse, listenForKnocks, respondToKnock } from "./houses.js";
@@ -1143,7 +1144,7 @@ window.sendMessage=(uid,name)=>{
 window.saveGame=()=>{game.save?.();toast("Game saved!");};
 window._setGraphicsQuality = (q) => {
   applyQuality(q, { renderer, sun, scene });
-  toast("🎨 Graphics set to " + q.toUpperCase() + ". Reload to see full effect.");
+  toast("🎨 Graphics set to " + q.toUpperCase());
   showPhoneApp("settings");
 };
 // ---- HomeStore: buy furniture + category filter ----
@@ -2298,6 +2299,7 @@ function governor(raw) {
 }
 
 function frame() {
+  perfFrameStart();
   // Nothing runs until the player has signed in / signed up.
   if (!isAuthed && !window.__bypassAuth) { clock.getDelta(); renderer.render(scene, camera); requestAnimationFrame(frame); return; }
   const _raw = clock.getDelta(); governor(_raw);
@@ -2439,7 +2441,9 @@ function frame() {
   sendPosition(player.pos.x, player.pos.z, player.heading);
   setMyPosition(player.pos.x, player.pos.z);
   mmT += dt; if (mmT > 0.1) { mmT = 0; mmDraw(player.pos.x, player.pos.z, ctl.yaw, player.heading, traffic.positions); }
+  perfBeforeRender();
   renderer.render(scene, camera);
+  perfAfterRender(renderer, getQuality());
   requestAnimationFrame(frame);
 }
 

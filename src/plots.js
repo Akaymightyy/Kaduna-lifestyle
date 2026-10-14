@@ -122,6 +122,7 @@ const _v = new THREE.Vector3();
 const _scl = new THREE.Vector3(1, 1, 1);
 
 export function tickPlotDoors(playerX, playerZ) {
+  if (!_doorMesh) return; // not initialised yet (e.g. before sign-in) — nothing to draw
   _player.x = playerX;
   _player.z = playerZ;
 

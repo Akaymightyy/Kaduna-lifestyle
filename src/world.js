@@ -81,18 +81,18 @@ export function buildWorld(scene) {
   scene.add(world);
 
   // ---- ground ----
-  const ground = new THREE.Mesh(withPat(new THREE.PlaneGeometry(1400, 700), 12), OLP({ color: 0x9aab62 }));
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(1400, 700), new THREE.MeshLambertMaterial({ color: 0x9aab62 }));
   ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
   world.add(ground);
 
   // ---- road ----
-  const asphalt = OLP({ color: 0x3a3d43 });
-  const road = new THREE.Mesh(withPat(new THREE.PlaneGeometry(WORLD_HALF_X * 2 + 200, ROAD_HALF * 2), 13), asphalt);
+  const asphalt = new THREE.MeshLambertMaterial({ color: 0x3a3d43 }); // flat planes: plain Lambert (cheapest)
+  const road = new THREE.Mesh(new THREE.PlaneGeometry(WORLD_HALF_X * 2 + 200, ROAD_HALF * 2), asphalt);
   road.rotation.x = -Math.PI / 2; road.position.y = 0.01; road.receiveShadow = true;
   world.add(road);
 
   for (const sx of SIDE_STREETS) {
-    const sp = new THREE.Mesh(withPat(new THREE.PlaneGeometry(12, 120), 13), asphalt);
+    const sp = new THREE.Mesh(new THREE.PlaneGeometry(12, 120), asphalt);
     sp.rotation.x = -Math.PI / 2; sp.position.set(sx, 0.012, 0); sp.receiveShadow = true;
     world.add(sp);
   }

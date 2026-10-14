@@ -249,6 +249,10 @@ export function applyQuality(q, { renderer, sun, scene }) {
   _quality = q;
   try { setArtQuality(q); } catch (e) {}
 
+  // The sky shader / clouds / sun disc are the heaviest "pretty" parts: switch them off live on Low (no reload needed)
+  if (_sky) _sky.visible = !!preset.skyShader;
+  if (_clouds) _clouds.visible = !!preset.clouds;
+  if (_sunSphere) _sunSphere.visible = q === "high";
   renderer.setPixelRatio(Math.min(preset.pixelRatio, devicePixelRatio));
   renderer.shadowMap.enabled = preset.shadows;
   if (preset.shadows && sun) {
