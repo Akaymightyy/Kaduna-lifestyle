@@ -29,7 +29,7 @@ import { celebrate } from "./celebrate.js";
 import { perfFrameStart, perfBeforeRender, perfAfterRender } from "./perf.js";
 import { initGraphics, updateSky, tickGraphics, tickShadows, applyQuality, autoDetectQuality, getQuality, QUALITY_PRESETS } from "./graphics.js";
 import { AREAS, getArea, claimPlot, getMyHouse, canPickArea, getPlotPosition } from "./areas.js";
-import { resolvePlayerHouseKey, loadHouse, listenForKnocks, respondToKnock } from "./houses.js";
+import { resolvePlayerHouseKey, loadHouse, setHouseLocked, listenForKnocks, respondToKnock } from "./houses.js";
 import {
   initPlotDoors,
   tickPlotDoors,
@@ -751,6 +751,34 @@ function _showPhoneApp(appId) {
   if(appId==="realestate"){
     const rentInfo = getRentInfo(game.state);
     let h = '<div style="font-size:15px;margin-bottom:8px;font-weight:700;color:#f2f2f4;">🏡 Real Estate & Rent</div>';
+    // ---- FEATURE 4/5: "My House" card — shows current area + plot + tier + lock toggle ----
+    if (game.state.homeArea && game.state.homePlot != null) {
+      const myArea = getArea(game.state.homeArea);
+      const myTier = HOUSE_TIERS.find(t => t.tier === (game.state.homeTier || 1));
+      h += '<div style="background:#1a2a1a;border:2px solid #4ade80;border-radius:12px;padding:12px;margin-bottom:12px;">';
+      h += '<div style="font-size:13px;font-weight:700;color:#4ade80;margin-bottom:4px;">🏠 Your House</div>';
+      h += '<div style="font-size:12px;color:#f2f2f4;">📍 ' + (myArea ? myArea.name : 'Unknown') + ' · Plot #' + game.state.homePlot + '</div>';
+      h += '<div style="font-size:11px;color:#9b9ba4;margin-top:2px;">' + (myTier ? myTier.emoji + ' ' + myTier.name : 'Tier ' + (game.state.homeTier || 1)) + '</div>';
+      // Lock toggle — async fetches the current locked state from Firebase on each render
+      h += '<div id="my-house-lock-row" style="margin-top:8px;font-size:11px;color:#9b9ba4;">Loading lock status...</div>';
+      h += '</div>';
+      // Fetch the locked state async + render the toggle button
+      (async () => {
+        try {
+          const house = await loadHouse(game.state.homeArea, game.state.homePlot);
+          const locked = house ? !!house.locked : false;
+          const row = document.getElementById("my-house-lock-row");
+          if (row) {
+            row.innerHTML = '<button onclick="window._toggleHouseLock(' + (locked ? 'false' : 'true') + ')" style="width:100%;background:' + (locked ? '#e11d48' : '#4ade80') + ';color:#000;border:none;border-radius:8px;padding:8px;cursor:pointer;font-size:12px;font-weight:600;">' + (locked ? '🔒 Locked — tap to UNLOCK' : '🔓 Unlocked — tap to LOCK') + '</button>';
+          }
+        } catch (e) {
+          const row = document.getElementById("my-house-lock-row");
+          if (row) row.textContent = 'Could not load lock status';
+        }
+      })();
+    } else {
+      h += '<div style="background:#3a1a1a;border:1px solid #e11d48;border-radius:10px;padding:10px;margin-bottom:12px;font-size:12px;color:#e11d48;text-align:center;">You haven\'t picked an area yet. <button onclick="window._showAreaPicker()" style="margin-top:6px;background:#f2b134;color:#000;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:11px;font-weight:600;">Pick an area now</button></div>';
+    }
     // Rent status
     h += '<div style="background:'+(rentInfo.due?'#3a1a1a':'#1a2a1a')+';border-radius:10px;padding:10px;margin-bottom:10px;border:1px solid '+(rentInfo.due?'#e11d48':'#2e7d4f')+';">';
     h += '<div style="font-size:12px;font-weight:600;color:'+(rentInfo.due?'#e11d48':'#4ade80')+';">'+(rentInfo.due?'🔔 RENT DUE!':'✅ Rent paid')+'</div>';
@@ -760,22 +788,33 @@ function _showPhoneApp(appId) {
     h += '</div>';
     if (rentInfo.due) h += '<button onclick="window._payRent()" style="width:100%;margin-top:6px;background:#f2b134;color:#000;border:none;border-radius:8px;padding:8px;cursor:pointer;font-size:12px;font-weight:600;">Pay Rent ₦'+rentInfo.amount.toLocaleString()+'</button>';
     h += '</div>';
-    // Housing tiers
-    h += '<div style="font-size:12px;font-weight:600;margin-bottom:6px;color:#f2b134;">🏠 Housing Tiers</div>';
-    h += '<div style="font-size:11px;color:#6b7280;margin-bottom:8px;">Balance: ₦'+game.state.money.toLocaleString()+'</div>';
-    for (const ht of HOUSE_TIERS) {
-      const canAfford = game.state.money >= ht.buyPrice;
-      const isCurrent = (game.state.homeTier || 1) === ht.tier;
-      h += '<div style="display:flex;align-items:center;gap:8px;padding:10px;background:#17181b;border-radius:10px;margin-bottom:6px;'+(isCurrent?'border:2px solid #4ade80;':'')+'">';
-      h += '<span style="font-size:24px;">'+ht.emoji+'</span>';
-      h += '<div style="flex:1;"><div style="font-size:13px;font-weight:600;color:#f2f2f4;">'+ht.name+(isCurrent?' ✅':'')+'</div>';
-      h += '<div style="font-size:10px;color:#9b9ba4;">Rent ₦'+ht.rent+'/wk · Buy ₦'+ht.buyPrice.toLocaleString()+' · Guests: '+ht.guestCap+'</div></div>';
-      if (isCurrent) h += '<span style="font-size:10px;color:#4ade80;">Current</span>';
-      else if (canAfford) h += '<button onclick="window._buyHouse('+ht.tier+','+ht.buyPrice+',\''+ht.name.replace(/'/g,"")+'\')" style="background:#f2b134;color:#000;border:none;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:11px;font-weight:600;">Buy</button>';
-      else h += '<span style="font-size:10px;color:#6b7280;">₦'+ht.buyPrice.toLocaleString()+'</span>';
-      h += '</div>';
+    // ---- FEATURE 5: Move to a new area ----
+    h += '<div style="font-size:12px;font-weight:600;margin:14px 0 6px;color:#f2b134;">🏠 Move to a New Area</div>';
+    h += '<div style="font-size:11px;color:#6b7280;margin-bottom:8px;">Balance: ₦'+game.state.money.toLocaleString()+' · Moving keeps your furniture (goes to storage)</div>';
+    const tiers = [
+      { id: "cheap",  label: "Budget Areas",   color: "#4ade80" },
+      { id: "middle", label: "Mid-Tier Areas", color: "#f2b134" },
+      { id: "rich",   label: "GRA / Upscale",  color: "#60a5fa" },
+    ];
+    for (const t of tiers) {
+      const areaList = AREAS.filter(a => a.tier === t.id);
+      if (!areaList.length) continue;
+      h += '<div style="font-size:11px;font-weight:700;color:'+t.color+';margin:8px 0 4px;">'+t.label+'</div>';
+      for (const a of areaList) {
+        const isCurrent = game.state.homeArea === a.id;
+        const canAfford = game.state.money >= a.buyPrice;
+        const canPick = canPickArea(game.state.origin, a);
+        h += '<div style="display:flex;align-items:center;gap:8px;padding:8px;background:#17181b;border-radius:8px;margin-bottom:5px;'+(isCurrent?'border:2px solid #4ade80;':'')+'">';
+        h += '<div style="flex:1;"><div style="font-size:12px;font-weight:600;color:#f2f2f4;">'+a.name+(isCurrent?' ✅':'')+'</div>';
+        h += '<div style="font-size:10px;color:#9b9ba4;">Rent ₦'+a.rentPrice.toLocaleString()+'/wk · Buy ₦'+a.buyPrice.toLocaleString()+'</div></div>';
+        if (isCurrent) h += '<span style="font-size:10px;color:#4ade80;">Current</span>';
+        else if (!canPick) h += '<span style="font-size:10px;color:#6b7280;">🔒 Origin</span>';
+        else if (canAfford) h += '<button onclick="window._moveToArea(\''+a.id+'\')" style="background:#f2b134;color:#000;border:none;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:11px;font-weight:600;">Move</button>';
+        else h += '<span style="font-size:10px;color:#6b7280;">₦'+a.buyPrice.toLocaleString()+'</span>';
+        h += '</div>';
+      }
     }
-    h += '<div style="font-size:11px;color:#6b7280;margin-top:8px;text-align:center;">💡 Walk to 🏠 My Home to enter. Rent due every 10 min.</div>';
+    h += '<div style="font-size:11px;color:#6b7280;margin-top:12px;text-align:center;">💡 Walk to 🏠 My Home to enter. Lock your house so visitors must knock.</div>';
     h += backBtn;
     c.innerHTML = h;
     return;
@@ -1845,6 +1884,31 @@ window._moveToArea = async (areaId) => {
   const pos = getPlotPosition(area, r.plotNo);
   player.pos.set(pos.x, 0, pos.z + 4); player.heading = Math.PI;
   updateHUD(); showPhoneApp("realestate");
+};
+// FEATURE 5: Toggle the player's house locked state. When locked, visitors
+// must knock + be accepted. When unlocked, visitors enter directly.
+window._toggleHouseLock = async (lock) => {
+  const uid = getMyUid();
+  if (!uid) { toast("Sign in first"); return; }
+  if (!game.state.homeArea || game.state.homePlot == null) { toast("Pick an area first"); return; }
+  try {
+    await setHouseLocked(game.state.homeArea, game.state.homePlot, lock);
+    toast(lock ? "🔒 House locked — visitors must knock" : "🔓 House unlocked — visitors can enter directly");
+    showPhoneApp("realestate");  // refresh the UI to show the new state
+  } catch (e) {
+    console.warn("[lock] toggle failed:", e.message);
+    toast("Could not toggle lock — try again");
+  }
+};
+// FEATURE 4: Surface the area picker from the Real Estate app (for users who
+// haven't picked an area yet, or want to re-open the picker).
+window._showAreaPicker = () => {
+  // If the user already has a homeArea, the picker is for re-picking (which
+  // actually means moving — confirm first).
+  if (game.state.homeArea) {
+    if (!confirm("You already live in " + (getArea(game.state.homeArea)?.name || "your area") + ". Open the area picker to MOVE?")) return;
+  }
+  _showAreaScreen();
 };
 // ---- Money Hunt HUD update (called by moneyhunt.js after a successful claim) ----
 function _updateHuntHud() {
