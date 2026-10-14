@@ -93,6 +93,10 @@ export async function claimPlot(areaId, uid, name, origin) {
           ownerName: name,
           tier,
           colors: { wall: area.wallCol, roof: area.roofCol, door: 0x4a3a2a },
+          // FEATURE: furniture now lives inside the house record so visitors can read it.
+          // The empty array is the initial state — furniture gets added by home.js
+          // when the player places items.
+          furniture: [],
           locked: false,
           forSale: false,
           forRent: false,
