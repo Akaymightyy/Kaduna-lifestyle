@@ -22,6 +22,16 @@ import { getMyUid } from "../multiplayer.js";
 // _saveFurniture were fire-and-forget with no error handling, causing silent save failures.
 import { ref, get, set } from "firebase/database";
 import { db } from "../firebase.js";
+// FEATURE: per-account house record — furniture now lives at
+// houses/{areaId}/{plotNo}/furniture so visitors can read it (visitors can't
+// read players/{otherUid}). Migration from the old path is handled automatically.
+import {
+  resolvePlayerHouseKey,
+  loadHouseFurniture,
+  saveHouseFurniture,
+  returnToStorage as houseReturnToStorage,
+  migrateFurnitureIfNeeded,
+} from "../houses.js";
 
 // Tier -> room dimensions + wall color + floor color + description
 const TIER_CONFIG = {
@@ -95,24 +105,26 @@ export async function build(scene, ctx) {
   group.add(_furnitureGroup);
   let _placedFurniture = [];
 
-  // ---- Load THIS player's placed furniture from Firebase ----
-  // FIX: Use static imports (already imported at top of file) instead of dynamic imports.
-  // FIX: Ensure _placedFurniture is always an array (Firebase can return an object with
-  // non-sequential keys when items have been removed, which breaks .push() and for...of).
+  // ---- Load THIS player's placed furniture from the HOUSE RECORD (not the player node) ----
+  // FEATURE: furniture now lives at houses/{areaId}/{plotNo}/furniture so visitors
+  // can read it (visitors can't read players/{otherUid} — blocked by Firebase rules).
+  // First we migrate any old furniture from players/{uid}/homeFurniture if needed.
+  //
+  // If the player hasn't claimed a plot yet (no homeArea/homePlot), we fall back
+  // to the old path so existing accounts without a plot aren't wiped.
   const uid = getMyUid();
-  if (uid) {
+  const houseKey = await resolvePlayerHouseKey(uid);  // { areaId, plotNo, area } | null
+  let _houseAreaId = null, _housePlotNo = null;
+  if (houseKey) {
+    _houseAreaId = houseKey.areaId;
+    _housePlotNo = houseKey.plotNo;
+    // One-time migration: copy players/{uid}/homeFurniture → houses/{area}/{plot}/furniture
+    await migrateFurnitureIfNeeded(uid, _houseAreaId, _housePlotNo);
+  }
+  if (uid && _houseAreaId && _housePlotNo != null) {
     try {
-      const snap = await get(ref(db, "players/" + uid + "/homeFurniture"));
-      const val = snap.val();
-      // FIX: Convert Firebase object to array if needed (handles non-sequential keys)
-      if (Array.isArray(val)) {
-        _placedFurniture = val;
-      } else if (val && typeof val === "object") {
-        _placedFurniture = Object.values(val);
-      } else {
-        _placedFurniture = [];
-      }
-      console.log("[home] Loaded " + _placedFurniture.length + " furniture items for uid=" + uid);
+      _placedFurniture = await loadHouseFurniture(_houseAreaId, _housePlotNo);
+      console.log(`[home] Loaded ${_placedFurniture.length} furniture items from houses/${_houseAreaId}/${_housePlotNo}`);
       _rebuildFurniture();
       if (_placedFurniture.length > 0) {
         const comfort = calcComfort(_placedFurniture);
@@ -123,6 +135,22 @@ export async function build(scene, ctx) {
     } catch (e) {
       console.error("[home] Could not load furniture:", e.message);
       ctx.toast("⚠️ Could not load furniture: " + e.message);
+    }
+  } else if (uid) {
+    // Player hasn't claimed a plot yet — fall back to the old per-player path
+    // so existing accounts aren't left with an empty room.
+    try {
+      const snap = await get(ref(db, "players/" + uid + "/homeFurniture"));
+      const val = snap.val();
+      if (Array.isArray(val)) _placedFurniture = val;
+      else if (val && typeof val === "object") _placedFurniture = Object.values(val);
+      else _placedFurniture = [];
+      console.warn("[home] No house plot claimed — falling back to players/{uid}/homeFurniture (" + _placedFurniture.length + " items).");
+      _rebuildFurniture();
+      ctx.toast("🏠 " + cfg.name + (houseKey ? "" : " — pick an area to save furniture properly"));
+    } catch (e) {
+      console.error("[home] Fallback load failed:", e.message);
+      ctx.toast("🏠 " + cfg.name + " — pick an area to start furnishing");
     }
   } else {
     console.warn("[home] getMyUid() returned null — furniture will not load");
@@ -270,32 +298,43 @@ export async function build(scene, ctx) {
     }
   };
 
-  // FIX: Use static imports + proper async/await instead of fire-and-forget .then() chain
+  // FEATURE: Return an item to the OWNER's storage (called from the remove action).
+  // Storage stays per-player (it's the player's inventory, not the house's).
   async function _returnToStorage(itemId, color) {
     const uid = getMyUid();
     if (!uid) return;
     try {
       const snap = await get(ref(db, "players/" + uid + "/storage"));
       const storage = snap.val() || [];
-      storage.push({ id: itemId, color: color || getItem(itemId)?.colors?.[0] });
-      await set(ref(db, "players/" + uid + "/storage"), storage);
+      const cleaned = Array.isArray(storage) ? storage : Object.values(storage);
+      cleaned.push({ id: itemId, color: color || getItem(itemId)?.colors?.[0] });
+      await set(ref(db, "players/" + uid + "/storage"), cleaned);
       console.log("[home] Returned " + itemId + " to storage");
     } catch (e) { console.error("[home] _returnToStorage failed:", e.message); }
   }
 
-  // FIX: Make _saveFurniture async with proper try/catch and error logging.
-  // Was fire-and-forget with .then() chains — if any step failed, the save silently
-  // didn't happen and no error was shown to the player.
+  // FEATURE: Save the furniture array to the HOUSE RECORD (not players/{uid}).
+  // Falls back to the old path if the player hasn't claimed a plot yet.
   async function _saveFurniture() {
     const uid = getMyUid();
     if (!uid) { console.error("[home] _saveFurniture: no uid — furniture NOT saved"); ctx.toast("⚠️ Could not save furniture (no user)"); return; }
+    const cleanArray = _placedFurniture.map(f => ({ id: f.id, x: f.x || 0, z: f.z || 0, rot: f.rot || 0, color: f.color }));
+    // Try the new house record path first
+    if (_houseAreaId && _housePlotNo != null) {
+      const ok = await saveHouseFurniture(_houseAreaId, _housePlotNo, cleanArray);
+      if (ok) {
+        console.log(`[home] Saved ${cleanArray.length} furniture items to houses/${_houseAreaId}/${_housePlotNo}`);
+        return;
+      }
+      // Save failed — fall through to old path as a safety net
+      console.warn("[home] saveHouseFurniture failed — trying old path as fallback");
+    }
+    // Fallback: old per-player path
     try {
-      // FIX: Ensure we save a clean array (no gaps, no non-sequential keys)
-      const cleanArray = _placedFurniture.map(f => ({ id: f.id, x: f.x || 0, z: f.z || 0, rot: f.rot || 0, color: f.color }));
       await set(ref(db, "players/" + uid + "/homeFurniture"), cleanArray);
-      console.log("[home] Saved " + cleanArray.length + " furniture items for uid=" + uid);
+      console.log("[home] Saved " + cleanArray.length + " furniture items (FALLBACK path)");
     } catch (e) {
-      console.error("[home] _saveFurniture FAILED:", e.message);
+      console.error("[home] _saveFurniture FAILED (both paths):", e.message);
       ctx.toast("⚠️ Could not save furniture: " + e.message);
     }
   }
