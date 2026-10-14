@@ -9,7 +9,7 @@
 
 import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
-import { rng } from "../config.js";
+import { rng, REAL_MS_PER_GAME_HOUR } from "../config.js";
 
 let _built = false;
 let _cache = null;
@@ -295,8 +295,9 @@ function _checkDress(ctx) {
 }
 
 function _checkSalat(ctx) {
-  // gameHour = (Date.now() / 60000) % 24
-  const gameHour = (Date.now() / 60000) % 24;
+  // FIX: same time scale as main.js — 5 real min = 1 game hour
+  // (was Date.now() / 60000, which made salat times trigger 5x too often)
+  const gameHour = (Date.now() / REAL_MS_PER_GAME_HOUR) % 24;
   for (const s of SALAT_TIMES) {
     if (Math.abs(gameHour - s.hour) < 0.05) {
       // It's salat time
