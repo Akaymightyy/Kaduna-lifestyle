@@ -28,7 +28,16 @@ import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
 import { celebrate } from "./celebrate.js";
 import { initGraphics, updateSky, tickGraphics, tickShadows, applyQuality, autoDetectQuality, getQuality, QUALITY_PRESETS } from "./graphics.js";
 import { AREAS, getArea, claimPlot, getMyHouse, canPickArea, getPlotPosition } from "./areas.js";
-import { resolvePlayerHouseKey, loadHouse } from "./houses.js";
+import { resolvePlayerHouseKey, loadHouse, listenForKnocks, respondToKnock } from "./houses.js";
+import {
+  initPlotDoors,
+  tickPlotDoors,
+  knockOnNearest,
+  listenForKnockReplyNow,
+  getUnlockedVisitInfo,
+  getNearestFriendPlot,
+  disposePlotDoors,
+} from "./plots.js";
 import { initMessages, searchUsers, openDM, sendMessage, sendHouseInvite, openChat, closeChat, getChatList, sendMoney, createGroup, leaveGroup, blockUser, reportUser, getChatMeta, cleanupMessages, getPresence, listenToPresence } from "./messages.js";
 import { initEvents, tickNepa, isNepaCut, getNepaStatus, hasPowerBackup, getModifiedDrain, tickMoodlets, addMoodlet, getActiveMoodlets, getConsequences, getWalkSpeedMultiplier, MOODLET_DEFS } from "./events.js";
 import { SKILLS, CAREERS, SHIFT_TONES, initCareers, getSkills, getCareer, getCareerDef, canJoinCareer, canPromote, joinCareer, promote, doShift, trainSkill } from "./careers.js";
@@ -2019,6 +2028,14 @@ initAuth((user) => {
   // ---- Also write player's name to economy node so admin shows it ----
   const playerName = user.displayName || user.email?.split("@")[0] || "Player";
   update(ref(db, "economy/" + user.uid), { name: playerName, balance: game.state.money });
+  // FEATURE: per-plot world doors + knock/invite flow (step 2c).
+  // initPlotDoors subscribes to nearby areas' house records and renders door
+  // markers. listenForKnocks lets the OWNER hear knocks from visitors in
+  // real-time and respond with accept/deny prompts.
+  try {
+    initPlotDoors(scene, user.uid, toast, (info) => _onPlotPromptUpdate(info));
+    listenForKnocks(user.uid, (knocks) => _onIncomingKnocks(knocks));
+  } catch (e) { console.warn("[plots] init failed", e); }
   // ---- Sync look across devices: the account's saved outfit in Firebase WINS over this device's local copy ----
   let _lookFirst = true;
   onValue(ref(db, "players/" + user.uid + "/look"), (snap) => {
@@ -2090,6 +2107,131 @@ function _syncHomeEntrance() {
   updateHomeEntrance(pos.x, pos.z + 4, Math.PI);
   // Update minimap home marker
   _updateHomeMinimapMarker(pos.x, pos.z);
+}
+
+// ---- FEATURE (step 2c): per-plot knock/enter prompt ----
+// Fires when the player walks within KNOCK_RANGE of a friend's plot door.
+// Shows a prompt like "🏠 @username's Home — Press here to knock" (locked)
+// or "Press here to enter" (unlocked).
+let _plotPromptEl = null;
+let _currentPlotInfo = null;  // { areaId, plotNo, ownerUid, ownerName, locked, dist }
+function _onPlotPromptUpdate(info) {
+  _currentPlotInfo = info;
+  if (!info) { if (_plotPromptEl) _plotPromptEl.style.display = "none"; return; }
+  if (!_plotPromptEl) {
+    _plotPromptEl = document.createElement("div");
+    _plotPromptEl.id = "plot-knock-prompt";
+    _plotPromptEl.style.cssText =
+      "position:fixed;left:50%;bottom:calc(38% + env(safe-area-inset-bottom));" +
+      "transform:translateX(-50%);background:rgba(15,77,58,.92);color:#fff;" +
+      "padding:10px 18px;border-radius:14px;font:600 13px Poppins,sans-serif;" +
+      "box-shadow:0 4px 14px rgba(0,0,0,.3);display:none;z-index:30;" +
+      "border:1px solid rgba(255,255,255,.2);text-align:center;max-width:90vw;cursor:pointer;";
+    document.body.appendChild(_plotPromptEl);
+    _plotPromptEl.addEventListener("click", () => _onPlotPromptTap());
+  }
+  if (info.locked) {
+    _plotPromptEl.innerHTML = '🏠 <b style="color:#f2b134;">' + info.ownerName + '</b>\'s Home<br><span style="color:#4ade80;font-weight:600;">Press here to knock</span>';
+  } else {
+    _plotPromptEl.innerHTML = '🚪 Enter <b style="color:#f2b134;">' + info.ownerName + '</b>\'s Home &nbsp;<span style="color:#4ade80;font-weight:600;">Press here 🟢</span>';
+  }
+  _plotPromptEl.style.display = "block";
+}
+function _onPlotPromptTap() {
+  if (!_currentPlotInfo) return;
+  const info = _currentPlotInfo;
+  if (info.locked) {
+    // Knock flow
+    const myName = getMyName() || "Visitor";
+    knockOnNearest(myName).then((ok) => {
+      if (!ok) return;
+      // Listen for the reply
+      listenForKnockReplyNow((reply) => {
+        if (reply.status === "accepted") {
+          toast("✅ " + reply.ownerName + " accepted! Entering...");
+          // Enter as visitor using the house info from the current plot
+          if (_currentPlotInfo) {
+            setTimeout(async () => {
+              try {
+                await enterPlaceAsVisitor({
+                  ownerUid: _currentPlotInfo.ownerUid,
+                  ownerName: _currentPlotInfo.ownerName,
+                  areaId: _currentPlotInfo.areaId,
+                  plotNo: _currentPlotInfo.plotNo,
+                }, { pos: player.pos, heading: player.heading });
+              } catch (e) { console.error(e); toast("Visit failed: " + e.message); }
+            }, 800);
+          }
+        } else if (reply.status === "denied") {
+          toast("🚫 " + reply.ownerName + " said not now.");
+        } else if (reply.status === "timeout") {
+          toast("⏳ " + reply.ownerName + " didn't answer. Try again later.");
+        }
+      });
+    });
+  } else {
+    // Unlocked — enter directly
+    const visitInfo = getUnlockedVisitInfo();
+    if (!visitInfo) { toast("Could not enter — try again"); return; }
+    enterPlaceAsVisitor(visitInfo, { pos: player.pos, heading: player.heading })
+      .catch(e => { console.error(e); toast("Visit failed: " + e.message); });
+  }
+}
+
+// ---- FEATURE (step 2c): owner-side knock prompt ----
+// Fires when a visitor knocks on OUR house. Shows a toast + Accept/Deny buttons.
+let _knockPromptEl = null;
+let _knockPromptT = 0;
+function _onIncomingKnocks(knocks) {
+  // knocks = { knockId: { visitorUid, visitorName, ts, areaId, plotNo, status } }
+  // We only show the prompt for PENDING knocks we haven't seen yet.
+  for (const [knockId, knock] of Object.entries(knocks)) {
+    if (knock.status !== "pending") continue;
+    if (window._seenKnocks && window._seenKnocks.has(knockId)) continue;
+    window._seenKnocks = window._seenKnocks || new Set();
+    window._seenKnocks.add(knockId);
+    _showOwnerKnockPrompt(knockId, knock);
+  }
+}
+function _showOwnerKnockPrompt(knockId, knock) {
+  if (!_knockPromptEl) {
+    _knockPromptEl = document.createElement("div");
+    _knockPromptEl.id = "owner-knock-prompt";
+    _knockPromptEl.style.cssText =
+      "position:fixed;left:50%;top:calc(20% + env(safe-area-inset-top));" +
+      "transform:translateX(-50%);background:rgba(15,77,58,.95);color:#fff;" +
+      "padding:14px 18px;border-radius:16px;font:600 13px Poppins,sans-serif;" +
+      "box-shadow:0 4px 18px rgba(0,0,0,.5);display:flex;flex-direction:column;" +
+      "align-items:center;gap:10px;z-index:40;border:2px solid #f2b134;max-width:90vw;";
+    document.body.appendChild(_knockPromptEl);
+  }
+  _knockPromptEl.innerHTML =
+    '<div style="text-align:center;">🚪 <b style="color:#f2b134;">' + (knock.visitorName || "Visitor") +
+    '</b> is knocking on your door</div>' +
+    '<div style="display:flex;gap:8px;">' +
+    '<button id="kp-accept" style="background:#4ade80;color:#000;border:none;border-radius:8px;padding:8px 18px;cursor:pointer;font:700 12px Poppins,sans-serif;">✓ Accept</button>' +
+    '<button id="kp-deny" style="background:#e11d48;color:#fff;border:none;border-radius:8px;padding:8px 18px;cursor:pointer;font:700 12px Poppins,sans-serif;">✕ Deny</button>' +
+    '</div>';
+  _knockPromptEl.style.display = "flex";
+  const acceptBtn = document.getElementById("kp-accept");
+  const denyBtn = document.getElementById("kp-deny");
+  acceptBtn.onclick = () => {
+    respondToKnock(getMyUid(), knockId, true).then(() => {
+      toast("✅ You accepted " + (knock.visitorName || "visitor"));
+    });
+    _knockPromptEl.style.display = "none";
+  };
+  denyBtn.onclick = () => {
+    respondToKnock(getMyUid(), knockId, false).then(() => {
+      toast("🚫 You denied " + (knock.visitorName || "visitor"));
+    });
+    _knockPromptEl.style.display = "none";
+  };
+  // Auto-hide after 30 seconds if no response
+  clearTimeout(_knockPromptT);
+  _knockPromptT = setTimeout(() => {
+    if (_knockPromptEl) _knockPromptEl.style.display = "none";
+  }, 30000);
 }
 function _updateHomeMinimapMarker(x, z) {
   // The minimap draws markers from MAP_LOCATIONS. We add/update a "My Home" marker.
@@ -2290,6 +2432,9 @@ function frame() {
   tickMoneyHunt(Date.now());
   // ---- Graphics tick: cloud drift ----
   tickGraphics(dt);
+  // ---- Plot doors tick: render doors at nearby occupied plots + detect knock range (step 2c) ----
+  // Only tick when NOT inside a place (otherwise we waste cycles on doors the player can't see)
+  if (!active) tickPlotDoors(player.pos.x, player.pos.z);
   if (!active) savePos(dt);
   sendPosition(player.pos.x, player.pos.z, player.heading);
   setMyPosition(player.pos.x, player.pos.z);
