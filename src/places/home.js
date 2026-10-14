@@ -17,6 +17,10 @@ import * as THREE from "three";
 import { box, mergedMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { getItem, makeFurnitureMesh, calcComfort } from "../furniture.js";
 import { getMyUid } from "../multiplayer.js";
+// FIX: Use static imports instead of dynamic imports — dynamic import chains in
+// _saveFurniture were fire-and-forget with no error handling, causing silent save failures.
+import { ref, get, set } from "firebase/database";
+import { db } from "../firebase.js";
 
 // Tier -> room dimensions + wall color + floor color + description
 const TIER_CONFIG = {
@@ -88,14 +92,23 @@ export async function build(scene, ctx) {
   let _placedFurniture = [];
 
   // ---- Load THIS player's placed furniture from Firebase ----
-  // getMyUid() is imported from multiplayer.js — identifies the current player.
+  // FIX: Use static imports (already imported at top of file) instead of dynamic imports.
+  // FIX: Ensure _placedFurniture is always an array (Firebase can return an object with
+  // non-sequential keys when items have been removed, which breaks .push() and for...of).
   const uid = getMyUid();
   if (uid) {
     try {
-      const { ref, get } = await import("firebase/database");
-      const { db } = await import("../firebase.js");
       const snap = await get(ref(db, "players/" + uid + "/homeFurniture"));
-      _placedFurniture = snap.val() || [];
+      const val = snap.val();
+      // FIX: Convert Firebase object to array if needed (handles non-sequential keys)
+      if (Array.isArray(val)) {
+        _placedFurniture = val;
+      } else if (val && typeof val === "object") {
+        _placedFurniture = Object.values(val);
+      } else {
+        _placedFurniture = [];
+      }
+      console.log("[home] Loaded " + _placedFurniture.length + " furniture items for uid=" + uid);
       _rebuildFurniture();
       if (_placedFurniture.length > 0) {
         const comfort = calcComfort(_placedFurniture);
@@ -103,7 +116,10 @@ export async function build(scene, ctx) {
       } else {
         ctx.toast("🏠 " + cfg.name + " — " + cfg.desc);
       }
-    } catch (e) { console.warn("Could not load furniture:", e.message); ctx.toast("⚠️ Could not load furniture: " + e.message); }
+    } catch (e) {
+      console.error("[home] Could not load furniture:", e.message);
+      ctx.toast("⚠️ Could not load furniture: " + e.message);
+    }
   } else {
     console.warn("[home] getMyUid() returned null — furniture will not load");
     ctx.toast("🏠 " + cfg.name);
@@ -250,28 +266,34 @@ export async function build(scene, ctx) {
     }
   };
 
-  function _returnToStorage(itemId, color) {
+  // FIX: Use static imports + proper async/await instead of fire-and-forget .then() chain
+  async function _returnToStorage(itemId, color) {
     const uid = getMyUid();
     if (!uid) return;
-    import("firebase/database").then(({ ref, get, set }) => {
-      import("../firebase.js").then(({ db }) => {
-        get(ref(db, "players/" + uid + "/storage")).then((snap) => {
-          const storage = snap.val() || [];
-          storage.push({ id: itemId, color: color || getItem(itemId)?.colors?.[0] });
-          set(ref(db, "players/" + uid + "/storage"), storage);
-        });
-      });
-    });
+    try {
+      const snap = await get(ref(db, "players/" + uid + "/storage"));
+      const storage = snap.val() || [];
+      storage.push({ id: itemId, color: color || getItem(itemId)?.colors?.[0] });
+      await set(ref(db, "players/" + uid + "/storage"), storage);
+      console.log("[home] Returned " + itemId + " to storage");
+    } catch (e) { console.error("[home] _returnToStorage failed:", e.message); }
   }
 
-  function _saveFurniture() {
+  // FIX: Make _saveFurniture async with proper try/catch and error logging.
+  // Was fire-and-forget with .then() chains — if any step failed, the save silently
+  // didn't happen and no error was shown to the player.
+  async function _saveFurniture() {
     const uid = getMyUid();
-    if (!uid) { console.warn("[home] _saveFurniture: no uid"); return; }
-    import("firebase/database").then(({ ref, set }) => {
-      import("../firebase.js").then(({ db }) => {
-        set(ref(db, "players/" + uid + "/homeFurniture"), _placedFurniture);
-      });
-    });
+    if (!uid) { console.error("[home] _saveFurniture: no uid — furniture NOT saved"); ctx.toast("⚠️ Could not save furniture (no user)"); return; }
+    try {
+      // FIX: Ensure we save a clean array (no gaps, no non-sequential keys)
+      const cleanArray = _placedFurniture.map(f => ({ id: f.id, x: f.x || 0, z: f.z || 0, rot: f.rot || 0, color: f.color }));
+      await set(ref(db, "players/" + uid + "/homeFurniture"), cleanArray);
+      console.log("[home] Saved " + cleanArray.length + " furniture items for uid=" + uid);
+    } catch (e) {
+      console.error("[home] _saveFurniture FAILED:", e.message);
+      ctx.toast("⚠️ Could not save furniture: " + e.message);
+    }
   }
 
   const handle = {
@@ -374,7 +396,9 @@ export async function build(scene, ctx) {
     ctx.canvas?.removeEventListener?.("pointerdown", _onCanvasTap);
   }
 
-  function _confirmPlace(ctx) {
+  // FIX: Make _confirmPlace async so it can await _saveFurniture — was calling
+  // _saveFurniture() without await, so the success toast showed before the save completed.
+  async function _confirmPlace(ctx) {
     if (!_pendingItem) return;
     // Clamp position to room bounds
     const margin = 0.5;
@@ -382,7 +406,8 @@ export async function build(scene, ctx) {
     _pendingItem.z = Math.max(-HD + margin, Math.min(HD - margin, _pendingItem.z || 0));
     _placedFurniture.push({ ..._pendingItem });
     _rebuildFurniture();
-    _saveFurniture();
+    // FIX: Await the save before showing success toast
+    await _saveFurniture();
     ctx.toast("✅ " + (getItem(_pendingItem.id)?.name || "Item") + " placed! Tap it to move/rotate/remove.");
     _pendingItem = null;
     _decorateMode = false;
