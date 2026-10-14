@@ -18,10 +18,31 @@ export const PALETTE = {
 
 // x = patterns on/off, y = grain, z = contact darkening, w = fake key light strength
 export const ART = { value: new THREE.Vector4(1, 1, 1, 1) };
+let _quality = "medium";
+const _registry = new Set();           // every stylised material (so a quality change can rebuild only these)
+
+// What each material really compiles with, per quality. LOW costs (almost) nothing: outdoor surfaces become plain Lambert,
+// interiors keep only the cheap fake key light. This is what keeps phones smooth.
+function effective(opts, q) {
+  const o = { pat: !!opts.pat, ao: !!opts.ao, fake: !!opts.fake, grain: !!opts.pat };
+  if (q === "low") { o.pat = false; o.grain = false; if (!o.fake) o.ao = false; }
+  return o;
+}
+function applyDefines(mat) {
+  const e = effective(mat.userData.artOpts, _quality);
+  const d = mat.defines || (mat.defines = {});
+  for (const k of ["ART_PAT", "ART_GRAIN", "ART_AO", "ART_FAKE"]) delete d[k];
+  if (e.pat) d.ART_PAT = ""; if (e.grain) d.ART_GRAIN = ""; if (e.ao) d.ART_AO = ""; if (e.fake) d.ART_FAKE = "";
+  mat.userData.artKey = "art" + (e.pat ? "P" : "") + (e.grain ? "G" : "") + (e.ao ? "A" : "") + (e.fake ? "F" : "");
+  mat.userData.artAny = e.pat || e.ao || e.fake;
+}
 export function setArtQuality(q) {
   if (q === "low") ART.value.set(0, 0, 1, 1);
   else if (q === "high") ART.value.set(1, 1, 1, 1);
   else ART.value.set(1, 0.8, 1, 1);
+  if (q === _quality) return;
+  _quality = q;
+  _registry.forEach((m) => { applyDefines(m); m.needsUpdate = true; });
 }
 
 // pattern codes (aPat attribute)
@@ -126,8 +147,10 @@ const FRAG_BODY = `
   #ifdef ART_PAT
     if (uArt.x > 0.5 && vPat > 0.5) col = artPattern(vPat, puv, col);
   #endif
-  // hand-painted grain
-  col *= 1.0 + (h21(floor(puv * 7.0)) - 0.5) * 0.06 * uArt.y;
+  // hand-painted grain (only on surfaces that have patterns, never on big outdoor planes)
+  #ifdef ART_GRAIN
+    col *= 1.0 + (h21(floor(puv * 7.0)) - 0.5) * 0.06 * uArt.y;
+  #endif
   // contact darkening on vertical surfaces near the ground
   #ifdef ART_AO
     float grad = mix(0.7, 1.0, smoothstep(0.0, 1.5, vWY));
@@ -149,8 +172,12 @@ const FRAG_GLOW = `
 
 /** Patch any MeshLambertMaterial with the stylised look. flags: { pat, ao, fake } */
 export function stylize(mat, { pat = true, ao = true, fake = false } = {}) {
-  mat.defines = Object.assign(mat.defines || {}, pat ? { ART_PAT: "" } : {}, ao ? { ART_AO: "" } : {}, fake ? { ART_FAKE: "" } : {});
+  mat.userData.artOpts = { pat, ao, fake };
+  mat.userData.styled = true;
+  applyDefines(mat);
+  _registry.add(mat);
   mat.onBeforeCompile = (shader) => {
+    if (!mat.userData.artAny) return;                 // nothing to add: stays a plain Lambert shader
     shader.uniforms.uArt = ART;
     shader.vertexShader = shader.vertexShader
       .replace("#include <common>", "#include <common>\n" + VERT_DECL)
@@ -160,8 +187,7 @@ export function stylize(mat, { pat = true, ao = true, fake = false } = {}) {
       .replace("#include <color_fragment>", "#include <color_fragment>\n" + FRAG_BODY)
       .replace("#include <opaque_fragment>", FRAG_GLOW + "\n#include <opaque_fragment>");
   };
-  mat.customProgramCacheKey = () => "art" + (pat ? "P" : "") + (ao ? "A" : "") + (fake ? "F" : "");
-  mat.userData.styled = true;
+  mat.customProgramCacheKey = () => mat.userData.artKey;
   return mat;
 }
 
