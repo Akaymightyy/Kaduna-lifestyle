@@ -3,29 +3,45 @@
 
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { styledMaterial, stylize } from "../art/style.js";
 
-// Make a BoxGeometry with per-face vertex colours (so a single merged mesh
-// can have differently-coloured faces). Color is a THREE.Color or hex int.
-export function box(w, h, d, x = 0, y = 0, z = 0, color = 0xffffff) {
+// Make a BoxGeometry with per-face vertex colours (so a single merged mesh can have differently-coloured
+// faces). Color is a THREE.Color or hex int. `pat` = optional surface pattern (see src/art/style.js PAT).
+export function box(w, h, d, x = 0, y = 0, z = 0, color = 0xffffff, pat = 0) {
   const g = new THREE.BoxGeometry(w, h, d);
   g.translate(x, y, z);
   const c = new THREE.Color(color);
   const n = g.attributes.position.count;
-  const col = new Float32Array(n * 3);
+  const col = new Float32Array(n * 3), p = new Float32Array(n).fill(pat);
   for (let i = 0; i < n; i++) {
     col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
   }
   g.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  g.setAttribute("aPat", new THREE.BufferAttribute(p, 1));
   return g;
 }
 
-// Merge a list of geometries into one mesh with vertex colors + Lambert material.
-export function mergedMesh(geos, materialOpts = {}) {
-  const merged = mergeGeometries(geos);
-  const mat = new THREE.MeshLambertMaterial({
-    vertexColors: true,
-    ...materialOpts,
+// Make sure every geometry has the same attributes so mergeGeometries never fails (custom geometries welcome).
+function normalise(geos) {
+  const prepared = geos.map((g) => {
+    let q = g;
+    if (!q.index && q.attributes.position) { /* keep as is: mixed indexed/non-indexed is fixed below */ }
+    if (!q.attributes.aPat) q.setAttribute("aPat", new THREE.BufferAttribute(new Float32Array(q.attributes.position.count), 1));
+    if (!q.attributes.color) { const n = q.attributes.position.count; q.setAttribute("color", new THREE.BufferAttribute(new Float32Array(n * 3).fill(1), 3)); }
+    return q;
   });
+  const anyIndexed = prepared.some((g) => g.index), anyFlat = prepared.some((g) => !g.index);
+  if (anyIndexed && anyFlat) return prepared.map((g) => (g.index ? g.toNonIndexed() : g));
+  return prepared;
+}
+
+// Merge a list of geometries into one mesh with vertex colors + the stylised interior material.
+export function mergedMesh(geos, materialOpts = {}) {
+  const merged = mergeGeometries(normalise(geos));
+  const custom = Object.keys(materialOpts).length > 0;
+  const mat = custom
+    ? stylize(new THREE.MeshLambertMaterial({ vertexColors: true, ...materialOpts }), { pat: true, ao: true, fake: true })
+    : styledMaterial("interior");
   const m = new THREE.Mesh(merged, mat);
   m.castShadow = false; m.receiveShadow = false; // interiors never need real shadows
   return m;
@@ -60,12 +76,14 @@ export function signMesh(text, w, h, opts = {}) {
   );
 }
 
-// Floor plane with simple checker or solid color
-export function floor(w, d, color = 0xbfb39a) {
-  const m = new THREE.Mesh(
-    new THREE.PlaneGeometry(w, d),
-    new THREE.MeshLambertMaterial({ color })
-  );
+// Floor plane. `pat` = pattern code (default: 9 concrete). 1 = tiles, 2 = wood planks. See src/art/style.js.
+export function floor(w, d, color = 0xbfb39a, pat = 9) {
+  const geo = new THREE.PlaneGeometry(w, d);
+  geo.setAttribute("aPat", new THREE.BufferAttribute(new Float32Array(geo.attributes.position.count).fill(pat), 1));
+  const c = new THREE.Color(color), n = geo.attributes.position.count, col = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+  geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  const m = new THREE.Mesh(geo, styledMaterial("interior"));
   m.rotation.x = -Math.PI / 2;
   m.receiveShadow = true;
   return m;
@@ -152,6 +170,7 @@ export function disposeGroup(group) {
     if (o.material) {
       const mats = Array.isArray(o.material) ? o.material : [o.material];
       mats.forEach((m) => {
+        if (m.userData && m.userData.shared) return; // shared stylised materials are reused by every place
         if (m.map) m.map.dispose();
         m.dispose();
       });

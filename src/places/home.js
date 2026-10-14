@@ -15,6 +15,7 @@
 
 import * as THREE from "three";
 import { box, mergedMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
+import { dressRoom } from "../art/dress.js";
 import { getItem, makeFurnitureMesh, calcComfort } from "../furniture.js";
 import { getMyUid } from "../multiplayer.js";
 // FIX: Use static imports instead of dynamic imports — dynamic import chains in
@@ -46,7 +47,7 @@ export async function build(scene, ctx) {
   group.visible = false;
 
   // ---- Build the room based on tier ----
-  group.add(floor(W, D, cfg.floorCol));
+  group.add(floor(W, D, cfg.floorCol, tier <= 2 ? 1 : 2));
 
   const wallMat = cfg.wallCol;
   const windowMat = 0x4a6177;
@@ -55,14 +56,14 @@ export async function build(scene, ctx) {
   const doorSide = (W - doorWidth) / 2;
   group.add(mergedMesh([
     // Back wall (north, -Z)
-    box(W, 4, 0.3, 0, 2, -HD, wallMat),
+    box(W, 4, 0.3, 0, 2, -HD, wallMat, 3),
     // Left wall (west, -X)
-    box(0.3, 4, D, -HW, 2, 0, wallMat),
+    box(0.3, 4, D, -HW, 2, 0, wallMat, 3),
     // Right wall (east, +X)
-    box(0.3, 4, D, HW, 2, 0, wallMat),
+    box(0.3, 4, D, HW, 2, 0, wallMat, 3),
     // Front wall (south, +Z) — two segments with door gap
-    box(doorSide, 4, 0.3, -(doorWidth / 2 + doorSide / 2), 2, HD, wallMat),
-    box(doorSide, 4, 0.3,  (doorWidth / 2 + doorSide / 2), 2, HD, wallMat),
+    box(doorSide, 4, 0.3, -(doorWidth / 2 + doorSide / 2), 2, HD, wallMat, 3),
+    box(doorSide, 4, 0.3,  (doorWidth / 2 + doorSide / 2), 2, HD, wallMat, 3),
     // Windows (only for tier 2+ — tier 1 rooms have small vent windows)
     ...(tier >= 2 ? [
       box(Math.max(2, W * 0.15), 1.5, 0.05, -W * 0.25, 2.5, -HD + 0.05, windowMat),
@@ -72,6 +73,9 @@ export async function build(scene, ctx) {
       box(1.2, 0.6, 0.05, 0, 3.4, -HD + 0.05, windowMat),
     ]),
   ]));
+
+  // ---- Stylised dressing: trims, windows, curtains, pictures, props (never blocks the room) ----
+  try { dressRoom(group, { W, D, tier, wallCol: cfg.wallCol, seed: tier * 7 + 3 }); } catch (e) { console.warn("[art] dressRoom failed", e); }
 
   // ---- Lighting: tier 1 is dimmer (single bulb), tier 2+ has multiple lights ----
   if (tier === 1) {
@@ -129,7 +133,7 @@ export async function build(scene, ctx) {
     while (_furnitureGroup.children.length) {
       const child = _furnitureGroup.children[0];
       _furnitureGroup.remove(child);
-      child.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } });
+      child.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material && !(o.material.userData && o.material.userData.shared)) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } });
     }
     for (const p of _placedFurniture) {
       const item = getItem(p.id);
