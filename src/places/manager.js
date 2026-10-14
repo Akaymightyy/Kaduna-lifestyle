@@ -118,6 +118,14 @@ export async function enterPlace(id, playerState) {
   const def = getPlace(id);
   if (!def) throw new Error("Unknown place id: " + id);
 
+  // BUGFIX: hide any floating prompts from the world (e.g. the per-plot knock
+  // prompt from plots.js) before fading in. Without this, the prompt stays
+  // visible during the place fade-in transition and blocks the leave-button
+  // (the player couldn't click "leave house" because "Enter @areatest's Home"
+  // was stuck on top).
+  document.getElementById("plot-knock-prompt")?.style.setProperty("display", "none");
+  document.getElementById("place-prompt")?.style.setProperty("display", "none");
+
   await _fadeTo(1);
 
   // ---- For the player's home: always dispose the old instance so it rebuilds
