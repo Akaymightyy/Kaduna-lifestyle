@@ -47,6 +47,7 @@ import { initAreaWorld, tickAreaWorld, setAreaLampsNight, disposeAreaWorld } fro
 // (a static OSM-derived file shipped in public/data/). The main Ahmadu Bello
 // Way is filtered out (already rendered by world.js) to avoid double-render.
 import { fetchKadunaData, buildRealMap } from "./realmap.js";
+import { VEHICLE_CATALOG, getVehicle, initVehicles, buyVehicle, getOwned, ownsVehicle, isRiding, getRideSpeed, getRideId, spawnRideVehicle, despawnRideVehicle, tickRideVehicle } from "./vehicles.js";
 import { initMessages, searchUsers, openDM, sendMessage, sendHouseInvite, openChat, closeChat, getChatList, sendMoney, createGroup, leaveGroup, blockUser, reportUser, getChatMeta, cleanupMessages, getPresence, listenToPresence } from "./messages.js";
 import { initEvents, tickNepa, isNepaCut, getNepaStatus, hasPowerBackup, getModifiedDrain, tickMoodlets, addMoodlet, getActiveMoodlets, getConsequences, getWalkSpeedMultiplier, MOODLET_DEFS } from "./events.js";
 import { SKILLS, CAREERS, SHIFT_TONES, initCareers, getSkills, getCareer, getCareerDef, canJoinCareer, canPromote, joinCareer, promote, doShift, trainSkill } from "./careers.js";
@@ -487,6 +488,7 @@ function _showPhoneApp(appId) {
       {id:"jobs",icon:"💼",label:"Hustle"},
       {id:"bank",icon:"🏦",label:"Bank"},
       {id:"ride",icon:"🛺",label:"Ride"},
+      {id:"cars",icon:"🚗",label:"Cars"},
       {id:"map",icon:"🗺️",label:"Map"},
       {id:"missions",icon:"🎯",label:"Missions"},
       {id:"daily",icon:"🎁",label:"Daily"},
@@ -513,7 +515,7 @@ function _showPhoneApp(appId) {
       {id:"settings",icon:"⚙️",label:"Settings"}
     ];
     if(isAdmin()) apps.push({id:"admin",icon:"🔐",label:"Admin"});
-    const COL={food:["#f59e0b","#f97316"],jobs:["#8b5cf6","#6366f1"],bank:["#3b82f6","#2563eb"],ride:["#10b981","#059669"],map:["#06b6d4","#0891b2"],daily:["#ec4899","#db2777"],health:["#ef4444","#dc2626"],richlist:["#f59e0b","#d97706"],profile:["#6366f1","#4f46e5"],events:["#d946ef","#c026d3"],news:["#64748b","#475569"],boutique:["#d946ef","#a855f7"],myoutfits:["#f97316","#ea580c"],wardrobe:["#14b8a6","#0d9488"],contacts:["#6366f1","#818cf8"],settings:["#64748b","#475569"],admin:["#ef4444","#b91c1c"],hunt:["#f2b134","#d97706"],missions:["#dc2626","#b91c1c"],realestate:["#16a34a","#15803d"],homestore:["#ea580c","#c2410c"],storage:["#0891b2","#0e7490"],messages:["#22c55e","#16a34a"]};
+    const COL={food:["#f59e0b","#f97316"],jobs:["#8b5cf6","#6366f1"],bank:["#3b82f6","#2563eb"],ride:["#10b981","#059669"],cars:["#6366f1","#4f46e5"],map:["#06b6d4","#0891b2"],daily:["#ec4899","#db2777"],health:["#ef4444","#dc2626"],richlist:["#f59e0b","#d97706"],profile:["#6366f1","#4f46e5"],events:["#d946ef","#c026d3"],news:["#64748b","#475569"],boutique:["#d946ef","#a855f7"],myoutfits:["#f97316","#ea580c"],wardrobe:["#14b8a6","#0d9488"],contacts:["#6366f1","#818cf8"],settings:["#64748b","#475569"],admin:["#ef4444","#b91c1c"],hunt:["#f2b134","#d97706"],missions:["#dc2626","#b91c1c"],realestate:["#16a34a","#15803d"],homestore:["#ea580c","#c2410c"],storage:["#0891b2","#0e7490"],messages:["#22c55e","#16a34a"]};
     const now=new Date(), hh=String(now.getHours()).padStart(2,"0"), mm=String(now.getMinutes()).padStart(2,"0");
     const dateTxt=now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})+" · Kaduna";
     c.innerHTML='<div class="ph-home-clock">'+hh+':'+mm+'</div><div class="ph-home-date">'+dateTxt+'</div><div class="ph-home-bal"><span>₦'+(game.state.money||0).toLocaleString()+'</span></div>'+
@@ -552,6 +554,63 @@ function _showPhoneApp(appId) {
       '<div style="font-size:11px;color:#666;margin-bottom:8px;">Choose how to get there:</div>'+
       rideOpts.map(r => '<div style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid #eee;border-radius:8px;margin-bottom:6px;"><span style="font-size:24px;">'+r.icon+'</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;">'+r.name+'</div><div style="font-size:11px;color:#666;">'+r.time+'s ride · '+(r.price===0?'Free':'₦'+r.price)+'</div></div><button onclick="window.bookRide(\''+r.id+'\')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:600;">Go</button></div>').join("")+
       backBtn;
+    return;
+  }
+  if(appId==="cars"){
+    // FEATURE: Car Dealership + Garage + Ride/Dismount
+    let h = '<div style="font-size:15px;margin-bottom:8px;font-weight:700;color:#f2f2f4;">🚗 Cars & Vehicles</div>';
+    // Riding status + dismount button
+    if (isRiding()) {
+      const rideId = getRideId();
+      const rv = getVehicle(rideId);
+      h += '<div style="background:#1a2a1a;border:2px solid #4ade80;border-radius:10px;padding:10px;margin-bottom:10px;display:flex;align-items:center;gap:8px;">';
+      h += '<span style="font-size:24px;">' + (rv?.emoji || "🚗") + '</span>';
+      h += '<div style="flex:1;"><div style="font-size:13px;font-weight:600;color:#4ade80;">Riding ' + (rv?.name || rideId) + '</div>';
+      h += '<div style="font-size:11px;color:#9b9ba4;">Speed boost +' + getRideSpeed() + ' m/s</div></div>';
+      h += '<button onclick="window._dismountVehicle()" style="background:#e11d48;color:#fff;border:none;border-radius:8px;padding:8px 14px;cursor:pointer;font:600 12px Poppins,sans-serif;">🛑 Dismount</button>';
+      h += '</div>';
+    }
+    // Garage (owned vehicles)
+    const owned = getOwned();
+    const ownedIds = Object.keys(owned).filter(id => owned[id]);
+    h += '<div style="font-size:12px;font-weight:600;margin:10px 0 6px;color:#f2b134;">🔧 Your Garage (' + ownedIds.length + ')</div>';
+    if (ownedIds.length === 0) {
+      h += '<div style="font-size:11px;color:#6b7280;padding:10px;text-align:center;background:#17181b;border-radius:8px;margin-bottom:10px;">No vehicles yet. Buy one below! 👇</div>';
+    } else {
+      for (const id of ownedIds) {
+        const v = getVehicle(id);
+        if (!v) continue;
+        const isCurrentRide = isRiding() && getRideId() === id;
+        h += '<div style="display:flex;align-items:center;gap:8px;padding:8px;background:#17181b;border-radius:8px;margin-bottom:5px;' + (isCurrentRide ? 'border:2px solid #4ade80;' : '') + '">';
+        h += '<span style="font-size:24px;">' + v.emoji + '</span>';
+        h += '<div style="flex:1;"><div style="font-size:12px;font-weight:600;color:#f2f2f4;">' + v.name + (isCurrentRide ? ' ✅' : '') + '</div>';
+        h += '<div style="font-size:10px;color:#9b9ba4;">Speed +' + v.speed + '</div></div>';
+        if (isCurrentRide) {
+          h += '<span style="font-size:10px;color:#4ade80;">Riding</span>';
+        } else {
+          h += '<button onclick="window._rideVehicle(\'' + id + '\')" style="background:#4ade80;color:#000;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font:600 11px Poppins,sans-serif;"> Ride</button>';
+        }
+        h += '</div>';
+      }
+    }
+    // Dealership (buy new vehicles)
+    h += '<div style="font-size:12px;font-weight:600;margin:14px 0 6px;color:#f2b134;">🚗 Dealership</div>';
+    h += '<div style="font-size:11px;color:#6b7280;margin-bottom:8px;">Balance: ₦' + game.state.money.toLocaleString() + '</div>';
+    for (const v of VEHICLE_CATALOG) {
+      const owns = ownsVehicle(v.id);
+      const canAfford = game.state.money >= v.price;
+      h += '<div style="display:flex;align-items:center;gap:8px;padding:8px;background:#17181b;border-radius:8px;margin-bottom:5px;' + (owns ? 'border:1px solid #4ade80;' : '') + '">';
+      h += '<span style="font-size:24px;">' + v.emoji + '</span>';
+      h += '<div style="flex:1;"><div style="font-size:12px;font-weight:600;color:#f2f2f4;">' + v.name + (owns ? ' ✅' : '') + '</div>';
+      h += '<div style="font-size:10px;color:#9b9ba4;">' + v.desc + ' · Speed +' + v.speed + '</div></div>';
+      if (owns) h += '<span style="font-size:10px;color:#4ade80;">Owned</span>';
+      else if (canAfford) h += '<button onclick="window._buyVehicle(\'' + v.id + '\')" style="background:#f2b134;color:#000;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font:600 11px Poppins,sans-serif;">₦' + v.price.toLocaleString() + '</button>';
+      else h += '<span style="font-size:10px;color:#6b7280;">₦' + v.price.toLocaleString() + '</span>';
+      h += '</div>';
+    }
+    h += '<div style="font-size:11px;color:#6b7280;margin-top:8px;text-align:center;">💡 Buy a vehicle → tap "Ride" in your Garage to spawn it + boost your speed.</div>';
+    h += backBtn;
+    c.innerHTML = h;
     return;
   }
   if(appId==="chat"){
@@ -1897,6 +1956,28 @@ window._showAreaPicker = () => {
   }
   _showAreaScreen();
 };
+// FEATURE: Buy a vehicle (deducts money, writes to Firebase)
+window._buyVehicle = async (vehicleId) => {
+  const ok = await buyVehicle(vehicleId, game.state, toast);
+  if (ok) { updateHUD(); showPhoneApp("cars"); }
+};
+// FEATURE: Ride a vehicle (spawn mesh + boost speed)
+window._rideVehicle = async (vehicleId) => {
+  if (isRiding()) { toast("Already riding — dismount first"); return; }
+  if (!ownsVehicle(vehicleId)) { toast("You don't own this vehicle"); return; }
+  const ok = await spawnRideVehicle(vehicleId, player.pos, player.heading);
+  if (ok) {
+    closePhone();
+    const v = getVehicle(vehicleId);
+    toast("🚗 Riding " + (v?.name || vehicleId) + "! Speed boosted.");
+  } else { toast("Could not spawn vehicle — try again"); }
+};
+// FEATURE: Dismount vehicle (despawn mesh + remove speed boost)
+window._dismountVehicle = () => {
+  despawnRideVehicle();
+  toast("🚶 Dismounted. Walking now.");
+  showPhoneApp("cars");
+};
 // ---- Money Hunt HUD update (called by moneyhunt.js after a successful claim) ----
 function _updateHuntHud() {
   const stats = getHuntStats();
@@ -2188,6 +2269,8 @@ initAuth((user) => {
   initWishes(user.uid, () => {});
   initElection(user.uid, () => {});
   initSocial(user.uid, () => {});
+  // FEATURE: init the vehicles system (subscribes to owned vehicles from Firebase)
+  initVehicles(scene, user.uid, () => {});
   // ---- Init Messages app ----
   const myName = user.displayName || user.email?.split("@")[0] || "Player";
   initMessages(user.uid, myName, toast, () => { _updateUnreadBadge(); if (_showingApp === "messages") showPhoneApp("messages"); });
@@ -2557,7 +2640,9 @@ function frame() {
   if (isLiveMapOn()) { liveMapFrame(dt); perfBeforeRender(); renderer.render(scene, camera); perfAfterRender(renderer, getQuality()); requestAnimationFrame(frame); return; }
   const now = Date.now() / 1000;
   const it = ctl.intent();
-  const maxSpd = (ctl.jog ? 4.8 : 2.1) * (game.state.needs?.energy < 20 ? 0.5 : 1.0);
+  // FEATURE: if riding a vehicle, add its speed boost to the player's max speed
+  const vehicleBoost = isRiding() ? getRideSpeed() : 0;
+  const maxSpd = ((ctl.jog ? 4.8 : 2.1) + vehicleBoost) * (game.state.needs?.energy < 20 ? 0.5 : 1.0);
   const target = it.mag * maxSpd;
   player.speed += (target - player.speed) * (1 - Math.exp(-dt * 9));
   if (it.mag > 0) {
@@ -2600,6 +2685,8 @@ function frame() {
     }
   }
   if (rig) { rig.group.position.copy(player.pos); rig.group.rotation.y = player.heading; rig.animate(dt, player.speed); }
+  // FEATURE: update the ride vehicle mesh to follow the player
+  tickRideVehicle(player.pos, player.heading);
   updateCamera(camera, ctl, player.pos, active ? (active.handle.colliders || []) : world.colliders, dt);
   applyTime();
   if (active) { scene.background = INTERIOR_BG; scene.fog.color.copy(INTERIOR_BG); sun.intensity = 0; hemi.intensity = 0.8; }
