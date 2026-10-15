@@ -4,10 +4,14 @@ export const WORLD_HALF_X = 200;
 // FEATURE 3b: expanded walkable bounds so players can reach all 14 area plot
 // positions (cheap areas at Z=±80, rich areas at Z=±40). The ground plane in
 // world.js is already 1400x700 — plenty of room. This is just the player clamp.
-export const PLAYER_LIMIT_X = 250;
-export const PLAYER_LIMIT_Z = 100;
+export const PLAYER_LIMIT_X = 340;
+export const PLAYER_LIMIT_Z = 320;
 export const CROSSINGS = [-80, 0, 80];
 export const SIDE_STREETS = [-90, 90];
+// ---- WIDE CITY: districts sit OUTSIDE the main-street band and are joined by avenues + cross streets ----
+export const WIDE_AVENUES_X = [-230, -90, 90, 230];   // north-south avenues (the two at +-90 continue the old side streets)
+export const WIDE_CROSS_Z = [-195, -88, 88, 195];     // east-west streets
+export const MAP_HALF_X = 360, MAP_HALF_Z = 340;      // size of the whole city (minimap + ground)
 
 // ---- Time scale: REAL-TIME clock (1 real hour = 1 game hour) ----
 // FEATURE: was 5 real min = 1 game hour (too fast — messages + shops flashing

@@ -1,7 +1,7 @@
 // src/world.js — improved Kaduna world with detailed buildings, landmarks, market
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { ROAD_HALF, WORLD_HALF_X, CROSSINGS, SIDE_STREETS, rng } from "./config.js";
+import { ROAD_HALF, WORLD_HALF_X, CROSSINGS, SIDE_STREETS, WIDE_AVENUES_X, WIDE_CROSS_Z, MAP_HALF_X, MAP_HALF_Z, rng } from "./config.js";
 
 import { stylize } from "./art/style.js";
 const OL = (o) => stylize(new THREE.MeshLambertMaterial(o), { pat: false, ao: true, fake: false });
@@ -81,7 +81,7 @@ export function buildWorld(scene) {
   scene.add(world);
 
   // ---- ground ----
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(1400, 700), new THREE.MeshLambertMaterial({ color: 0x9aab62 }));
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(MAP_HALF_X * 2 + 700, MAP_HALF_Z * 2 + 300), new THREE.MeshLambertMaterial({ color: 0x9aab62 }));
   ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
   world.add(ground);
 
@@ -95,6 +95,28 @@ export function buildWorld(scene) {
     const sp = new THREE.Mesh(new THREE.PlaneGeometry(12, 120), asphalt);
     sp.rotation.x = -Math.PI / 2; sp.position.set(sx, 0.012, 0); sp.receiveShadow = true;
     world.add(sp);
+  }
+
+  // ---- WIDE CITY roads: avenues (north-south) + cross streets (east-west) joining the districts ----
+  // One merged mesh for all asphalt and one for all dashes = 2 draw calls for the whole network.
+  {
+    const aGeos = [], dGeos = [];
+    const AW = 10, Y = 0.013;
+    const strip = (cx, cz, w, d, list, y) => { const g = new THREE.PlaneGeometry(w, d); g.rotateX(-Math.PI / 2); g.translate(cx, y, cz); list.push(g); };
+    const zFrom = ROAD_HALF + 6, zTo = MAP_HALF_Z - 12;           // avenues start at the main street pavement
+    for (const ax of WIDE_AVENUES_X) for (const sg of [1, -1]) {
+      const len = zTo - zFrom, cz = sg * (zFrom + len / 2);
+      strip(ax, cz, AW, len, aGeos, Y);
+      for (let z = zFrom + 4; z < zTo - 4; z += 9) strip(ax, sg * z, 0.22, 3.4, dGeos, Y + 0.012);
+    }
+    for (const cz of WIDE_CROSS_Z) {
+      const len = (MAP_HALF_X - 12) * 2;
+      strip(0, cz, len, AW, aGeos, Y);
+      for (let x = -MAP_HALF_X + 16; x < MAP_HALF_X - 16; x += 9) strip(x, cz, 3.4, 0.22, dGeos, Y + 0.012);
+    }
+    const am = new THREE.Mesh(mergeGeometries(aGeos), asphalt); am.receiveShadow = true; world.add(am);
+    const dm = new THREE.Mesh(mergeGeometries(dGeos), new THREE.MeshBasicMaterial({ color: 0xf2f2ee })); world.add(dm);
+    aGeos.forEach((g) => g.dispose()); dGeos.forEach((g) => g.dispose());
   }
 
   // sidewalks with kerb edge

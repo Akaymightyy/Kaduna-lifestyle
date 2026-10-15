@@ -1,11 +1,12 @@
-import { WORLD_HALF_X, ROAD_HALF, SIDE_STREETS } from "./config.js";
+import { WORLD_HALF_X, ROAD_HALF, SIDE_STREETS, WIDE_AVENUES_X, WIDE_CROSS_Z, MAP_HALF_X, MAP_HALF_Z } from "./config.js";
+import { AREAS } from "./areas.js";
 
 // Pre-baked top-down map (2 px per metre), redrawn rotated around the player ~10x/second.
 export function createMinimap(canvas, shapes) {
-  const S = 2, W = (WORLD_HALF_X + 40) * 2 * S, H = 150 * S;
+  const S = 2, W = MAP_HALF_X * 2 * S, H = MAP_HALF_Z * 2 * S;
   const base = document.createElement("canvas"); base.width = W; base.height = H;
   const g = base.getContext("2d");
-  const X = (x) => (x + WORLD_HALF_X + 40) * S, Z = (z) => (z + 75) * S;
+  const X = (x) => (x + MAP_HALF_X) * S, Z = (z) => (z + MAP_HALF_Z) * S;
   g.fillStyle = "#b9cf8a"; g.fillRect(0, 0, W, H);
 
   // Draw real roads from kaduna.json if available
@@ -44,6 +45,16 @@ export function createMinimap(canvas, shapes) {
     g.setLineDash([]);
   }
 
+  // wide-city avenues + cross streets + district blocks (drawn once into the pre-baked map)
+  g.fillStyle = "#555a62";
+  for (const ax of WIDE_AVENUES_X) g.fillRect(X(ax - 5), 0, 10 * S, H);
+  for (const cz of WIDE_CROSS_Z) g.fillRect(0, Z(cz - 5), W, 10 * S);
+  for (const a of AREAS) {
+    g.fillStyle = a.tier === "rich" ? "#e6d49a" : a.tier === "middle" ? "#b7d3a0" : "#d3c19a";
+    g.fillRect(X(a.x - 44), Z(a.z - 40), 88 * S, 96 * S);
+    g.fillStyle = "#33413a"; g.font = "bold " + (9 * S) + "px Arial"; g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillText(a.name, X(a.x), Z(a.z));
+  }
   for (const b of shapes.buildings) {
     if (b.place) {
       g.fillStyle = "#" + (b.placeColor || 0xc0392b).toString(16).padStart(6, "0");

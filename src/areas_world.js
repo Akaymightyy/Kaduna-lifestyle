@@ -105,8 +105,13 @@ const _scl = new THREE.Vector3(1, 1, 1);
 const _hide = new THREE.Matrix4().makeScale(0, 0, 0);
 const _up = new THREE.Vector3(0, 1, 0);
 
+let _tkX = 1e9, _tkZ = 1e9, _tkT = 0;
 export function tickAreaWorld(playerX, playerZ) {
   if (!_scene) return;
+  // Houses/lamps only need refreshing when the player moved ~1 m or every 300 ms (was every single frame)
+  const _now = performance.now(), _dx = playerX - _tkX, _dz = playerZ - _tkZ;
+  if (_dx * _dx + _dz * _dz < 1 && _now - _tkT < 300) return;
+  _tkX = playerX; _tkZ = playerZ; _tkT = _now;
   // Iterate every area — if it's nearby, ensure its meshes exist and update
   // chunk positions. If it's far, dispose its meshes (frees GPU memory).
   for (const area of AREAS) {

@@ -17,28 +17,28 @@ import { db } from "./firebase.js";
 import { ref, get, set, update, onValue, runTransaction } from "firebase/database";
 
 // ---- Area definitions (real Kaduna neighbourhoods) ----
-// x, z = centre of the area in world metres. The world is X: -150..150, Z: -55..55.
-// We extend it: areas are placed in a grid around the existing city centre.
+// x, z = centre of the area in world metres. The main street + its buildings fill Z: -62..62.
+// Districts sit OUTSIDE that band (rows at z = +-145 and +-255) and are joined by the avenues / cross streets in world.js.
 export const AREAS = [
   // ---- Cheap / rent areas ----
-  { id: "rigasa",       name: "Rigasa",         tier: "cheap",  rentPrice: 500,   buyPrice: 20000,   desc: "Bustling working-class area. Affordable but crowded.", x: -120, z: 80,  plots: 80,  wallCol: 0xc4a87a, roofCol: 0x8a5a3c },
-  { id: "kakuri",       name: "Kakuri",         tier: "cheap",  rentPrice: 600,   buyPrice: 25000,   desc: "Industrial area. Close to factories and workshops.", x: 120, z: 80,   plots: 80,  wallCol: 0xb8a070, roofCol: 0x7a4a2c },
-  { id: "tudun_wada",   name: "Tudun Wada",     tier: "cheap",  rentPrice: 500,   buyPrice: 20000,   desc: "Dense residential. Everybody knows everybody.", x: -120, z: -80, plots: 80,  wallCol: 0xc4a87a, roofCol: 0x8a5a3c },
-  { id: "mando",        name: "Mando",          tier: "cheap",  rentPrice: 550,   buyPrice: 22000,   desc: "Outskirts with big compounds. Quiet and spacious.", x: 120, z: -80,  plots: 60,  wallCol: 0xb8a070, roofCol: 0x7a4a2c },
-  { id: "kabala_costain", name: "Kabala Costain", tier: "cheap", rentPrice: 600,  buyPrice: 25000,   desc: "Old neighbourhood with character. Near the railway.", x: -140, z: 0,   plots: 70,  wallCol: 0xc4a87a, roofCol: 0x8a5a3c },
+  { id: "rigasa",       name: "Rigasa",         tier: "cheap",  rentPrice: 500,   buyPrice: 20000,   desc: "Bustling working-class area. Affordable but crowded.", x: -290, z: 145,  plots: 80,  wallCol: 0xc4a87a, roofCol: 0x8a5a3c },
+  { id: "kakuri",       name: "Kakuri",         tier: "cheap",  rentPrice: 600,   buyPrice: 25000,   desc: "Industrial area. Close to factories and workshops.", x: 290, z: 145,   plots: 80,  wallCol: 0xb8a070, roofCol: 0x7a4a2c },
+  { id: "tudun_wada",   name: "Tudun Wada",     tier: "cheap",  rentPrice: 500,   buyPrice: 20000,   desc: "Dense residential. Everybody knows everybody.", x: -290, z: -145, plots: 80,  wallCol: 0xc4a87a, roofCol: 0x8a5a3c },
+  { id: "mando",        name: "Mando",          tier: "cheap",  rentPrice: 550,   buyPrice: 22000,   desc: "Outskirts with big compounds. Quiet and spacious.", x: 290, z: -145,  plots: 60,  wallCol: 0xb8a070, roofCol: 0x7a4a2c },
+  { id: "kabala_costain", name: "Kabala Costain", tier: "cheap", rentPrice: 600,  buyPrice: 25000,   desc: "Old neighbourhood with character. Near the railway.", x: 170, z: -255,   plots: 70,  wallCol: 0xc4a87a, roofCol: 0x8a5a3c },
 
   // ---- Middle areas ----
-  { id: "kawo",         name: "Kawo",           tier: "middle", rentPrice: 1000,  buyPrice: 50000,   desc: "Bustling market district. Everything dey here.", x: -60, z: 60,   plots: 100, wallCol: 0xd4c5a0, roofCol: 0x9a6a3c },
-  { id: "sabon_tasha",  name: "Sabon Tasha",    tier: "middle", rentPrice: 1000,  buyPrice: 50000,   desc: "Residential with shops and schools. Family-friendly.", x: 60, z: 60,    plots: 100, wallCol: 0xd4c5a0, roofCol: 0x9a6a3c },
-  { id: "gonin_gora",   name: "Gonin Gora",     tier: "middle", rentPrice: 1200,  buyPrice: 60000,   desc: "Growing suburb with new houses. Peaceful.", x: -60, z: -60,  plots: 90,  wallCol: 0xd4c5a0, roofCol: 0x9a6a3c },
-  { id: "television",   name: "Television",     tier: "middle", rentPrice: 1100,  buyPrice: 55000,   desc: "Modern area near the TV station. Good roads.", x: 60, z: -60,   plots: 90,  wallCol: 0xd4c5a0, roofCol: 0x9a6a3c },
-  { id: "ungwan_sarki", name: "Ungwan Sarki",   tier: "middle", rentPrice: 1200,  buyPrice: 60000,   desc: "Established neighbourhood. Mix of old and new.", x: -100, z: 40,  plots: 80,  wallCol: 0xd4c5a0, roofCol: 0x9a6a3c },
+  { id: "kawo",         name: "Kawo",           tier: "middle", rentPrice: 1000,  buyPrice: 50000,   desc: "Bustling market district. Everything dey here.", x: -170, z: 145,   plots: 100, wallCol: 0xd4c5a0, roofCol: 0x9a6a3c },
+  { id: "sabon_tasha",  name: "Sabon Tasha",    tier: "middle", rentPrice: 1000,  buyPrice: 50000,   desc: "Residential with shops and schools. Family-friendly.", x: 170, z: 145,    plots: 100, wallCol: 0xd4c5a0, roofCol: 0x9a6a3c },
+  { id: "gonin_gora",   name: "Gonin Gora",     tier: "middle", rentPrice: 1200,  buyPrice: 60000,   desc: "Growing suburb with new houses. Peaceful.", x: -170, z: -145,  plots: 90,  wallCol: 0xd4c5a0, roofCol: 0x9a6a3c },
+  { id: "television",   name: "Television",     tier: "middle", rentPrice: 1100,  buyPrice: 55000,   desc: "Modern area near the TV station. Good roads.", x: 170, z: -145,   plots: 90,  wallCol: 0xd4c5a0, roofCol: 0x9a6a3c },
+  { id: "ungwan_sarki", name: "Ungwan Sarki",   tier: "middle", rentPrice: 1200,  buyPrice: 60000,   desc: "Established neighbourhood. Mix of old and new.", x: 0, z: 145,  plots: 80,  wallCol: 0xd4c5a0, roofCol: 0x9a6a3c },
 
   // ---- Rich areas (GRA-style) ----
-  { id: "barnawa",      name: "Barnawa",        tier: "rich",   rentPrice: 3000,  buyPrice: 200000,  desc: "GRA-style. Big houses, quiet streets, riverside.", x: 100, z: 40,   plots: 60,  wallCol: 0xf0e8d8, roofCol: 0x4a6177 },
-  { id: "malali",       name: "Malali",         tier: "rich",   rentPrice: 3500,  buyPrice: 250000,  desc: "Upscale residential. Diplomats and big oga live here.", x: 100, z: -40,  plots: 50,  wallCol: 0xf0e8d8, roofCol: 0x4a6177 },
-  { id: "ungwan_rimi",  name: "Ungwan Rimi",    tier: "rich",   rentPrice: 3200,  buyPrice: 220000,  desc: "GRA. Spacious compounds with gardens.", x: -100, z: -40, plots: 50,  wallCol: 0xf0e8d8, roofCol: 0x4a6177 },
-  { id: "badarawa",     name: "Badarawa",       tier: "rich",   rentPrice: 3000,  buyPrice: 200000,  desc: "Quiet upscale area near the river. Fresh air.", x: 140, z: 0,    plots: 40,  wallCol: 0xf0e8d8, roofCol: 0x4a6177 },
+  { id: "barnawa",      name: "Barnawa",        tier: "rich",   rentPrice: 3000,  buyPrice: 200000,  desc: "GRA-style. Big houses, quiet streets, riverside.", x: -170, z: 255,   plots: 60,  wallCol: 0xf0e8d8, roofCol: 0x4a6177 },
+  { id: "malali",       name: "Malali",         tier: "rich",   rentPrice: 3500,  buyPrice: 250000,  desc: "Upscale residential. Diplomats and big oga live here.", x: -170, z: -255,  plots: 50,  wallCol: 0xf0e8d8, roofCol: 0x4a6177 },
+  { id: "ungwan_rimi",  name: "Ungwan Rimi",    tier: "rich",   rentPrice: 3200,  buyPrice: 220000,  desc: "GRA. Spacious compounds with gardens.", x: 0, z: -145, plots: 50,  wallCol: 0xf0e8d8, roofCol: 0x4a6177 },
+  { id: "badarawa",     name: "Badarawa",       tier: "rich",   rentPrice: 3000,  buyPrice: 200000,  desc: "Quiet upscale area near the river. Fresh air.", x: 170, z: 255,    plots: 40,  wallCol: 0xf0e8d8, roofCol: 0x4a6177 },
 ];
 
 // ---- Plot position generator ----
@@ -50,9 +50,13 @@ export function getPlotPosition(area, plotNo) {
   const spacing = 8;  // metres between plots
   const startX = area.x - (plotsPerRow * spacing) / 2;
   const startZ = area.z - (area.plots / plotsPerRow * spacing) / 2;
+  // The area's own road runs along X through the centre (z = area.z, 6 m + 1.5 m pavements).
+  // Rows that would land on that road are pushed past it so houses never sit in the road.
+  let baseZ = startZ + row * spacing;
+  if (baseZ >= area.z - 4) baseZ += 12;
   return {
     x: startX + col * spacing,
-    z: startZ + row * spacing,
+    z: baseZ,
     rot: (col % 2 === 0) ? 0 : Math.PI,  // alternate facing
   };
 }
