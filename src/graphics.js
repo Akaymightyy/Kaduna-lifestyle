@@ -133,27 +133,34 @@ export function updateSky(hour) {
   const azimuth = Math.cos(sunAngle); // -1 (west) to 1 (east)
 
   // ---- Sky shader uniforms ----
-  if (_sky) {
+  if (_sky && _sky.material && _sky.material.uniforms) {
+    try {
     const phi = THREE.MathUtils.degToRad(90 - elevation * 90); // 0=horizon, 90=zenith
     const theta = THREE.MathUtils.degToRad(azimuth * 180);
     const sunPos = new THREE.Vector3();
     sunPos.setFromSphericalCoords(1, phi, theta);
-    _sky.material.uniforms["sunPosition"].value.copy(sunPos);
-    _sky.material.uniforms["exposure"].value = _renderer.toneMappingExposure;
+    if (_sky.material.uniforms["sunPosition"]) _sky.material.uniforms["sunPosition"].value.copy(sunPos);
+    // BUGFIX: removed `_sky.material.uniforms["exposure"].value = ...` — the Three.js
+    // Sky addon does NOT have an "exposure" uniform (exposure is a renderer-level setting,
+    // set via renderer.toneMappingExposure in initGraphics). Setting it threw
+    // "Cannot set properties of undefined (setting 'value')" every time updateSky()
+    // fired (every 6 game-minutes = every 6 real seconds with TIME_SCALE=1).
+    // That was the red error banner at the top of the screen the user reported.
 
     // Adjust turbidity/rayleigh for time of day
     const isNight = elevation < 0.05;
     const isDawnDusk = elevation > 0.05 && elevation < 0.25;
     if (isNight) {
-      _sky.material.uniforms["rayleigh"].value = 0.5;
-      _sky.material.uniforms["turbidity"].value = 0.5;
+      if (_sky.material.uniforms["rayleigh"]) _sky.material.uniforms["rayleigh"].value = 0.5;
+      if (_sky.material.uniforms["turbidity"]) _sky.material.uniforms["turbidity"].value = 0.5;
     } else if (isDawnDusk) {
-      _sky.material.uniforms["rayleigh"].value = 3;
-      _sky.material.uniforms["turbidity"].value = 12;
+      if (_sky.material.uniforms["rayleigh"]) _sky.material.uniforms["rayleigh"].value = 3;
+      if (_sky.material.uniforms["turbidity"]) _sky.material.uniforms["turbidity"].value = 12;
     } else {
-      _sky.material.uniforms["rayleigh"].value = 2;
-      _sky.material.uniforms["turbidity"].value = 8;
+      if (_sky.material.uniforms["rayleigh"]) _sky.material.uniforms["rayleigh"].value = 2;
+      if (_sky.material.uniforms["turbidity"]) _sky.material.uniforms["turbidity"].value = 8;
     }
+    } catch (e) { /* Sky uniforms not available — sky won't update, no crash */ }
   }
 
   // ---- Sun light direction + colour ----
