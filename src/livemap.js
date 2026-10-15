@@ -56,7 +56,7 @@ function build() {
     if (ptr.size === 2) { const [a, b] = [...ptr.values()]; const d = Math.hypot(a.x - b.x, a.y - b.y); if (pinch0 > 0) st.tdist = Math.max(MIN_D, Math.min(MAX_D, dist0 * pinch0 / d)); return; }
     const mpp = (2 * st.dist * Math.tan(THREE.MathUtils.degToRad(S.camera.fov / 2))) / innerHeight;   // metres per pixel
     st.tx -= dx * mpp; st.tz -= dy * mpp / Math.sin(PITCH);
-    const L = S.limits; st.tx = Math.max(-L.x, Math.min(L.x, st.tx)); st.tz = Math.max(-L.z, Math.min(L.z, st.tz));
+    const L = S.limits; st.tx = Math.max(-L.x - 200, Math.min(L.x + 200, st.tx)); st.tz = Math.max(-L.z - 200, Math.min(L.z + 200, st.tz));
   });
   const up = (e) => { ptr.delete(e.pointerId); if (ptr.size < 2) pinch0 = 0; };
   root.addEventListener("pointerup", up); root.addEventListener("pointercancel", up);
@@ -68,12 +68,13 @@ function makeLabels() {
   labelBox.innerHTML = ""; labels = [];
   const add = (txt, x, z, kind, id, y = 6) => {
     const el = document.createElement("div"); el.className = "lm-tag " + kind; el.textContent = txt; labelBox.appendChild(el);
-    el.addEventListener("click", () => { if (root._moved() > 8) return; if (kind === "place") S.travelPlace(id); else if (kind === "area") S.travelArea(id); });
+    el.addEventListener("click", () => { if (root._moved() > 8) return; if (kind === "place") S.travelPlace(id); else if (kind === "area" && id) S.travelArea(id); });
     labels.push({ el, x, y, z, kind });
   };
   for (const a of S.AREAS) add("🏘️ " + a.name, a.x, a.z, "area", a.id, 8);
   for (const p of S.listPlaces()) add((p.minimapIcon || "📍") + " " + p.name, p.entranceX, p.entranceZ, "place", p.id, 8);
   const h = S.getHomePos && S.getHomePos(); if (h) add("🏠 My Home", h.x, h.z, "home", null, 6);
+  for (const e of (S.extraLabels || [])) add(e.name, e.x, e.z, "area", null, 10);
   add("📍 You", 0, 0, "me", null, 4); labels[labels.length - 1].follow = true;
 }
 
@@ -82,8 +83,8 @@ export function openLiveMap() {
   if (!root) build();
   on = true;
   st.x = st.tx = S.player.pos.x; st.z = st.tz = S.player.pos.z; st.dist = st.tdist = 200;
-  saved = { far: S.camera.far, fogNear: S.scene.fog ? S.scene.fog.near : 0, fogFar: S.scene.fog ? S.scene.fog.far : 0 };
-  S.camera.far = 4000; S.camera.updateProjectionMatrix();
+  saved = { near: S.camera.near, far: S.camera.far, fogNear: S.scene.fog ? S.scene.fog.near : 0, fogFar: S.scene.fog ? S.scene.fog.far : 0 };
+  S.camera.far = 4000; S.camera.near = 2; S.camera.updateProjectionMatrix();
   if (S.scene.fog) { S.scene.fog.near = 500; S.scene.fog.far = 2600; }
   document.body.classList.add("live-map");
   root.style.display = ""; makeLabels();
@@ -92,7 +93,7 @@ export function openLiveMap() {
 export function closeLiveMap() {
   if (!on) return;
   on = false;
-  S.camera.far = saved.far; S.camera.updateProjectionMatrix();
+  S.camera.far = saved.far; S.camera.near = saved.near; S.camera.updateProjectionMatrix();
   if (S.scene.fog) { S.scene.fog.near = saved.fogNear; S.scene.fog.far = saved.fogFar; }
   document.body.classList.remove("live-map");
   root.style.display = "none";

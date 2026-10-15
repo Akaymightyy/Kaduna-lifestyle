@@ -4,8 +4,8 @@ export const WORLD_HALF_X = 200;
 // FEATURE 3b: expanded walkable bounds so players can reach all 14 area plot
 // positions (cheap areas at Z=±80, rich areas at Z=±40). The ground plane in
 // world.js is already 1400x700 — plenty of room. This is just the player clamp.
-export const PLAYER_LIMIT_X = 340;
-export const PLAYER_LIMIT_Z = 320;
+export const PLAYER_LIMIT_X = 560;
+export const PLAYER_LIMIT_Z = 400;
 export const CROSSINGS = [-80, 0, 80];
 export const SIDE_STREETS = [-90, 90];
 // ---- WIDE CITY: districts sit OUTSIDE the main-street band and are joined by avenues + cross streets ----

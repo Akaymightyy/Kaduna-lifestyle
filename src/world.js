@@ -81,7 +81,7 @@ export function buildWorld(scene) {
   scene.add(world);
 
   // ---- ground ----
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(MAP_HALF_X * 2 + 700, MAP_HALF_Z * 2 + 300), new THREE.MeshLambertMaterial({ color: 0x9aab62 }));
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(MAP_HALF_X * 2 + 2200, MAP_HALF_Z * 2 + 1900), new THREE.MeshLambertMaterial({ color: 0x9aab62 }));
   ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
   world.add(ground);
 

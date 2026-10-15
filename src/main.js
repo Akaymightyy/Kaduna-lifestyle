@@ -27,6 +27,7 @@ import { ORIGINS, HOUSE_TIERS, getRentInfo, payRent, checkRentDue, applyOrigin, 
 import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
 import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
 import { celebrate } from "./celebrate.js";
+import { addScenery, SCENERY_LABELS } from "./scenery.js";
 import { initLiveMap, openLiveMap, closeLiveMap, isLiveMapOn, liveMapFrame } from "./livemap.js";
 import { perfFrameStart, perfBeforeRender, perfAfterRender } from "./perf.js";
 import { initGraphics, updateSky, tickGraphics, tickShadows, applyQuality, autoDetectQuality, getQuality, QUALITY_PRESETS } from "./graphics.js";
@@ -215,6 +216,7 @@ function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.asp
 addEventListener("resize", resize); resize();
 
 const world = buildWorld(scene);
+addScenery(scene, world);
 const traffic = createTraffic(scene);
 let mmDraw = createMinimap($("mm"), world.mapShapes);
 // FEATURE 3b: init the chunk-streamed area world (roads + NPC houses + lamp posts).
@@ -2621,7 +2623,7 @@ function governor(raw) {
   console.log("[quality] fps", fps.toFixed(0), "-> level", _gLevel);
 }
 
-initLiveMap({ scene, camera, player, AREAS, listPlaces, getHomePos: () => window._myHomePos, limits: { x: 340, z: 320 },
+initLiveMap({ scene, camera, player, AREAS, listPlaces, getHomePos: () => window._myHomePos, limits: { x: 560, z: 400 }, extraLabels: SCENERY_LABELS,
   travelPlace: (id) => { closeLiveMap(); window.travelToPlace(id); },
   travelArea: (id) => { closeLiveMap(); window.travelToArea(id); },
   tickWorld: (x, z, r) => { tickAreaWorld(x, z, r); tickPlotDoors(x, z); } });
