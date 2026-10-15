@@ -2549,6 +2549,7 @@ function frame() {
   const _pn = performance.now();
   if (_pn - _lastFrameT < 14) { requestAnimationFrame(frame); return; }
   _lastFrameT = _pn;
+  perfFrameStart();
   // Nothing runs until the player has signed in / signed up.
   if (!isAuthed && !window.__bypassAuth) { clock.getDelta(); renderer.render(scene, camera); requestAnimationFrame(frame); return; }
   const _raw = clock.getDelta(); governor(_raw);

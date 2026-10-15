@@ -96,6 +96,7 @@ export function closeLiveMap() {
   if (S.scene.fog) { S.scene.fog.near = saved.fogNear; S.scene.fog.far = saved.fogFar; }
   document.body.classList.remove("live-map");
   root.style.display = "none";
+  document.querySelectorAll("#bottom-nav .nav-btn").forEach(b => b.classList.toggle("active", b.dataset.nav === "home"));
 }
 
 /** Called every frame while the map is open (instead of the normal gameplay update). */
