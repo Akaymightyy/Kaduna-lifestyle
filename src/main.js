@@ -62,6 +62,49 @@ const showError = (m) => { const e = $("err"); e.style.display = "flex"; e.textC
 // A stray runtime error must not kill the whole game screen: log it, only load failures are fatal.
 addEventListener("error", (e) => { console.error("[game error]", e.message); });
 
+// ---- PWA: Install App prompt ----
+// When the browser detects the app is installable, it fires beforeinstallprompt.
+// We capture it and show a floating "Install App" button. Tapping it triggers
+// the browser's native install dialog.
+let _deferredPrompt = null;
+addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  _deferredPrompt = e;
+  // Show install button if not already shown + not already installed
+  if (!_deferredPrompt || localStorage.getItem("kaduna-installed") === "1") return;
+  let btn = document.getElementById("pwa-install-btn");
+  if (!btn) {
+    btn = document.createElement("button");
+    btn.id = "pwa-install-btn";
+    btn.style.cssText = "position:fixed;right:12px;top:calc(12px + env(safe-area-inset-top));" +
+      "z-index:35;background:#f2b134;color:#000;border:none;border-radius:20px;padding:6px 14px;" +
+      "font:700 12px Poppins,sans-serif;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3);" +
+      "display:flex;align-items:center;gap:4px;";
+    btn.innerHTML = "📥 Install";
+    btn.onclick = async () => {
+      if (!_deferredPrompt) return;
+      _deferredPrompt.prompt();
+      const { outcome } = await _deferredPrompt.userChoice;
+      if (outcome === "accepted") {
+        localStorage.setItem("kaduna-installed", "1");
+        toast("🎉 Kaduna Lifestyle installed! Find it on your home screen.");
+      }
+      _deferredPrompt = null;
+      btn.remove();
+    };
+    document.body.appendChild(btn);
+  }
+});
+// Hide install button if already installed (running in standalone mode)
+addEventListener("appinstalled", () => {
+  localStorage.setItem("kaduna-installed", "1");
+  document.getElementById("pwa-install-btn")?.remove();
+});
+// Check if already running as installed PWA (standalone mode)
+if (window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone) {
+  localStorage.setItem("kaduna-installed", "1");
+}
+
 // ---- Prevent back button from exiting the site ----
 // Push a dummy history state so the browser's back button stays in the app
 // instead of navigating away. If the user presses back again, show a confirm.
