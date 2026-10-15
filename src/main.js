@@ -2658,19 +2658,51 @@ function _frame() {
   const dt = Math.min(_raw, 0.05);
   if (isLiveMapOn()) { liveMapFrame(dt); perfBeforeRender(); renderer.render(scene, camera); perfAfterRender(renderer, getQuality()); requestAnimationFrame(frame); return; }
   const now = Date.now() / 1000;
-  const it = ctl.intent();
-  // FEATURE: if riding a vehicle, add its speed boost to the player's max speed
-  const vehicleBoost = isRiding() ? getRideSpeed() : 0;
-  const maxSpd = ((ctl.jog ? 4.8 : 2.1) + vehicleBoost) * (game.state.needs?.energy < 20 ? 0.5 : 1.0);
-  const target = it.mag * maxSpd;
-  player.speed += (target - player.speed) * (1 - Math.exp(-dt * 9));
-  if (it.mag > 0) {
-    const want = Math.atan2(it.x, it.z);
-    let d = want - player.heading; d = Math.atan2(Math.sin(d), Math.cos(d));
-    player.heading += d * (1 - Math.exp(-dt * 12));
-    player.pos.x += it.x * player.speed * dt; player.pos.z += it.z * player.speed * dt;
+  const _riding = isRiding();
+  if (_riding) {
+    // FEATURE: VEHICLE CONTROL SCHEME
+    // Joystick up/down = THROTTLE (accelerate / brake/reverse)
+    // Joystick left/right = STEERING (change heading — like a steering wheel)
+    // Speed ramps up gradually (acceleration feel, dt*3 vs dt*9 for walking)
+    // Vehicle top speed = getRideSpeed() * 1.8 (always faster than walking max 4.8)
+    const maxVehSpd = getRideSpeed() * 1.8;
+    // Get raw joystick + keyboard input (before camera-relative conversion)
+    let steer = ctl.joyX || 0, throttle = ctl.joyY || 0;
+    const k = ctl.keys || {};
+    if (k["w"] || k["arrowup"]) throttle += 1;
+    if (k["s"] || k["arrowdown"]) throttle -= 1;
+    if (k["a"] || k["arrowleft"]) steer -= 1;
+    if (k["d"] || k["arrowright"]) steer += 1;
+    steer = Math.max(-1, Math.min(1, steer));
+    throttle = Math.max(-1, Math.min(1, throttle));
+    // Acceleration: throttle sets target, ramp is SLOWER (vehicle feel)
+    const target = throttle * maxVehSpd;
+    player.speed += (target - player.speed) * (1 - Math.exp(-dt * 3));
+    // Steering: change heading proportional to speed (can't steer when parked)
+    if (Math.abs(player.speed) > 0.3) {
+      const steerRate = 2.8;  // radians per second at full lock
+      player.heading += steer * steerRate * dt * (player.speed > 0 ? 1 : -1);
+    }
+    // Move along heading direction (not camera-relative)
+    const fx = -Math.sin(player.heading), fz = -Math.cos(player.heading);
+    player.pos.x += fx * player.speed * dt;
+    player.pos.z += fz * player.speed * dt;
+  } else {
+    // NORMAL WALKING (existing camera-relative control scheme)
+    const it = ctl.intent();
+    const maxSpd = (ctl.jog ? 4.8 : 2.1) * (game.state.needs?.energy < 20 ? 0.5 : 1.0);
+    const target = it.mag * maxSpd;
+    player.speed += (target - player.speed) * (1 - Math.exp(-dt * 9));
+    if (it.mag > 0) {
+      const want = Math.atan2(it.x, it.z);
+      let d = want - player.heading; d = Math.atan2(Math.sin(d), Math.cos(d));
+      player.heading += d * (1 - Math.exp(-dt * 12));
+      player.pos.x += it.x * player.speed * dt; player.pos.z += it.z * player.speed * dt;
+    }
   }
   const active = getActivePlace();
+  // SAFETY: auto-dismount vehicle when entering a place (can't ride inside a shop)
+  if (active && isRiding()) { despawnRideVehicle(); toast("🚶 Dismounted (entered building)"); }
   if (!active) collide(player.pos, world.colliders);
   // If we're inside a place, also collide with the place's local colliders
   if (active?.handle?.colliders) {
@@ -2703,7 +2735,15 @@ function _frame() {
       }
     }
   }
-  if (rig) { rig.group.position.copy(player.pos); rig.group.rotation.y = player.heading; rig.animate(dt, player.speed); }
+  if (rig) {
+    rig.group.position.copy(player.pos);
+    rig.group.rotation.y = player.heading;
+    rig.animate(dt, player.speed);
+    // FEATURE: hide the player's character model when riding a vehicle.
+    // The vehicle mesh IS the visual representation — without this, the
+    // player's feet + legs clip through the vehicle body.
+    rig.group.visible = !isRiding();
+  }
   // FEATURE: update the ride vehicle mesh to follow the player
   tickRideVehicle(player.pos, player.heading);
   updateCamera(camera, ctl, player.pos, active ? (active.handle.colliders || []) : world.colliders, dt);
