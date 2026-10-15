@@ -1,0 +1,32 @@
+{
+  "name": "Kaduna Lifestyle",
+  "short_name": "Kaduna",
+  "description": "3D multiplayer life-sim game of Kaduna, Nigeria. Buy houses, ride cars, meet friends, and live your best Kaduna life.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#9fd4f5",
+  "theme_color": "#0f4d3a",
+  "categories": ["games", "social", "entertainment"],
+  "icons": [
+    {
+      "src": "/icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}
