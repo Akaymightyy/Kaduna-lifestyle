@@ -8,9 +8,9 @@ const APP_SHELL = [
   "/index.html",
   "/data/kaduna.json",
   "/manifest.json",
-  "/icon-192.svg",
-  "/icon-512.svg",
-  "/icon.svg",
+  "/icon-192.png",
+  "/icon-512.png",
+  "/icon-maskable.png",
 ];
 
 // ---- Install: pre-cache the app shell ----
