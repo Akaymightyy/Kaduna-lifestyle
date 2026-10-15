@@ -3,7 +3,7 @@ import { AREAS } from "./areas.js";
 
 // Pre-baked top-down map (2 px per metre), redrawn rotated around the player ~10x/second.
 export function createMinimap(canvas, shapes) {
-  const S = 2, W = MAP_HALF_X * 2 * S, H = MAP_HALF_Z * 2 * S;
+  const S = 1.25, W = MAP_HALF_X * 2 * S, H = MAP_HALF_Z * 2 * S;
   const base = document.createElement("canvas"); base.width = W; base.height = H;
   const g = base.getContext("2d");
   const X = (x) => (x + MAP_HALF_X) * S, Z = (z) => (z + MAP_HALF_Z) * S;

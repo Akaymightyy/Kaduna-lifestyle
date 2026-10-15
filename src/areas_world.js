@@ -106,7 +106,7 @@ const _hide = new THREE.Matrix4().makeScale(0, 0, 0);
 const _up = new THREE.Vector3(0, 1, 0);
 
 let _tkX = 1e9, _tkZ = 1e9, _tkT = 0;
-export function tickAreaWorld(playerX, playerZ) {
+export function tickAreaWorld(playerX, playerZ, range) {
   if (!_scene) return;
   // Houses/lamps only need refreshing when the player moved ~1 m or every 300 ms (was every single frame)
   const _now = performance.now(), _dx = playerX - _tkX, _dz = playerZ - _tkZ;
@@ -117,10 +117,10 @@ export function tickAreaWorld(playerX, playerZ) {
   for (const area of AREAS) {
     const dx = area.x - playerX, dz = area.z - playerZ;
     const distToArea = Math.sqrt(dx * dx + dz * dz);
-    const isNear = distToArea < AREA_RENDER_RANGE;
+    const isNear = distToArea < (range || AREA_RENDER_RANGE) + 80;
     if (isNear) {
       if (!_areasBuilt.has(area.id)) _buildArea(area);
-      _updateArea(area, playerX, playerZ, distToArea);
+      _updateArea(area, playerX, playerZ, distToArea, range || AREA_RENDER_RANGE);
     } else {
       if (_areasBuilt.has(area.id)) _disposeArea(area.id);
     }
@@ -202,13 +202,13 @@ function _buildArea(area) {
 }
 
 // ---- Update an area's chunk positions (called per-frame while the area is nearby) ----
-function _updateArea(area, playerX, playerZ, distToArea) {
+function _updateArea(area, playerX, playerZ, distToArea, range) {
   const entry = _areasBuilt.get(area.id);
   if (!entry) return;
   const { houseMesh, lampMesh, capacity, lampCount } = entry;
 
   // Hide the whole area's meshes if the player is too far
-  if (distToArea > AREA_RENDER_RANGE) {
+  if (distToArea > range + 80) {
     houseMesh.visible = false;
     lampMesh.visible = false;
     entry.roadMesh.visible = false;
@@ -239,7 +239,7 @@ function _updateArea(area, playerX, playerZ, distToArea) {
     const plotNo = parseInt(plotNoStr, 10);
     const pos = getPlotPosition(area, plotNo);
     const dx = pos.x - playerX, dz = pos.z - playerZ;
-    if (dx * dx + dz * dz > PLOT_CHUNK_RANGE * PLOT_CHUNK_RANGE) continue;
+    if (dx * dx + dz * dz > (range - 30) * (range - 30)) continue;
     _v.set(pos.x, 0, pos.z);
     _q.setFromAxisAngle(_up, pos.rot || 0);
     _m4.compose(_v, _q, _scl);
@@ -299,7 +299,7 @@ function _updateArea(area, playerX, playerZ, distToArea) {
     if (lampIdx >= lampCount) break;
     const pos = getPlotPosition(area, plotNo);
     const dx = pos.x - playerX, dz = pos.z - playerZ;
-    if (dx * dx + dz * dz > PLOT_CHUNK_RANGE * PLOT_CHUNK_RANGE) continue;
+    if (dx * dx + dz * dz > (range - 30) * (range - 30)) continue;
     // Offset lamp to the corner of the plot (so it doesn't clip into the house)
     _v.set(pos.x + 3.5, 0, pos.z + 3.5);
     _q.identity();

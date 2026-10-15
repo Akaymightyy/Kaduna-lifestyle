@@ -5,6 +5,7 @@ import { loadPlayer, collide } from "./player.js";
 import { createControls, updateCamera } from "./controls.js";
 import { createMinimap } from "./minimap.js";
 import { addCity } from "./city.js";
+import { WIDE_AVENUES_X, WIDE_CROSS_Z, MAP_HALF_X, MAP_HALF_Z } from "./config.js";
 import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAILY_QUESTS, DAILY_REWARDS, TIME_SCALE, REAL_MS_PER_GAME_HOUR, FIXED_HOUR } from "./config.js";
 import { createGameState } from "./needs.js";
 import { auth, db } from "./firebase.js";
@@ -26,6 +27,7 @@ import { ORIGINS, HOUSE_TIERS, getRentInfo, payRent, checkRentDue, applyOrigin, 
 import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
 import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
 import { celebrate } from "./celebrate.js";
+import { initLiveMap, openLiveMap, closeLiveMap, isLiveMapOn, liveMapFrame } from "./livemap.js";
 import { perfFrameStart, perfBeforeRender, perfAfterRender } from "./perf.js";
 import { initGraphics, updateSky, tickGraphics, tickShadows, applyQuality, autoDetectQuality, getQuality, QUALITY_PRESETS } from "./graphics.js";
 import { AREAS, getArea, claimPlot, getMyHouse, canPickArea, getPlotPosition } from "./areas.js";
@@ -561,26 +563,32 @@ function _showPhoneApp(appId) {
     // Visual drone-style top-down map (canvas) + place list below
     const places = listPlaces();
     const gameHour = _gameHour();
-    // Map bounds: x from -160 to 160, z from -50 to 50
-    const MAP_W = 300, MAP_H = 120;
-    const minWX = -160, maxWX = 160, minWZ = -50, maxWZ = 50;
+    // Map bounds = the WHOLE wide city (main street + 14 districts + avenues)
+    const MAP_W = 300, MAP_H = Math.round(300 * (MAP_HALF_Z / MAP_HALF_X));
+    const minWX = -MAP_HALF_X, maxWX = MAP_HALF_X, minWZ = -MAP_HALF_Z, maxWZ = MAP_HALF_Z;
     const toMapX = (wx) => ((wx - minWX) / (maxWX - minWX)) * MAP_W;
     const toMapZ = (wz) => ((wz - minWZ) / (maxWZ - minWZ)) * MAP_H;
+    const sx1 = MAP_W / (maxWX - minWX), sz1 = MAP_H / (maxWZ - minWZ);   // metres -> svg units
     // Player position
     const px = player.pos.x, pz = player.pos.z;
     // Build SVG (crisp, tappable)
     let svg = '<svg width="100%" viewBox="0 0 '+MAP_W+' '+MAP_H+'" style="background:#9aab62;border-radius:12px;display:block;touch-action:manipulation;">';
-    // Grass background already set. Draw road (gray horizontal strip)
+    // Avenues + cross streets of the wide city
+    for (const ax of WIDE_AVENUES_X) svg += '<rect x="'+(toMapX(ax)-5*sx1)+'" y="0" width="'+(10*sx1)+'" height="'+MAP_H+'" fill="#555a62"/>';
+    for (const cz of WIDE_CROSS_Z) svg += '<rect x="0" y="'+(toMapZ(cz)-5*sz1)+'" width="'+MAP_W+'" height="'+(10*sz1)+'" fill="#555a62"/>';
+    // Main street (gray horizontal strip) + centre line
     svg += '<rect x="0" y="'+(toMapZ(-9))+'" width="'+MAP_W+'" height="'+(toMapZ(9)-toMapZ(-9))+'" fill="#555a62"/>';
-    // Road markings (dashed center line)
-    svg += '<line x1="0" y1="'+toMapZ(0)+'" x2="'+MAP_W+'" y2="'+toMapZ(0)+'" stroke="#fff" stroke-width="0.8" stroke-dasharray="4,3"/>';
-    // Side streets
-    for (const sx of [-90, 90]) {
-      svg += '<rect x="'+(toMapX(sx)-2)+'" y="0" width="4" height="'+MAP_H+'" fill="#555a62"/>';
+    svg += '<line x1="0" y1="'+toMapZ(0)+'" x2="'+MAP_W+'" y2="'+toMapZ(0)+'" stroke="#fff" stroke-width="0.6" stroke-dasharray="4,3"/>';
+    // Building bands either side of the main street
+    svg += '<rect x="'+toMapX(-200)+'" y="'+toMapZ(-60)+'" width="'+(400*sx1)+'" height="'+(51*sz1)+'" fill="#8f7a5e"/>';
+    svg += '<rect x="'+toMapX(-200)+'" y="'+toMapZ(9)+'" width="'+(400*sx1)+'" height="'+(51*sz1)+'" fill="#8f7a5e"/>';
+    // Districts (tappable blocks)
+    for (const a of AREAS) {
+      const fill = a.tier === "rich" ? "#e6d49a" : a.tier === "middle" ? "#b7d3a0" : "#d3c19a";
+      svg += '<g style="cursor:pointer;" onclick="window.travelToArea(\''+a.id+'\')">'+
+        '<rect x="'+toMapX(a.x-44)+'" y="'+toMapZ(a.z-40)+'" width="'+(88*sx1)+'" height="'+(96*sz1)+'" rx="2" fill="'+fill+'" stroke="#33413a" stroke-width="0.6"/>'+
+        '<text x="'+toMapX(a.x)+'" y="'+(toMapZ(a.z+8)+2)+'" text-anchor="middle" font-size="5.5" font-weight="700" fill="#243028">'+a.name+'</text></g>';
     }
-    // Buildings strip (top + bottom)
-    svg += '<rect x="0" y="0" width="'+MAP_W+'" height="'+toMapZ(-12)+'" fill="#8f7a5e"/>';
-    svg += '<rect x="0" y="'+toMapZ(12)+'" width="'+MAP_W+'" height="'+(MAP_H-toMapZ(12))+'" fill="#8f7a5e"/>';
     // Place markers (tappable)
     for (const p of places) {
       const mx = toMapX(p.entranceX), mz = toMapZ(p.entranceZ);
@@ -588,14 +596,16 @@ function _showPhoneApp(appId) {
       const color = "#" + (p.minimapColor || 0xc0392b).toString(16).padStart(6, "0");
       svg += '<g style="cursor:pointer;" onclick="window.travelToPlace(\''+p.id+'\')">';
       // Glow ring (open only)
-      if (open) svg += '<circle cx="'+mx+'" cy="'+mz+'" r="7" fill="'+color+'" opacity="0.25"/>';
+      if (open) svg += '<circle cx="'+mx+'" cy="'+mz+'" r="5" fill="'+color+'" opacity="0.25"/>';
       // Main dot
-      svg += '<circle cx="'+mx+'" cy="'+mz+'" r="4.5" fill="'+color+'" stroke="#fff" stroke-width="1.5"/>';
+      svg += '<circle cx="'+mx+'" cy="'+mz+'" r="3" fill="'+color+'" stroke="#fff" stroke-width="1"/>';
       // Label (short)
       const shortName = p.name.split(" ").slice(0, 2).join(" ");
-      svg += '<text x="'+mx+'" y="'+(mz-7)+'" text-anchor="middle" font-size="6" font-weight="700" fill="#fff" style="paint-order:stroke;stroke:#000;stroke-width:1.5;">'+shortName+'</text>';
+      svg += '<text x="'+mx+'" y="'+(mz-5)+'" text-anchor="middle" font-size="4.5" font-weight="700" fill="#fff" style="paint-order:stroke;stroke:#000;stroke-width:1.5;">'+shortName+'</text>';
       svg += '</g>';
     }
+    // My home
+    if (window._myHomePos) svg += '<text x="'+toMapX(window._myHomePos.x)+'" y="'+(toMapZ(window._myHomePos.z)+3)+'" text-anchor="middle" font-size="9">🏠</text>';
     // Player position (pulsing red dot)
     const pmx = toMapX(px), pmz = toMapZ(pz);
     svg += '<circle cx="'+pmx+'" cy="'+pmz+'" r="6" fill="#ff6a3d" opacity="0.3"><animate attributeName="r" values="6;9;6" dur="1.5s" repeatCount="indefinite"/></circle>';
@@ -608,7 +618,7 @@ function _showPhoneApp(appId) {
       '<span><span style="display:inline-block;width:8px;height:8px;background:#ff6a3d;border-radius:50%;border:1px solid #fff;"></span> You</span>'+
       '<span><span style="display:inline-block;width:8px;height:8px;background:#2e7d4f;border-radius:50%;"></span> Open place</span>'+
       '<span><span style="display:inline-block;width:8px;height:8px;background:#e11d48;border-radius:50%;"></span> Closed place</span>'+
-      '<span>👆 Tap a place to travel</span>'+
+      '<span>👆 Tap a place or a district to travel</span>'+
     '</div>';
     // Place list (tappable)
     const placeList = places.map(p => {
@@ -617,7 +627,11 @@ function _showPhoneApp(appId) {
       const color = "#" + (p.minimapColor || 0xc0392b).toString(16).padStart(6, "0");
       return '<div onclick="window.travelToPlace(\''+p.id+'\')" style="padding:8px;background:'+(open?'#e8f5e9':'#f5e8e8')+';border-radius:8px;margin-bottom:5px;font-size:12px;font-weight:600;color:var(--green);cursor:pointer;border-left:4px solid '+color+';">'+p.minimapIcon+' '+p.name+' '+openBadge+'<div style="font-size:10px;color:#666;font-weight:400;margin-top:2px;">'+(p.type==='interior'?'Interior':'Outdoor')+' · '+p.activities.length+' activities</div></div>';
     }).join("");
-    c.innerHTML='<div style="font-size:14px;margin-bottom:8px;font-weight:700;color:var(--green);">🗺️ Kaduna Map</div>'+svg+legend+'<div style="font-size:11px;font-weight:600;margin:8px 0 6px;color:#666;">All Places:</div>'+placeList+backBtn;
+    const areaList = AREAS.map(a => {
+      const tc = a.tier === "rich" ? "#f2b134" : a.tier === "middle" ? "#4a9a5a" : "#8a8f96";
+      return '<div onclick="window.travelToArea(\''+a.id+'\')" style="padding:8px;background:#f1efe7;border-radius:8px;margin-bottom:5px;font-size:12px;font-weight:600;color:var(--green);cursor:pointer;border-left:4px solid '+tc+';">🏘️ '+a.name+' <span style="font-size:10px;color:#888;font-weight:400;">· '+a.tier+'</span><div style="font-size:10px;color:#666;font-weight:400;margin-top:2px;">Rent ₦'+a.rentPrice.toLocaleString()+' · Buy ₦'+a.buyPrice.toLocaleString()+' · Go there ₦'+AREA_TRAVEL_FARE+'</div></div>';
+    }).join("");
+    c.innerHTML='<div style="font-size:14px;margin-bottom:8px;font-weight:700;color:var(--green);">🗺️ Kaduna Map</div>'+svg+legend+'<div style="font-size:11px;font-weight:600;margin:8px 0 6px;color:#666;">Districts:</div>'+areaList+'<div style="font-size:11px;font-weight:600;margin:8px 0 6px;color:#666;">All Places:</div>'+placeList+backBtn;
     return;
   }
   if(appId==="daily"){
@@ -1291,6 +1305,23 @@ window._saveLook=()=>{
   const uid=getMyUid();
   if(uid) update(ref(db,"players/"+uid+"/look"),game.state.look);
   toast("✓ Outfit saved! Other players can see it.");
+};
+const AREA_TRAVEL_FARE = 300;
+window.travelToArea=(areaId)=>{
+  const a = getArea(areaId);
+  if (!a) return;
+  if (getActivePlace()) { toast("Leave the building first."); return; }
+  if (game.state.money < AREA_TRAVEL_FARE) { toast("A keke to " + a.name + " costs ₦" + AREA_TRAVEL_FARE + " — you don't have enough."); return; }
+  game.state.money -= AREA_TRAVEL_FARE;
+  game.save?.();
+  const uid = getMyUid();
+  if (uid) update(ref(db, "economy/" + uid), { balance: game.state.money });
+  // arrive on the district's own road, west end, facing east
+  player.pos.x = a.x - 48; player.pos.z = a.z;
+  ctl.yaw = -Math.PI / 2 + Math.PI;
+  updateHUD();
+  closePhone?.();
+  toast("🛺 Welcome to " + a.name + " (−₦" + AREA_TRAVEL_FARE + ")");
 };
 window.travelToPlace=(placeId)=>{
   // Called from the map app: open the ride app with this place preselected
@@ -2077,7 +2108,7 @@ document.querySelectorAll("#bottom-nav .nav-btn").forEach(btn=>{
     btn.classList.add("active");
     const n=btn.dataset.nav;
     if(n==="phone")openPhone();
-    else if(n==="map"){openPhone();setTimeout(()=>showPhoneApp("map"),50);}
+    else if(n==="map"){closePhone();$("profile-sheet")?.classList.remove("show");openLiveMap();}
     else if(n==="home"){
       closePhone();$("profile-sheet")?.classList.remove("show");
       // Travel to the player's home entrance (dynamic coordinates)
@@ -2507,11 +2538,17 @@ function governor(raw) {
   console.log("[quality] fps", fps.toFixed(0), "-> level", _gLevel);
 }
 
+initLiveMap({ scene, camera, player, AREAS, listPlaces, getHomePos: () => window._myHomePos, limits: { x: 340, z: 320 },
+  travelPlace: (id) => { closeLiveMap(); window.travelToPlace(id); },
+  travelArea: (id) => { closeLiveMap(); window.travelToArea(id); },
+  tickWorld: (x, z, r) => { tickAreaWorld(x, z, r); tickPlotDoors(x, z); } });
+
 function frame() {
   // Nothing runs until the player has signed in / signed up.
   if (!isAuthed && !window.__bypassAuth) { clock.getDelta(); renderer.render(scene, camera); requestAnimationFrame(frame); return; }
   const _raw = clock.getDelta(); governor(_raw);
   const dt = Math.min(_raw, 0.05);
+  if (isLiveMapOn()) { liveMapFrame(dt); perfBeforeRender(); renderer.render(scene, camera); perfAfterRender(renderer, getQuality()); requestAnimationFrame(frame); return; }
   const now = Date.now() / 1000;
   const it = ctl.intent();
   const maxSpd = (ctl.jog ? 4.8 : 2.1) * (game.state.needs?.energy < 20 ? 0.5 : 1.0);
