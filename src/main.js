@@ -43,7 +43,7 @@ import {
   disposePlotDoors,
   getAreaNameSprites,
 } from "./plots.js";
-import { initAreaWorld, tickAreaWorld, setAreaLampsNight, disposeAreaWorld } from "./areas_world.js";
+import { initAreaWorld, tickAreaWorld, setAreaLampsNight, disposeAreaWorld, getRentSigns } from "./areas_world.js";
 // FEATURE 3c: load real Kaduna road + river + building data from kaduna.json
 // (a static OSM-derived file shipped in public/data/). The main Ahmadu Bello
 // Way is filtered out (already rendered by world.js) to avoid double-render.
@@ -286,20 +286,27 @@ function _handleWorldTap(clientX, clientY) {
   _tapPointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
   _tapRaycaster.setFromCamera(_tapPointer, camera);
   const targets = [];
+  // Remote player groups
   const remotes = getRemotePlayers();
   for (const uid in remotes) {
     const m = remotes[uid];
     if (m.group && m.group.visible) targets.push(m.group);
   }
+  // Area name sprites
   const areaSprites = getAreaNameSprites();
   for (const [areaId, entry] of areaSprites) {
     if (entry.sprite && entry.sprite.visible) targets.push(entry.sprite);
+  }
+  // FOR RENT / FOR SALE sign sprites
+  const rentSigns = getRentSigns();
+  for (const slot of rentSigns) {
+    if (slot.sprite && slot.sprite.visible) targets.push(slot.sprite);
   }
   if (!targets.length) return;
   const hits = _tapRaycaster.intersectObjects(targets, true);
   if (!hits.length) return;
   let obj = hits[0].object;
-  while (obj && !obj.userData?.isRemotePlayer && !obj.userData?.isAreaName) obj = obj.parent;
+  while (obj && !obj.userData?.isRemotePlayer && !obj.userData?.isAreaName && !obj.userData?.isForRent) obj = obj.parent;
   if (!obj) return;
   const ud = obj.userData;
   if (ud.isRemotePlayer) {
@@ -323,6 +330,38 @@ function _handleWorldTap(clientX, clientY) {
     player.pos.set(a.x, 0, a.z);
     player.heading = 0;
     toast("📍 Travelled to " + areaName);
+  } else if (ud.isForRent) {
+    // Tap on a FOR RENT / FOR SALE sign → rent/buy prompt
+    const area = getArea(ud.areaId);
+    if (!area) { toast("Unknown area"); return; }
+    if (!canPickArea(game.state.origin, area)) { toast("🔒 Your origin can't live here"); return; }
+    const isForSale = area.tier === "rich";
+    const price = isForSale ? ud.buyPrice : ud.rentPrice;
+    const label = isForSale ? "Buy" : "Rent";
+    if (game.state.money < price) { toast("Need ₦" + price.toLocaleString() + " to " + label.toLowerCase() + " here"); return; }
+    if (!confirm(label + " a house in " + ud.areaName + " for ₦" + price.toLocaleString() + "?")) return;
+    // Claim the plot
+    const uid = getMyUid();
+    if (!uid) { toast("Sign in first"); return; }
+    const name = getMyName() || "Player";
+    toast("🏠 Claiming plot in " + ud.areaName + "...");
+    claimPlot(ud.areaId, uid, name, game.state.origin).then((r) => {
+      if (r.ok) {
+        game.state.money -= price;
+        game.state.homeArea = ud.areaId;
+        game.state.homePlot = r.plotNo;
+        if (r.tier) game.state.homeTier = r.tier;
+        game.save?.();
+        _syncHomeEntrance();
+        update(ref(db, "economy/" + uid), { balance: game.state.money });
+        update(ref(db, "players/" + uid), { homeArea: ud.areaId, homePlot: r.plotNo, homeTier: game.state.homeTier });
+        toast("🎉 Plot " + r.plotNo + " in " + ud.areaName + " is yours!");
+        const pos = getPlotPosition(area, r.plotNo);
+        player.pos.set(pos.x, 0, pos.z + 4);
+        player.heading = Math.PI;
+        updateHUD();
+      } else { toast("❌ " + (r.reason || "Could not claim — try another plot")); }
+    }).catch((e) => { toast("Claim failed — try again"); console.warn(e); });
   }
 }
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 400);

@@ -53,6 +53,11 @@ const DOOR_W = 1.0, DOOR_H = 2.0;
 let _scene = null;
 let _worldColliders = null;   // FEATURE: ref to world.colliders so we can push house footprints
 let _areasBuilt = new Map();  // areaId -> { houseMesh, lampMesh, roadMesh, capacity }
+// FEATURE: FOR RENT / FOR SALE sign pool — shows at empty plots within range.
+let _rentSignPool = [];
+let _rentSignGroup = null;
+const RENT_SIGN_RANGE = 45;
+const RENT_SIGN_POOL_SIZE = 16;
 
 // ---- Build the merged house geometry (body + roof + door), used for every instance ----
 // The geometry is the SAME for every house — only the per-instance color varies
@@ -94,8 +99,28 @@ function _buildLampGeometry() {
 // ---- Init ----
 export function initAreaWorld(scene, worldColliders) {
   _scene = scene;
-  _worldColliders = worldColliders;  // FEATURE: stash the ref so per-area house colliders can be pushed
+  _worldColliders = worldColliders;
+  // FEATURE: create the FOR RENT / FOR SALE sign pool (16 sprites, recycled LRU)
+  _rentSignGroup = new THREE.Group();
+  _rentSignGroup.name = "rent_signs";
+  _scene.add(_rentSignGroup);
+  for (let i = 0; i < RENT_SIGN_POOL_SIZE; i++) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 256; canvas.height = 96;
+    const ctx = canvas.getContext("2d");
+    const tex = new THREE.CanvasTexture(canvas);
+    const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+    const sprite = new THREE.Sprite(mat);
+    sprite.visible = false;
+    sprite.scale.set(4, 1.5, 1);
+    sprite.userData = {};
+    _rentSignGroup.add(sprite);
+    _rentSignPool.push({ sprite, canvas, ctx, texture: tex, plotKey: null });
+  }
 }
+
+// FEATURE: expose the rent sign pool for the tap-raycaster
+export function getRentSigns() { return _rentSignPool; }
 
 // ---- Tick: per-frame, manage per-area meshes + chunk positions ----
 const _m4 = new THREE.Matrix4();
@@ -125,6 +150,79 @@ export function tickAreaWorld(playerX, playerZ, range) {
       if (_areasBuilt.has(area.id)) _disposeArea(area.id);
     }
   }
+  // FEATURE: update FOR RENT / FOR SALE signs at empty plots near the player
+  _updateRentSigns(playerX, playerZ);
+}
+
+// ---- FEATURE: Update FOR RENT / FOR SALE signs ----
+// Collects empty plots within RENT_SIGN_RANGE across all nearby areas.
+// Assigns the nearest N to the sprite pool (LRU recycled). Each sprite
+// shows "FOR RENT ₦X/wk" or "FOR SALE ₦X" and is tappable.
+function _updateRentSigns(playerX, playerZ) {
+  if (!_rentSignPool.length) return;
+  // Collect empty plots within range
+  const candidates = [];
+  for (const [areaId, entry] of _areasBuilt) {
+    const area = getArea(areaId);
+    if (!area) continue;
+    const houses = getAreaHouses(areaId);
+    // Iterate a sample of plots (every 3rd plot to avoid checking all 100+)
+    for (let plotNo = 0; plotNo < area.plots; plotNo += 3) {
+      // Skip if occupied
+      if (houses[plotNo]) continue;
+      const pos = getPlotPosition(area, plotNo);
+      const dx = pos.x - playerX, dz = pos.z - playerZ;
+      const d2 = dx * dx + dz * dz;
+      if (d2 > RENT_SIGN_RANGE * RENT_SIGN_RANGE) continue;
+      candidates.push({ areaId, plotNo, area, pos, dist: Math.sqrt(d2) });
+    }
+  }
+  // Sort by distance — nearest first
+  candidates.sort((a, b) => a.dist - b.dist);
+  // Assign to pool
+  for (let i = 0; i < _rentSignPool.length; i++) {
+    const slot = _rentSignPool[i];
+    const c = candidates[i];
+    if (!c) { slot.sprite.visible = false; slot.plotKey = null; continue; }
+    const plotKey = c.areaId + "/" + c.plotNo;
+    if (slot.plotKey !== plotKey) {
+      // Redraw the sign canvas
+      const isForSale = c.area.tier === "rich";  // rich areas show FOR SALE, others FOR RENT
+      _drawRentSign(slot.canvas, slot.ctx, isForSale, c.area);
+      slot.texture.needsUpdate = true;
+      slot.plotKey = plotKey;
+    }
+    slot.sprite.position.set(c.pos.x, 3.5, c.pos.z);
+    slot.sprite.visible = true;
+    // Tag for tap-raycaster
+    slot.sprite.userData = {
+      isForRent: true,
+      areaId: c.areaId,
+      plotNo: c.plotNo,
+      rentPrice: c.area.rentPrice,
+      buyPrice: c.area.buyPrice,
+      areaName: c.area.name,
+    };
+  }
+}
+
+function _drawRentSign(canvas, ctx, isForSale, area) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const bg = isForSale ? "#1a2a5a" : "#2a5a1a";
+  const accent = isForSale ? "#60a5fa" : "#4ade80";
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = accent;
+  ctx.fillRect(0, 0, 5, canvas.height);
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 28px Poppins, Arial, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(isForSale ? "FOR SALE" : "FOR RENT", 128, 30);
+  ctx.font = "bold 20px Poppins, Arial, sans-serif";
+  ctx.fillStyle = accent;
+  const price = isForSale ? "₦" + area.buyPrice.toLocaleString() : "₦" + area.rentPrice.toLocaleString() + "/wk";
+  ctx.fillText(price, 128, 68);
 }
 
 // ---- Build all the meshes for one area (called once when the area first becomes nearby) ----
