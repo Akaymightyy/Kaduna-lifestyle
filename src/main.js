@@ -2629,7 +2629,24 @@ initLiveMap({ scene, camera, player, AREAS, listPlaces, getHomePos: () => window
   tickWorld: (x, z, r) => { tickAreaWorld(x, z, r); tickPlotDoors(x, z); } });
 
 let _lastFrameT = 0;
+// Safety net: if anything throws inside a frame the game used to freeze for good (buttons work, world never moves).
+// Now the loop keeps going, the scene still draws, and the error is shown in a small red tag you can screenshot.
+let _errN = 0;
 function frame() {
+  try { _frame(); }
+  catch (e) {
+    _errN++;
+    try { console.error("[frame error]", e); } catch (_) {}
+    try {
+      let b = document.getElementById("err-tag");
+      if (!b) { b = document.createElement("div"); b.id = "err-tag"; b.style.cssText = "position:fixed;left:6px;right:6px;top:calc(4px + env(safe-area-inset-top));z-index:9999;background:rgba(160,20,20,.9);color:#fff;font:600 10px monospace;padding:4px 6px;border-radius:6px;pointer-events:none;word-break:break-all"; document.body.appendChild(b); }
+      b.textContent = "⚠ #" + _errN + " " + (e && e.stack ? e.stack.split("\n").slice(0, 3).join(" | ") : String(e)).slice(0, 260);
+    } catch (_) {}
+    try { renderer.render(scene, camera); } catch (_) {}
+    requestAnimationFrame(frame);
+  }
+}
+function _frame() {
   // Cap at ~60 fps: 90/120 Hz phones in Chrome otherwise do double the work for nothing.
   const _pn = performance.now();
   if (_pn - _lastFrameT < 14) { requestAnimationFrame(frame); return; }
