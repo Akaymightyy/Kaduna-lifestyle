@@ -12,6 +12,10 @@
         "huntStats": {
           ".read": "auth.uid === $uid",
           ".write": "auth.uid === $uid"
+        },
+        "vehicles": {
+          ".read": "auth.uid === $uid",
+          ".write": "auth.uid === $uid"
         }
       }
     },
