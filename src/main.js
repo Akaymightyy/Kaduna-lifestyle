@@ -2543,7 +2543,12 @@ initLiveMap({ scene, camera, player, AREAS, listPlaces, getHomePos: () => window
   travelArea: (id) => { closeLiveMap(); window.travelToArea(id); },
   tickWorld: (x, z, r) => { tickAreaWorld(x, z, r); tickPlotDoors(x, z); } });
 
+let _lastFrameT = 0;
 function frame() {
+  // Cap at ~60 fps: 90/120 Hz phones in Chrome otherwise do double the work for nothing.
+  const _pn = performance.now();
+  if (_pn - _lastFrameT < 14) { requestAnimationFrame(frame); return; }
+  _lastFrameT = _pn;
   // Nothing runs until the player has signed in / signed up.
   if (!isAuthed && !window.__bypassAuth) { clock.getDelta(); renderer.render(scene, camera); requestAnimationFrame(frame); return; }
   const _raw = clock.getDelta(); governor(_raw);
