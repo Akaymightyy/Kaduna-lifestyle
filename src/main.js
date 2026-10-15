@@ -5,17 +5,17 @@ import { loadPlayer, collide } from "./player.js";
 import { createControls, updateCamera } from "./controls.js";
 import { createMinimap } from "./minimap.js";
 import { addCity } from "./city.js";
-import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAILY_QUESTS, DAILY_REWARDS, TIME_SCALE, REAL_MS_PER_GAME_HOUR, FIXED_HOUR } from "./config.js";
+import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAILY_QUESTS, DAILY_REWARDS, TIME_SCALE, REAL_MS_PER_GAME_HOUR } from "./config.js";
 import { createGameState } from "./needs.js";
 import { auth, db } from "./firebase.js";
 import { initAuth, showAuthModal, wireAuthUI, logout, isAuthed } from "./auth.js";
-import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition, getRemotePlayers } from "./multiplayer.js";
+import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition } from "./multiplayer.js";
 import { startRide, travelToZone, travelToPlace, getDestinations } from "./travel.js";
 import { subscribeRichList } from "./economy.js";
 import { createNPCs } from "./npcs.js";
 import { initAdmin, showAdminDashboard, hideAdminDashboard, isAdmin, adminTab } from "./admin.js";
 import { checkDailyReward, getDailyStatus, claimQuestReward } from "./daily.js";
-import { ref, get, onValue, update, set } from "firebase/database";
+import { ref, onValue, update } from "firebase/database";
 import { openCreator } from "./creator.js";
 import { outfitsFor, BUILDS, SHOP, SLOT_KEYS } from "./outfits.js";
 import { initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, getActivePlace, enterPlace, enterPlaceAsVisitor, exitPlace, sendUIEvent } from "./places/manager.js";
@@ -26,10 +26,9 @@ import { ORIGINS, HOUSE_TIERS, getRentInfo, payRent, checkRentDue, applyOrigin, 
 import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
 import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
 import { celebrate } from "./celebrate.js";
-import { perfFrameStart, perfBeforeRender, perfAfterRender } from "./perf.js";
 import { initGraphics, updateSky, tickGraphics, tickShadows, applyQuality, autoDetectQuality, getQuality, QUALITY_PRESETS } from "./graphics.js";
 import { AREAS, getArea, claimPlot, getMyHouse, canPickArea, getPlotPosition } from "./areas.js";
-import { resolvePlayerHouseKey, loadHouse, setHouseLocked, listenForKnocks, respondToKnock } from "./houses.js";
+import { resolvePlayerHouseKey, loadHouse, listenForKnocks, respondToKnock } from "./houses.js";
 import {
   initPlotDoors,
   tickPlotDoors,
@@ -38,13 +37,7 @@ import {
   getUnlockedVisitInfo,
   getNearestFriendPlot,
   disposePlotDoors,
-  getAreaNameSprites,
 } from "./plots.js";
-import { initAreaWorld, tickAreaWorld, setAreaLampsNight, disposeAreaWorld } from "./areas_world.js";
-// FEATURE 3c: load real Kaduna road + river + building data from kaduna.json
-// (a static OSM-derived file shipped in public/data/). The main Ahmadu Bello
-// Way is filtered out (already rendered by world.js) to avoid double-render.
-import { fetchKadunaData, buildRealMap } from "./realmap.js";
 import { initMessages, searchUsers, openDM, sendMessage, sendHouseInvite, openChat, closeChat, getChatList, sendMoney, createGroup, leaveGroup, blockUser, reportUser, getChatMeta, cleanupMessages, getPresence, listenToPresence } from "./messages.js";
 import { initEvents, tickNepa, isNepaCut, getNepaStatus, hasPowerBackup, getModifiedDrain, tickMoodlets, addMoodlet, getActiveMoodlets, getConsequences, getWalkSpeedMultiplier, MOODLET_DEFS } from "./events.js";
 import { SKILLS, CAREERS, SHIFT_TONES, initCareers, getSkills, getCareer, getCareerDef, canJoinCareer, canPromote, joinCareer, promote, doShift, trainSkill } from "./careers.js";
@@ -108,84 +101,6 @@ renderer.shadowMap.autoUpdate = false;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0xa9d6f2, Q.fogNear, Q.fogFar);
-
-// FEATURE: tap-raycaster for clicking remote player name tags (→ open DM)
-// and area name signs (→ travel there). Detects taps on the canvas that
-// aren't part of a drag (joystick) and raycasts against sprites + remote
-// player groups in the scene.
-const _tapRaycaster = new THREE.Raycaster();
-const _tapPointer = new THREE.Vector2();
-let _tapDown = null;  // { x, y, t }
-canvas.addEventListener("pointerdown", (e) => {
-  _tapDown = { x: e.clientX, y: e.clientY, t: Date.now() };
-});
-canvas.addEventListener("pointerup", (e) => {
-  if (!_tapDown) return;
-  const dx = e.clientX - _tapDown.x, dy = e.clientY - _tapDown.y;
-  const moved = Math.sqrt(dx * dx + dy * dy);
-  const elapsed = Date.now() - _tapDown.t;
-  _tapDown = null;
-  // If the pointer moved >10px or took >500ms, treat as a drag (not a tap)
-  if (moved > 10 || elapsed > 500) return;
-  _handleWorldTap(e.clientX, e.clientY);
-});
-function _handleWorldTap(clientX, clientY) {
-  if (!camera || !scene) return;
-  const rect = canvas.getBoundingClientRect();
-  _tapPointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
-  _tapPointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
-  _tapRaycaster.setFromCamera(_tapPointer, camera);
-  // Build a list of tappable targets: remote player groups + area name sprites.
-  // Each carries userData that tells us what to do when tapped.
-  const targets = [];
-  // Remote players
-  const remotes = getRemotePlayers();
-  for (const uid in remotes) {
-    const m = remotes[uid];
-    if (m.group && m.group.visible) targets.push(m.group);
-  }
-  // Area name sprites
-  const areaSprites = getAreaNameSprites();
-  for (const [areaId, entry] of areaSprites) {
-    if (entry.sprite && entry.sprite.visible) targets.push(entry.sprite);
-  }
-  if (!targets.length) return;
-  // Raycaster.intersectObjects can hit sprites + groups. We need recursive=true
-  // to hit child meshes of remote player groups (the avatar body).
-  const hits = _tapRaycaster.intersectObjects(targets, true);
-  if (!hits.length) return;
-  // Walk up the parent chain from the first hit until we find a target with userData
-  let obj = hits[0].object;
-  while (obj && !obj.userData?.isRemotePlayer && !obj.userData?.isAreaName) obj = obj.parent;
-  if (!obj) return;
-  const ud = obj.userData;
-  if (ud.isRemotePlayer) {
-    // Tap on a remote player's name tag → open a DM with them
-    const otherUid = ud.playerUid;
-    const otherName = ud.playerName || "Player";
-    if (!otherUid || otherUid === getMyUid()) return;
-    toast("💬 Opening chat with " + otherName + "...");
-    openDM(otherUid, otherName).then((r) => {
-      if (r) {
-        window._openChatId = r.chatId;
-        window._openChatOtherUid = otherUid;
-        window._openChatName = otherName;
-        showPhoneApp("messages");
-      } else {
-        toast("Could not open chat — try again");
-      }
-    }).catch((e) => { console.warn("[tap] openDM failed", e); toast("Could not open chat"); });
-  } else if (ud.isAreaName) {
-    // Tap on an area name sign → travel there
-    const areaId = ud.areaId;
-    const areaName = ud.areaName;
-    const a = getArea(areaId);
-    if (!a) { toast("Unknown area"); return; }
-    player.pos.set(a.x, 0, a.z);
-    player.heading = 0;
-    toast("📍 Travelled to " + areaName);
-  }
-}
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 400);
 const hemi = new THREE.HemisphereLight(0xdfeeff, 0x8a7a55, 1.0); scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff2d6, 1.8);
@@ -200,40 +115,6 @@ addEventListener("resize", resize); resize();
 const world = buildWorld(scene);
 const traffic = createTraffic(scene);
 let mmDraw = createMinimap($("mm"), world.mapShapes);
-// FEATURE 3b: init the chunk-streamed area world (roads + NPC houses + lamp posts).
-// Pass world.colliders so per-area house footprints can be added as colliders
-// (player can't walk through occupied-plot houses). Must be called AFTER
-// buildWorld() so world.colliders exists.
-initAreaWorld(scene, world.colliders);
-// FEATURE 3c: load real Kaduna road/river/building data from kaduna.json and
-// render it on top of the procedural world. The main Ahmadu Bello Way is
-// filtered out (already rendered by world.js) so we don't double-render.
-// The real map adds: Kawo Road, Waff Road, Independence Way, Muhammad Buhari
-// Way, Tudun Wada Road, Sabon Gari Road, Market Road, Station Road, Barnawa
-// Way, Kakuri Road + the Kaduna River (water polyline on the west side).
-// Credit: "© OpenStreetMap contributors" — see CREDITS.md.
-fetchKadunaData().then((kadunaData) => {
-  if (!kadunaData) { console.warn("[realmap] kaduna.json failed to load — using procedural world only"); return; }
-  // FEATURE: pass world.world (the worldGroup) as the parent so the realmap
-  // meshes hide when the player enters a place (places/manager.js sets
-  // worldGroup.visible = false during enterPlace). Without this, the realmap
-  // roads/buildings stayed visible inside houses — that was the
-  // "I still see buildings inside the houses" bug.
-  const realMap = buildRealMap(scene, kadunaData, world.world);
-  if (realMap) {
-    console.log("[realmap] Built " + kadunaData.roads.length + " roads + " + (kadunaData.buildings?.length || 0) + " buildings + " + (kadunaData.water?.length || 0) + " water polygons from kaduna.json");
-    // Merge the real map's colliders + mapShapes into the procedural world's
-    // so the player can't walk through the new buildings + the minimap shows them.
-    if (realMap.colliders) world.colliders.push(...realMap.colliders);
-    if (realMap.mapShapes) {
-      if (realMap.mapShapes.buildings) world.mapShapes.buildings.push(...realMap.mapShapes.buildings);
-      if (realMap.mapShapes.roads) {
-        world.mapShapes.roads = world.mapShapes.roads || [];
-        world.mapShapes.roads.push(...realMap.mapShapes.roads);
-      }
-    }
-  }
-}).catch((e) => console.warn("[realmap] fetch failed:", e.message));
 const ctl = createControls(canvas, camera, { joy: $("joy"), knob: $("knob") });
 const game = createGameState();
 const npcs = createNPCs(scene);
@@ -244,7 +125,7 @@ let _activeMission = null;
 const SKY = [[0,0x0b1230,0.0,0.25,0x8899ff],[5,0x1b2548,0.0,0.3,0x8899ff],[6.5,0xf3a56b,0.9,0.7,0xffb070],[9,0x9fd4f5,1.8,1.0,0xfff2d6],[16,0x9fd4f5,1.8,1.0,0xfff2d6],[18,0xf08a5d,1.0,0.75,0xff9a5a],[19.5,0x2a2f55,0.1,0.35,0x8899ff],[24,0x0b1230,0.0,0.25,0x8899ff]];
 function skyAt(h) { let i=0; while(i<SKY.length-2&&h>=SKY[i+1][0])i++; const a=SKY[i],b=SKY[i+1],t=(h-a[0])/(b[0]-a[0]); const lc=(x,y)=>new THREE.Color(x).lerp(new THREE.Color(y),t); return {sky:lc(a[1],b[1]),sun:a[2]+(b[2]-a[2])*t,hemi:a[3]+(b[3]-a[3])*t,sunCol:lc(a[4],b[4])}; }
 const qs = new URLSearchParams(location.search);
-const fixedHour = qs.has("t") ? parseFloat(qs.get("t")) : FIXED_HOUR;  // FEATURE: default = evening (17.5)
+const fixedHour = qs.has("t") ? parseFloat(qs.get("t")) : null;
 const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const INTERIOR_BG = new THREE.Color(0x1a1510);
 let lastClock = "";
@@ -326,13 +207,10 @@ function applyTime() {
     // 1.3 gives a warm pool of light around each lamp post that overlaps with
     // the next one, so the player always has a lit path.
     if (world.lampLights) for (const pl of world.lampLights) { pl.intensity = 1.3; pl.visible = true; }
-    // FEATURE 3b: area lamp posts glow at night too
-    setAreaLampsNight(true);
   } else {
     traffic.setNight(false);
     world.lamps.material.color.set(0x555555);
     if (world.lampLights) for (const pl of world.lampLights) { pl.intensity = 0; pl.visible = false; }
-    setAreaLampsNight(false);
   }
   // FIX: Reposition the lamp pool to the 6 nearest lamp posts around the player.
   // The pool of 6 PointLights follows the player so the streets around them look
@@ -552,11 +430,9 @@ function _showPhoneApp(appId) {
     // Visual drone-style top-down map (canvas) + place list below
     const places = listPlaces();
     const gameHour = _gameHour();
-    // FEATURE: expanded map bounds to match the new walkable world (±250 X, ±100 Z).
-    // Was ±160 / ±50 which cramped everything onto one street. Now we can see
-    // all 14 districts spread across the city, plus the road + landmarks.
-    const MAP_W = 320, MAP_H = 180;
-    const minWX = -250, maxWX = 250, minWZ = -100, maxWZ = 100;
+    // Map bounds: x from -160 to 160, z from -50 to 50
+    const MAP_W = 300, MAP_H = 120;
+    const minWX = -160, maxWX = 160, minWZ = -50, maxWZ = 50;
     const toMapX = (wx) => ((wx - minWX) / (maxWX - minWX)) * MAP_W;
     const toMapZ = (wz) => ((wz - minWZ) / (maxWZ - minWZ)) * MAP_H;
     // Player position
@@ -571,42 +447,23 @@ function _showPhoneApp(appId) {
     for (const sx of [-90, 90]) {
       svg += '<rect x="'+(toMapX(sx)-2)+'" y="0" width="4" height="'+MAP_H+'" fill="#555a62"/>';
     }
-    // Buildings strip (top + bottom near the road)
+    // Buildings strip (top + bottom)
     svg += '<rect x="0" y="0" width="'+MAP_W+'" height="'+toMapZ(-12)+'" fill="#8f7a5e"/>';
     svg += '<rect x="0" y="'+toMapZ(12)+'" width="'+MAP_W+'" height="'+(MAP_H-toMapZ(12))+'" fill="#8f7a5e"/>';
-    // FEATURE: draw district markers + names (spread across the city)
-    // Each district gets a colored disc + label, sized by tier (rich=large gold,
-    // middle=medium green, cheap=small grey). Tappable to travel there.
-    const districts = MAP_LOCATIONS.filter(m => m.type === "district");
-    for (const d of districts) {
-      const area = getArea(d.name.toLowerCase().replace(/\s/g, "_")) || AREAS.find(a => a.name === d.name);
-      const tier = area ? area.tier : "middle";
-      const r = tier === "rich" ? 5 : tier === "middle" ? 4 : 3;
-      const col = tier === "rich" ? "#f2b134" : tier === "middle" ? "#4a9a5a" : "#8a8f96";
-      const mx = toMapX(d.x), mz = toMapZ(d.z);
-      svg += '<g style="cursor:pointer;" onclick="window.travelToArea(\''+(area?area.id:'')+'\')">';
-      svg += '<circle cx="'+mx+'" cy="'+mz+'" r="'+(r+2)+''+'" fill="'+col+'" opacity="0.2"/>';
-      svg += '<circle cx="'+mx+'" cy="'+mz+'" r="'+r+'" fill="'+col+'" stroke="#fff" stroke-width="1.2"/>';
-      svg += '<text x="'+mx+'" y="'+(mz-r-2)+'" text-anchor="middle" font-size="6" font-weight="700" fill="#fff" style="paint-order:stroke;stroke:#000;stroke-width:1.5;">'+d.name+'</text>';
-      svg += '</g>';
-    }
-    // Place markers (tappable) — these are the existing places on/around the road
+    // Place markers (tappable)
     for (const p of places) {
       const mx = toMapX(p.entranceX), mz = toMapZ(p.entranceZ);
       const open = (p.hours == null) ? true : (gameHour >= p.hours.open && gameHour < p.hours.close);
       const color = "#" + (p.minimapColor || 0xc0392b).toString(16).padStart(6, "0");
       svg += '<g style="cursor:pointer;" onclick="window.travelToPlace(\''+p.id+'\')">';
       // Glow ring (open only)
-      if (open) svg += '<circle cx="'+mx+'" cy="'+mz+'" r="6" fill="'+color+'" opacity="0.25"/>';
+      if (open) svg += '<circle cx="'+mx+'" cy="'+mz+'" r="7" fill="'+color+'" opacity="0.25"/>';
       // Main dot
-      svg += '<circle cx="'+mx+'" cy="'+mz+'" r="4" fill="'+color+'" stroke="#fff" stroke-width="1.2"/>';
+      svg += '<circle cx="'+mx+'" cy="'+mz+'" r="4.5" fill="'+color+'" stroke="#fff" stroke-width="1.5"/>';
+      // Label (short)
+      const shortName = p.name.split(" ").slice(0, 2).join(" ");
+      svg += '<text x="'+mx+'" y="'+(mz-7)+'" text-anchor="middle" font-size="6" font-weight="700" fill="#fff" style="paint-order:stroke;stroke:#000;stroke-width:1.5;">'+shortName+'</text>';
       svg += '</g>';
-    }
-    // "My Home" marker on the map
-    if (window._myHomePos) {
-      const mx = toMapX(window._myHomePos.x), mz = toMapZ(window._myHomePos.z);
-      svg += '<circle cx="'+mx+'" cy="'+mz+'" r="5" fill="#2e7d4f" stroke="#fff" stroke-width="1.5"/>';
-      svg += '<text x="'+mx+'" y="'+(mz-7)+'" text-anchor="middle" font-size="5" font-weight="700" fill="#fff" style="paint-order:stroke;stroke:#000;stroke-width:1.2;">🏠</text>';
     }
     // Player position (pulsing red dot)
     const pmx = toMapX(px), pmz = toMapZ(pz);
@@ -618,10 +475,9 @@ function _showPhoneApp(appId) {
     // Legend
     const legend = '<div style="display:flex;gap:10px;font-size:9px;color:#666;margin:6px 0 10px;flex-wrap:wrap;">'+
       '<span><span style="display:inline-block;width:8px;height:8px;background:#ff6a3d;border-radius:50%;border:1px solid #fff;"></span> You</span>'+
-      '<span><span style="display:inline-block;width:8px;height:8px;background:#f2b134;border-radius:50%;"></span> Rich area</span>'+
-      '<span><span style="display:inline-block;width:8px;height:8px;background:#4a9a5a;border-radius:50%;"></span> Middle area</span>'+
-      '<span><span style="display:inline-block;width:8px;height:8px;background:#8a8f96;border-radius:50%;"></span> Cheap area</span>'+
-      '<span>👆 Tap a place or area to travel</span>'+
+      '<span><span style="display:inline-block;width:8px;height:8px;background:#2e7d4f;border-radius:50%;"></span> Open place</span>'+
+      '<span><span style="display:inline-block;width:8px;height:8px;background:#e11d48;border-radius:50%;"></span> Closed place</span>'+
+      '<span>👆 Tap a place to travel</span>'+
     '</div>';
     // Place list (tappable)
     const placeList = places.map(p => {
@@ -631,16 +487,6 @@ function _showPhoneApp(appId) {
       return '<div onclick="window.travelToPlace(\''+p.id+'\')" style="padding:8px;background:'+(open?'#e8f5e9':'#f5e8e8')+';border-radius:8px;margin-bottom:5px;font-size:12px;font-weight:600;color:var(--green);cursor:pointer;border-left:4px solid '+color+';">'+p.minimapIcon+' '+p.name+' '+openBadge+'<div style="font-size:10px;color:#666;font-weight:400;margin-top:2px;">'+(p.type==='interior'?'Interior':'Outdoor')+' · '+p.activities.length+' activities</div></div>';
     }).join("");
     c.innerHTML='<div style="font-size:14px;margin-bottom:8px;font-weight:700;color:var(--green);">🗺️ Kaduna Map</div>'+svg+legend+'<div style="font-size:11px;font-weight:600;margin:8px 0 6px;color:#666;">All Places:</div>'+placeList+backBtn;
-    // FEATURE: wire the area-travel handler so tapping a district disc teleports
-    // the player to that area's center (free, no keke — just for quick navigation).
-    window.travelToArea = (areaId) => {
-      if (!areaId) { toast("Unknown area"); return; }
-      const a = getArea(areaId);
-      if (!a) { toast("Unknown area"); return; }
-      player.pos.set(a.x, 0, a.z);
-      player.heading = 0;
-      toast("📍 Travelled to " + a.name);
-    };
     return;
   }
   if(appId==="daily"){
@@ -751,34 +597,6 @@ function _showPhoneApp(appId) {
   if(appId==="realestate"){
     const rentInfo = getRentInfo(game.state);
     let h = '<div style="font-size:15px;margin-bottom:8px;font-weight:700;color:#f2f2f4;">🏡 Real Estate & Rent</div>';
-    // ---- FEATURE 4/5: "My House" card — shows current area + plot + tier + lock toggle ----
-    if (game.state.homeArea && game.state.homePlot != null) {
-      const myArea = getArea(game.state.homeArea);
-      const myTier = HOUSE_TIERS.find(t => t.tier === (game.state.homeTier || 1));
-      h += '<div style="background:#1a2a1a;border:2px solid #4ade80;border-radius:12px;padding:12px;margin-bottom:12px;">';
-      h += '<div style="font-size:13px;font-weight:700;color:#4ade80;margin-bottom:4px;">🏠 Your House</div>';
-      h += '<div style="font-size:12px;color:#f2f2f4;">📍 ' + (myArea ? myArea.name : 'Unknown') + ' · Plot #' + game.state.homePlot + '</div>';
-      h += '<div style="font-size:11px;color:#9b9ba4;margin-top:2px;">' + (myTier ? myTier.emoji + ' ' + myTier.name : 'Tier ' + (game.state.homeTier || 1)) + '</div>';
-      // Lock toggle — async fetches the current locked state from Firebase on each render
-      h += '<div id="my-house-lock-row" style="margin-top:8px;font-size:11px;color:#9b9ba4;">Loading lock status...</div>';
-      h += '</div>';
-      // Fetch the locked state async + render the toggle button
-      (async () => {
-        try {
-          const house = await loadHouse(game.state.homeArea, game.state.homePlot);
-          const locked = house ? !!house.locked : false;
-          const row = document.getElementById("my-house-lock-row");
-          if (row) {
-            row.innerHTML = '<button onclick="window._toggleHouseLock(' + (locked ? 'false' : 'true') + ')" style="width:100%;background:' + (locked ? '#e11d48' : '#4ade80') + ';color:#000;border:none;border-radius:8px;padding:8px;cursor:pointer;font-size:12px;font-weight:600;">' + (locked ? '🔒 Locked — tap to UNLOCK' : '🔓 Unlocked — tap to LOCK') + '</button>';
-          }
-        } catch (e) {
-          const row = document.getElementById("my-house-lock-row");
-          if (row) row.textContent = 'Could not load lock status';
-        }
-      })();
-    } else {
-      h += '<div style="background:#3a1a1a;border:1px solid #e11d48;border-radius:10px;padding:10px;margin-bottom:12px;font-size:12px;color:#e11d48;text-align:center;">You haven\'t picked an area yet. <button onclick="window._showAreaPicker()" style="margin-top:6px;background:#f2b134;color:#000;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:11px;font-weight:600;">Pick an area now</button></div>';
-    }
     // Rent status
     h += '<div style="background:'+(rentInfo.due?'#3a1a1a':'#1a2a1a')+';border-radius:10px;padding:10px;margin-bottom:10px;border:1px solid '+(rentInfo.due?'#e11d48':'#2e7d4f')+';">';
     h += '<div style="font-size:12px;font-weight:600;color:'+(rentInfo.due?'#e11d48':'#4ade80')+';">'+(rentInfo.due?'🔔 RENT DUE!':'✅ Rent paid')+'</div>';
@@ -788,33 +606,22 @@ function _showPhoneApp(appId) {
     h += '</div>';
     if (rentInfo.due) h += '<button onclick="window._payRent()" style="width:100%;margin-top:6px;background:#f2b134;color:#000;border:none;border-radius:8px;padding:8px;cursor:pointer;font-size:12px;font-weight:600;">Pay Rent ₦'+rentInfo.amount.toLocaleString()+'</button>';
     h += '</div>';
-    // ---- FEATURE 5: Move to a new area ----
-    h += '<div style="font-size:12px;font-weight:600;margin:14px 0 6px;color:#f2b134;">🏠 Move to a New Area</div>';
-    h += '<div style="font-size:11px;color:#6b7280;margin-bottom:8px;">Balance: ₦'+game.state.money.toLocaleString()+' · Moving keeps your furniture (goes to storage)</div>';
-    const tiers = [
-      { id: "cheap",  label: "Budget Areas",   color: "#4ade80" },
-      { id: "middle", label: "Mid-Tier Areas", color: "#f2b134" },
-      { id: "rich",   label: "GRA / Upscale",  color: "#60a5fa" },
-    ];
-    for (const t of tiers) {
-      const areaList = AREAS.filter(a => a.tier === t.id);
-      if (!areaList.length) continue;
-      h += '<div style="font-size:11px;font-weight:700;color:'+t.color+';margin:8px 0 4px;">'+t.label+'</div>';
-      for (const a of areaList) {
-        const isCurrent = game.state.homeArea === a.id;
-        const canAfford = game.state.money >= a.buyPrice;
-        const canPick = canPickArea(game.state.origin, a);
-        h += '<div style="display:flex;align-items:center;gap:8px;padding:8px;background:#17181b;border-radius:8px;margin-bottom:5px;'+(isCurrent?'border:2px solid #4ade80;':'')+'">';
-        h += '<div style="flex:1;"><div style="font-size:12px;font-weight:600;color:#f2f2f4;">'+a.name+(isCurrent?' ✅':'')+'</div>';
-        h += '<div style="font-size:10px;color:#9b9ba4;">Rent ₦'+a.rentPrice.toLocaleString()+'/wk · Buy ₦'+a.buyPrice.toLocaleString()+'</div></div>';
-        if (isCurrent) h += '<span style="font-size:10px;color:#4ade80;">Current</span>';
-        else if (!canPick) h += '<span style="font-size:10px;color:#6b7280;">🔒 Origin</span>';
-        else if (canAfford) h += '<button onclick="window._moveToArea(\''+a.id+'\')" style="background:#f2b134;color:#000;border:none;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:11px;font-weight:600;">Move</button>';
-        else h += '<span style="font-size:10px;color:#6b7280;">₦'+a.buyPrice.toLocaleString()+'</span>';
-        h += '</div>';
-      }
+    // Housing tiers
+    h += '<div style="font-size:12px;font-weight:600;margin-bottom:6px;color:#f2b134;">🏠 Housing Tiers</div>';
+    h += '<div style="font-size:11px;color:#6b7280;margin-bottom:8px;">Balance: ₦'+game.state.money.toLocaleString()+'</div>';
+    for (const ht of HOUSE_TIERS) {
+      const canAfford = game.state.money >= ht.buyPrice;
+      const isCurrent = (game.state.homeTier || 1) === ht.tier;
+      h += '<div style="display:flex;align-items:center;gap:8px;padding:10px;background:#17181b;border-radius:10px;margin-bottom:6px;'+(isCurrent?'border:2px solid #4ade80;':'')+'">';
+      h += '<span style="font-size:24px;">'+ht.emoji+'</span>';
+      h += '<div style="flex:1;"><div style="font-size:13px;font-weight:600;color:#f2f2f4;">'+ht.name+(isCurrent?' ✅':'')+'</div>';
+      h += '<div style="font-size:10px;color:#9b9ba4;">Rent ₦'+ht.rent+'/wk · Buy ₦'+ht.buyPrice.toLocaleString()+' · Guests: '+ht.guestCap+'</div></div>';
+      if (isCurrent) h += '<span style="font-size:10px;color:#4ade80;">Current</span>';
+      else if (canAfford) h += '<button onclick="window._buyHouse('+ht.tier+','+ht.buyPrice+',\''+ht.name.replace(/'/g,"")+'\')" style="background:#f2b134;color:#000;border:none;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:11px;font-weight:600;">Buy</button>';
+      else h += '<span style="font-size:10px;color:#6b7280;">₦'+ht.buyPrice.toLocaleString()+'</span>';
+      h += '</div>';
     }
-    h += '<div style="font-size:11px;color:#6b7280;margin-top:12px;text-align:center;">💡 Walk to 🏠 My Home to enter. Lock your house so visitors must knock.</div>';
+    h += '<div style="font-size:11px;color:#6b7280;margin-top:8px;text-align:center;">💡 Walk to 🏠 My Home to enter. Rent due every 10 min.</div>';
     h += backBtn;
     c.innerHTML = h;
     return;
@@ -1238,20 +1045,7 @@ window.buyMed=(id)=>{
   game.save?.(); updateHUD(); toast("Medicine taken! Feel better now.");
   showPhoneApp("health");
 };
-function _pushLook(){
-  // FEATURE: push outfit/look changes IMMEDIATELY to Firebase (no debounce).
-  // The old 300ms debounce meant if the user changed outfit and quickly
-  // closed the phone, the change might not sync — and other devices would
-  // still see the old outfit. Now we write synchronously so the change
-  // is in Firebase before the next Firebase read can happen.
-  const u = getMyUid();
-  if (!u) return;
-  try {
-    update(ref(db, "players/" + u + "/look"), game.state.look).catch((e) => {
-      console.warn("[look] push failed:", e.message);
-    });
-  } catch (e) { console.warn("[look] push exception:", e.message); }
-}
+function _pushLook(){ clearTimeout(window._lookT); window._lookT=setTimeout(()=>{const u=getMyUid(); if(u) update(ref(db,"players/"+u+"/look"),game.state.look).catch(()=>{});},300); }
 window.buyClothing=(id)=>{
   const it=SHOP.find(x=>x.id===id); if(!it) return;
   const L=game.state.look; L.owned=L.owned||[];
@@ -1349,7 +1143,7 @@ window.sendMessage=(uid,name)=>{
 window.saveGame=()=>{game.save?.();toast("Game saved!");};
 window._setGraphicsQuality = (q) => {
   applyQuality(q, { renderer, sun, scene });
-  toast("🎨 Graphics set to " + q.toUpperCase());
+  toast("🎨 Graphics set to " + q.toUpperCase() + ". Reload to see full effect.");
   showPhoneApp("settings");
 };
 // ---- HomeStore: buy furniture + category filter ----
@@ -1885,31 +1679,6 @@ window._moveToArea = async (areaId) => {
   player.pos.set(pos.x, 0, pos.z + 4); player.heading = Math.PI;
   updateHUD(); showPhoneApp("realestate");
 };
-// FEATURE 5: Toggle the player's house locked state. When locked, visitors
-// must knock + be accepted. When unlocked, visitors enter directly.
-window._toggleHouseLock = async (lock) => {
-  const uid = getMyUid();
-  if (!uid) { toast("Sign in first"); return; }
-  if (!game.state.homeArea || game.state.homePlot == null) { toast("Pick an area first"); return; }
-  try {
-    await setHouseLocked(game.state.homeArea, game.state.homePlot, lock);
-    toast(lock ? "🔒 House locked — visitors must knock" : "🔓 House unlocked — visitors can enter directly");
-    showPhoneApp("realestate");  // refresh the UI to show the new state
-  } catch (e) {
-    console.warn("[lock] toggle failed:", e.message);
-    toast("Could not toggle lock — try again");
-  }
-};
-// FEATURE 4: Surface the area picker from the Real Estate app (for users who
-// haven't picked an area yet, or want to re-open the picker).
-window._showAreaPicker = () => {
-  // If the user already has a homeArea, the picker is for re-picking (which
-  // actually means moving — confirm first).
-  if (game.state.homeArea) {
-    if (!confirm("You already live in " + (getArea(game.state.homeArea)?.name || "your area") + ". Open the area picker to MOVE?")) return;
-  }
-  _showAreaScreen();
-};
 // ---- Money Hunt HUD update (called by moneyhunt.js after a successful claim) ----
 function _updateHuntHud() {
   const stats = getHuntStats();
@@ -2204,40 +1973,6 @@ initAuth((user) => {
   // ---- Init Messages app ----
   const myName = user.displayName || user.email?.split("@")[0] || "Player";
   initMessages(user.uid, myName, toast, () => { _updateUnreadBadge(); if (_showingApp === "messages") showPhoneApp("messages"); });
-  // FEATURE: backfill userProfiles/{uid} for accounts that signed up BEFORE the
-  // search fix. Without this, existing accounts won't show up in search results
-  // (their name is only in players/{uid} which is admin/owner-only readable).
-  // We read players/{uid} (allowed since it's our own node), and if
-  // userProfiles/{uid} is missing, write it from the player's name + username.
-  // Wrapped in an IIFE because the surrounding auth callback isn't async.
-  (async () => {
-    try {
-      const profileSnap = await get(ref(db, "userProfiles/" + user.uid));
-      if (!profileSnap.exists()) {
-        const playerSnap = await get(ref(db, "players/" + user.uid));
-        const p = playerSnap.val() || {};
-        const pname = p.name || myName;
-        const puname = p.username || (user.email ? user.email.split("@")[0] : pname);
-        await set(ref(db, "userProfiles/" + user.uid), {
-          name: pname,
-          username: puname,
-          createdAt: p.ts || Date.now(),
-        });
-        console.log("[auth] Backfilled userProfiles for " + user.uid);
-      } else {
-        // Profile exists — but check if name/username is stale and update if so
-        const profile = profileSnap.val();
-        const playerSnap = await get(ref(db, "players/" + user.uid));
-        const p = playerSnap.val() || {};
-        if ((p.name && p.name !== profile.name) || (p.username && p.username !== profile.username)) {
-          await update(ref(db, "userProfiles/" + user.uid), {
-            name: p.name || profile.name,
-            username: p.username || profile.username,
-          });
-        }
-      }
-    } catch (e) { console.warn("[auth] userProfiles backfill failed:", e.message); }
-  })();
   initFlavour((headline) => { if (headline) toast("📰 " + headline.text); });
   // ---- Sync home entrance to player's plot (so Home button + entrance prompt work) ----
   _syncHomeEntrance();
@@ -2380,9 +2115,14 @@ function _syncHomeEntrance() {
 // or "Press here to enter" (unlocked).
 let _plotPromptEl = null;
 let _currentPlotInfo = null;  // { areaId, plotNo, ownerUid, ownerName, locked, dist }
+let _plotPromptKey = "";
 function _onPlotPromptUpdate(info) {
   _currentPlotInfo = info;
-  if (!info) { if (_plotPromptEl) _plotPromptEl.style.display = "none"; return; }
+  if (!info) { _plotPromptKey = ""; if (_plotPromptEl) _plotPromptEl.style.display = "none"; return; }
+  // Called every frame: only touch the DOM when something actually changed (was rewriting innerHTML 60x/second)
+  const key = info.areaId + "/" + info.plotNo + "/" + (info.locked ? 1 : 0) + "/" + info.ownerName;
+  if (key === _plotPromptKey && _plotPromptEl && _plotPromptEl.style.display === "block") return;
+  _plotPromptKey = key;
   if (!_plotPromptEl) {
     _plotPromptEl = document.createElement("div");
     _plotPromptEl.id = "plot-knock-prompt";
@@ -2563,7 +2303,6 @@ function governor(raw) {
 }
 
 function frame() {
-  perfFrameStart();
   // Nothing runs until the player has signed in / signed up.
   if (!isAuthed && !window.__bypassAuth) { clock.getDelta(); renderer.render(scene, camera); requestAnimationFrame(frame); return; }
   const _raw = clock.getDelta(); governor(_raw);
@@ -2701,15 +2440,12 @@ function frame() {
   // ---- Plot doors tick: render doors at nearby occupied plots + detect knock range (step 2c) ----
   // Only tick when NOT inside a place (otherwise we waste cycles on doors the player can't see)
   if (!active) tickPlotDoors(player.pos.x, player.pos.z);
-  // FEATURE 3b: area world tick — chunk-streamed area roads + houses + lamp posts
-  if (!active) tickAreaWorld(player.pos.x, player.pos.z);
+  else if (_currentPlotInfo) _onPlotPromptUpdate(null); // inside a place: hide the "Enter X's Home" box
   if (!active) savePos(dt);
   sendPosition(player.pos.x, player.pos.z, player.heading);
   setMyPosition(player.pos.x, player.pos.z);
   mmT += dt; if (mmT > 0.1) { mmT = 0; mmDraw(player.pos.x, player.pos.z, ctl.yaw, player.heading, traffic.positions); }
-  perfBeforeRender();
   renderer.render(scene, camera);
-  perfAfterRender(renderer, getQuality());
   requestAnimationFrame(frame);
 }
 

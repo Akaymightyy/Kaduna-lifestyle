@@ -133,8 +133,12 @@ const _m4 = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _v = new THREE.Vector3();
 const _scl = new THREE.Vector3(1, 1, 1);
+const _UP = new THREE.Vector3(0, 1, 0);
+const _HIDE = new THREE.Matrix4().makeScale(0, 0, 0);
 
+let _housesVersion = 0, _simVersion = -1, _simX = 1e9, _simZ = 1e9, _simT = 0, _simInfo = null;
 export function tickPlotDoors(playerX, playerZ) {
+  if (!_doorMesh) return; // not initialised yet (before sign-in) — nothing to draw
   _player.x = playerX;
   _player.z = playerZ;
 
@@ -149,6 +153,7 @@ export function tickPlotDoors(playerX, playerZ) {
     if (!_subscriptions.has(areaId)) {
       const unsub = onValue(ref(db, "houses/" + areaId), (snap) => {
         _houses[areaId] = snap.val() || {};
+        _housesVersion++;
       });
       _subscriptions.set(areaId, unsub);
       _nearbyAreas.add(areaId);
@@ -187,6 +192,15 @@ export function tickPlotDoors(playerX, playerZ) {
     if (nameEntry) nameEntry.sprite.visible = distToArea < AREA_NAME_RANGE;
   }
 
+  // Doors / labels / knock-prompt only need recomputing when the player moved a bit, the houses changed, or 300 ms passed.
+  const _now = performance.now();
+  const _mx = playerX - _simX, _mz = playerZ - _simZ;
+  if (_simVersion === _housesVersion && _mx * _mx + _mz * _mz < 0.25 && _now - _simT < 300) {
+    if (_onPromptUpdate) _onPromptUpdate(_simInfo);
+    return;
+  }
+  _simVersion = _housesVersion; _simX = playerX; _simZ = playerZ; _simT = _now;
+
   // 2. Collect all occupied plots within RENDER_RANGE
   const nearbyPlots = [];
   for (const areaId of _nearbyAreas) {
@@ -211,14 +225,13 @@ export function tickPlotDoors(playerX, playerZ) {
   for (const p of nearbyPlots) {
     if (idx >= 256) break;
     _v.set(p.pos.x, 0, p.pos.z);
-    _q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), p.pos.rot || 0);
+    _q.setFromAxisAngle(_UP, p.pos.rot || 0);
     _m4.compose(_v, _q, _scl);
     _doorMesh.setMatrixAt(idx, _m4);
     idx++;
   }
   // Hide any leftover instances from the previous frame
-  const hide = new THREE.Matrix4().makeScale(0, 0, 0);
-  for (let i = idx; i < _doorMesh.count; i++) _doorMesh.setMatrixAt(i, hide);
+  for (let i = idx; i < _doorMesh.count; i++) _doorMesh.setMatrixAt(i, _HIDE);
   _doorMesh.count = idx;
   _doorMesh.instanceMatrix.needsUpdate = true;
 
@@ -256,6 +269,14 @@ export function tickPlotDoors(playerX, playerZ) {
   _nearestFriendPlot = nearest;
 
   // 6. Notify main.js about the prompt update
+  _simInfo = nearest ? {
+      areaId: nearest.areaId,
+      plotNo: nearest.plotNo,
+      ownerUid: nearest.house.ownerUid,
+      ownerName: nearest.house.ownerName || "Friend",
+      locked: nearest.house.locked,
+      dist: nearest.dist,
+    } : null;
   if (_onPromptUpdate) {
     _onPromptUpdate(nearest ? {
       areaId: nearest.areaId,
@@ -269,21 +290,6 @@ export function tickPlotDoors(playerX, playerZ) {
 }
 
 export function getNearestFriendPlot() { return _nearestFriendPlot; }
-
-// FEATURE 3b: expose the cached houses data so areas_world.js can render
-// house exteriors ONLY at occupied plots (not every plot in the area).
-// Without this, areas_world.js would place a house at every plot —
-// choking the screen and tanking perf.
-// Returns the house record object for the area, or {} if not subscribed yet.
-export function getAreaHouses(areaId) {
-  return _houses[areaId] || {};
-}
-
-// FEATURE: expose the area name sprites map so main.js's tap-raycaster can
-// detect when the player taps a floating area name sign → travel there.
-export function getAreaNameSprites() {
-  return _areaNameSprites;
-}
 
 // ---- Draw a label onto a canvas (called only when the label changes) ----
 function _drawLabel(canvas, ctx, text, accent) {
@@ -407,58 +413,29 @@ function _buildAreaGrid(areaId, area) {
                   0x8a8f96;
   const mat = new THREE.MeshLambertMaterial({ color: tierCol });
   // Capacity: 4 posts per plot × area.plots
-  const capacity = area.plots * 4;
+  const capacity = area.plots;               // ONE instance per plot (the 4 corner posts are inside the geometry)
   const mesh = new THREE.InstancedMesh(merged, mat, capacity);
   mesh.frustumCulled = false;
-  mesh.count = 0; // start with 0 — _updateAreaGrid will place them
-  // Initialize all matrices to hidden
-  const hide = new THREE.Matrix4().makeScale(0, 0, 0);
-  for (let i = 0; i < capacity; i++) mesh.setMatrixAt(i, hide);
+  // Positions never change, so place every plot ONCE here (not every frame).
+  const m4 = new THREE.Matrix4(), v = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
+  for (let plotNo = 0; plotNo < capacity; plotNo++) {
+    const pos = getPlotPosition(area, plotNo);
+    v.set(pos.x, 0, pos.z); q.setFromAxisAngle(up, pos.rot || 0); m4.compose(v, q, sc);
+    mesh.setMatrixAt(plotNo, m4);
+  }
+  mesh.count = capacity;
   mesh.instanceMatrix.needsUpdate = true;
+  mesh.visible = false;
   _scene.add(mesh);
   _areaGridMeshes.set(areaId, { mesh, capacity });
-  console.log("[plots] Built area grid for " + areaId + " (" + area.plots + " plots, capacity " + capacity + ")");
 }
 
-const _gridM4 = new THREE.Matrix4();
-const _gridV = new THREE.Vector3();
-const _gridQ = new THREE.Quaternion();
-const _gridS = new THREE.Vector3(1, 1, 1);
+// Per frame: only flip visibility (no loops, no allocations, no GPU re-upload).
 function _updateAreaGrid(areaId, area, playerX, playerZ) {
   const entry = _areaGridMeshes.get(areaId);
   if (!entry) return;
-  const { mesh, capacity } = entry;
-  // Distance from area center to player — if too far, hide the whole grid
-  const dxArea = area.x - playerX, dzArea = area.z - playerZ;
-  const distToArea = Math.sqrt(dxArea * dxArea + dzArea * dzArea);
-  if (distToArea > AREA_GRID_RANGE) {
-    mesh.visible = false;
-    return;
-  }
-  mesh.visible = true;
-  // Place 4 corner instances per plot. We only render plots within
-  // AREA_GRID_RANGE of the PLAYER (chunk streaming — close plots only).
-  let idx = 0;
-  for (let plotNo = 0; plotNo < area.plots; plotNo++) {
-    const pos = getPlotPosition(area, plotNo);
-    const dx = pos.x - playerX, dz = pos.z - playerZ;
-    if (dx * dx + dz * dz > AREA_GRID_RANGE * AREA_GRID_RANGE) continue;
-    // 4 corners per plot
-    const rotY = pos.rot || 0;
-    for (let corner = 0; corner < 4; corner++) {
-      if (idx >= capacity) break;
-      _gridV.set(pos.x, 0, pos.z);
-      _gridQ.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotY);
-      _gridM4.compose(_gridV, _gridQ, _gridS);
-      mesh.setMatrixAt(idx, _gridM4);
-      idx++;
-    }
-  }
-  // Hide the rest
-  const hide = new THREE.Matrix4().makeScale(0, 0, 0);
-  for (let i = idx; i < mesh.count; i++) mesh.setMatrixAt(i, hide);
-  mesh.count = Math.min(idx, capacity);
-  mesh.instanceMatrix.needsUpdate = true;
+  const dx = area.x - playerX, dz = area.z - playerZ;
+  entry.mesh.visible = dx * dx + dz * dz <= AREA_GRID_RANGE * AREA_GRID_RANGE;
 }
 
 function _disposeAreaGrid(areaId) {
@@ -503,9 +480,6 @@ function _buildAreaName(areaId, area) {
   sprite.position.set(area.x, 12, area.z);
   sprite.scale.set(16, 4, 1);
   sprite.visible = false; // tickPlotDoors will toggle based on distance
-  // FEATURE: tag the area name sprite with userData so main.js's tap-raycaster
-  // can detect when the player taps an area name → travel there.
-  sprite.userData = { isAreaName: true, areaId: area.id, areaName: area.name };
   _scene.add(sprite);
   _areaNameSprites.set(areaId, { sprite, canvas, ctx, texture: tex });
 }
