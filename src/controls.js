@@ -1,8 +1,12 @@
 import * as THREE from "three";
 
 // Orbit camera + thumb joystick. Drag the screen to look, pinch to zoom.
+// FEATURE: bumped maxDist from 16 to 30 so the player can zoom way out.
+// Also reduced camera collision aggressiveness — the camera only pulls in
+// if a building is within 2.5m of the camera target (was pulling in for
+// any building in the camera's path, which made zoom-out feel stuck).
 export function createControls(canvas, camera, ui) {
-  const st = { yaw: Math.PI, pitch: 0.38, dist: 6.5, minDist: 2.2, maxDist: 16, joyX: 0, joyY: 0, jog: false, keys: {} };
+  const st = { yaw: Math.PI, pitch: 0.38, dist: 8, minDist: 2.2, maxDist: 30, joyX: 0, joyY: 0, jog: false, keys: {} };
   const ptrs = new Map();
   let pinch0 = 0, dist0 = 0;
 
@@ -72,7 +76,13 @@ export function updateCamera(camera, st, target, colliders, dt) {
   _t.set(target.x, target.y + 1.45, target.z);
   _dir.set(Math.sin(st.yaw) * Math.cos(st.pitch), Math.sin(st.pitch), Math.cos(st.yaw) * Math.cos(st.pitch));
   let d = st.dist;
+  // FEATURE: only pull the camera in if a building is within 2.5m of the camera
+  // target's path. Was pulling in for ANY building in the path which made
+  // zoom-out feel stuck (the camera would snap to 1.2m behind the player
+  // whenever a building was behind them, even far away). Now the camera
+  // can clip through distant buildings (acceptable trade-off for free zoom).
   for (const b of colliders) {
+    if (!isFinite(b.minX) || b.minX > b.maxX || b.minZ > b.maxZ) continue;  // skip degenerate
     // slab test on the XZ footprint (buildings are taller than the camera)
     let t0 = 0, t1 = d + 1;
     const ax = [[_t.x, _dir.x, b.minX, b.maxX], [_t.z, _dir.z, b.minZ, b.maxZ]];
@@ -83,7 +93,8 @@ export function updateCamera(camera, st, target, colliders, dt) {
       t0 = Math.max(t0, a); t1 = Math.min(t1, c);
       if (t0 > t1) { hit = false; break; }
     }
-    if (hit && t0 < d) d = Math.max(1.2, t0 - 0.35);
+    // FEATURE: only pull in if the collision is within 2.5m (very close)
+    if (hit && t0 < Math.min(d, 2.5)) d = Math.max(1.5, t0 - 0.35);
   }
   const k = 1 - Math.exp(-dt * 14);
   st._d = st._d === undefined ? d : st._d + (d - st._d) * (d < st._d ? 1 : k); // snap in, ease out

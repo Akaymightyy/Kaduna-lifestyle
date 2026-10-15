@@ -5,17 +5,17 @@ import { loadPlayer, collide } from "./player.js";
 import { createControls, updateCamera } from "./controls.js";
 import { createMinimap } from "./minimap.js";
 import { addCity } from "./city.js";
-import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAILY_QUESTS, DAILY_REWARDS, TIME_SCALE, REAL_MS_PER_GAME_HOUR } from "./config.js";
+import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAILY_QUESTS, DAILY_REWARDS, TIME_SCALE, REAL_MS_PER_GAME_HOUR, FIXED_HOUR } from "./config.js";
 import { createGameState } from "./needs.js";
 import { auth, db } from "./firebase.js";
 import { initAuth, showAuthModal, wireAuthUI, logout, isAuthed } from "./auth.js";
-import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition } from "./multiplayer.js";
+import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition, getRemotePlayers } from "./multiplayer.js";
 import { startRide, travelToZone, travelToPlace, getDestinations } from "./travel.js";
 import { subscribeRichList } from "./economy.js";
 import { createNPCs } from "./npcs.js";
 import { initAdmin, showAdminDashboard, hideAdminDashboard, isAdmin, adminTab } from "./admin.js";
 import { checkDailyReward, getDailyStatus, claimQuestReward } from "./daily.js";
-import { ref, onValue, update } from "firebase/database";
+import { ref, get, onValue, update, set } from "firebase/database";
 import { openCreator } from "./creator.js";
 import { outfitsFor, BUILDS, SHOP, SLOT_KEYS } from "./outfits.js";
 import { initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, getActivePlace, enterPlace, enterPlaceAsVisitor, exitPlace, sendUIEvent } from "./places/manager.js";
@@ -26,9 +26,10 @@ import { ORIGINS, HOUSE_TIERS, getRentInfo, payRent, checkRentDue, applyOrigin, 
 import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
 import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
 import { celebrate } from "./celebrate.js";
+import { perfFrameStart, perfBeforeRender, perfAfterRender } from "./perf.js";
 import { initGraphics, updateSky, tickGraphics, tickShadows, applyQuality, autoDetectQuality, getQuality, QUALITY_PRESETS } from "./graphics.js";
 import { AREAS, getArea, claimPlot, getMyHouse, canPickArea, getPlotPosition } from "./areas.js";
-import { resolvePlayerHouseKey, loadHouse, listenForKnocks, respondToKnock } from "./houses.js";
+import { resolvePlayerHouseKey, loadHouse, setHouseLocked, listenForKnocks, respondToKnock } from "./houses.js";
 import {
   initPlotDoors,
   tickPlotDoors,
@@ -37,7 +38,13 @@ import {
   getUnlockedVisitInfo,
   getNearestFriendPlot,
   disposePlotDoors,
+  getAreaNameSprites,
 } from "./plots.js";
+import { initAreaWorld, tickAreaWorld, setAreaLampsNight, disposeAreaWorld } from "./areas_world.js";
+// FEATURE 3c: load real Kaduna road + river + building data from kaduna.json
+// (a static OSM-derived file shipped in public/data/). The main Ahmadu Bello
+// Way is filtered out (already rendered by world.js) to avoid double-render.
+import { fetchKadunaData, buildRealMap } from "./realmap.js";
 import { initMessages, searchUsers, openDM, sendMessage, sendHouseInvite, openChat, closeChat, getChatList, sendMoney, createGroup, leaveGroup, blockUser, reportUser, getChatMeta, cleanupMessages, getPresence, listenToPresence } from "./messages.js";
 import { initEvents, tickNepa, isNepaCut, getNepaStatus, hasPowerBackup, getModifiedDrain, tickMoodlets, addMoodlet, getActiveMoodlets, getConsequences, getWalkSpeedMultiplier, MOODLET_DEFS } from "./events.js";
 import { SKILLS, CAREERS, SHIFT_TONES, initCareers, getSkills, getCareer, getCareerDef, canJoinCareer, canPromote, joinCareer, promote, doShift, trainSkill } from "./careers.js";
@@ -64,6 +71,32 @@ addEventListener("popstate", (e) => {
     }
   }
 });
+
+// FEATURE: push the current balance to Firebase when the user closes the tab,
+// refreshes, or backgrounds the app. Without this, money earned via med/clothing/
+// ride/quest/job/daily-reward that didn't explicitly call update(economy/uid)
+// would be lost on logout. Armed once per session (after first sign-in).
+let _beforeUnloadArmed = false;
+function _armBeforeUnload(uid) {
+  if (_beforeUnloadArmed) return;
+  _beforeUnloadArmed = true;
+  addEventListener("beforeunload", () => {
+    try {
+      const u = uid || getMyUid();
+      if (!u) return;
+      update(ref(db, "economy/" + u), { balance: game.state.money });
+    } catch (e) { /* non-critical */ }
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      try {
+        const u = uid || getMyUid();
+        if (!u) return;
+        update(ref(db, "economy/" + u), { balance: game.state.money });
+      } catch (e) { /* non-critical */ }
+    }
+  });
+}
 
 let tipI = 0;
 $("ltip").textContent = TIPS[0];
@@ -101,6 +134,72 @@ renderer.shadowMap.autoUpdate = false;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0xa9d6f2, Q.fogNear, Q.fogFar);
+
+// FEATURE: tap-raycaster for clicking remote player name tags (→ open DM)
+// and area name signs (→ travel there). Detects taps on the canvas that
+// aren't part of a drag (joystick) and raycasts against sprites + remote
+// player groups in the scene.
+const _tapRaycaster = new THREE.Raycaster();
+const _tapPointer = new THREE.Vector2();
+let _tapDown = null;
+canvas.addEventListener("pointerdown", (e) => {
+  _tapDown = { x: e.clientX, y: e.clientY, t: Date.now() };
+});
+canvas.addEventListener("pointerup", (e) => {
+  if (!_tapDown) return;
+  const dx = e.clientX - _tapDown.x, dy = e.clientY - _tapDown.y;
+  const moved = Math.sqrt(dx * dx + dy * dy);
+  const elapsed = Date.now() - _tapDown.t;
+  _tapDown = null;
+  if (moved > 10 || elapsed > 500) return;  // drag, not tap
+  _handleWorldTap(e.clientX, e.clientY);
+});
+function _handleWorldTap(clientX, clientY) {
+  if (!camera || !scene) return;
+  const rect = canvas.getBoundingClientRect();
+  _tapPointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+  _tapPointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+  _tapRaycaster.setFromCamera(_tapPointer, camera);
+  const targets = [];
+  const remotes = getRemotePlayers();
+  for (const uid in remotes) {
+    const m = remotes[uid];
+    if (m.group && m.group.visible) targets.push(m.group);
+  }
+  const areaSprites = getAreaNameSprites();
+  for (const [areaId, entry] of areaSprites) {
+    if (entry.sprite && entry.sprite.visible) targets.push(entry.sprite);
+  }
+  if (!targets.length) return;
+  const hits = _tapRaycaster.intersectObjects(targets, true);
+  if (!hits.length) return;
+  let obj = hits[0].object;
+  while (obj && !obj.userData?.isRemotePlayer && !obj.userData?.isAreaName) obj = obj.parent;
+  if (!obj) return;
+  const ud = obj.userData;
+  if (ud.isRemotePlayer) {
+    const otherUid = ud.playerUid;
+    const otherName = ud.playerName || "Player";
+    if (!otherUid || otherUid === getMyUid()) return;
+    toast("💬 Opening chat with " + otherName + "...");
+    openDM(otherUid, otherName).then((r) => {
+      if (r) {
+        window._openChatId = r.chatId;
+        window._openChatOtherUid = otherUid;
+        window._openChatName = otherName;
+        showPhoneApp("messages");
+      } else { toast("Could not open chat — try again"); }
+    }).catch((e) => { console.warn("[tap] openDM failed", e); toast("Could not open chat"); });
+  } else if (ud.isAreaName) {
+    const areaId = ud.areaId;
+    const areaName = ud.areaName;
+    const a = getArea(areaId);
+    if (!a) { toast("Unknown area"); return; }
+    player.pos.set(a.x, 0, a.z);
+    player.heading = 0;
+    toast("📍 Travelled to " + areaName);
+  }
+}
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 400);
 const hemi = new THREE.HemisphereLight(0xdfeeff, 0x8a7a55, 1.0); scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff2d6, 1.8);
@@ -115,6 +214,28 @@ addEventListener("resize", resize); resize();
 const world = buildWorld(scene);
 const traffic = createTraffic(scene);
 let mmDraw = createMinimap($("mm"), world.mapShapes);
+// FEATURE 3b: init the chunk-streamed area world (roads + NPC houses + lamp posts).
+// Pass world.colliders so per-area house footprints can be added as colliders.
+// Must be called AFTER buildWorld() so world.colliders exists.
+initAreaWorld(scene, world.colliders);
+// FEATURE 3c: load real Kaduna road/river/building data from kaduna.json and
+// render it on top of the procedural world. Pass world.world (the worldGroup)
+// as the parent so the realmap meshes hide when the player enters a place.
+fetchKadunaData().then((kadunaData) => {
+  if (!kadunaData) { console.warn("[realmap] kaduna.json failed to load — using procedural world only"); return; }
+  const realMap = buildRealMap(scene, kadunaData, world.world);
+  if (realMap) {
+    console.log("[realmap] Built " + kadunaData.roads.length + " roads + " + (kadunaData.buildings?.length || 0) + " buildings + " + (kadunaData.water?.length || 0) + " water polygons from kaduna.json");
+    if (realMap.colliders) world.colliders.push(...realMap.colliders);
+    if (realMap.mapShapes) {
+      if (realMap.mapShapes.buildings) world.mapShapes.buildings.push(...realMap.mapShapes.buildings);
+      if (realMap.mapShapes.roads) {
+        world.mapShapes.roads = world.mapShapes.roads || [];
+        world.mapShapes.roads.push(...realMap.mapShapes.roads);
+      }
+    }
+  }
+}).catch((e) => console.warn("[realmap] fetch failed:", e.message));
 const ctl = createControls(canvas, camera, { joy: $("joy"), knob: $("knob") });
 const game = createGameState();
 const npcs = createNPCs(scene);
@@ -125,7 +246,7 @@ let _activeMission = null;
 const SKY = [[0,0x0b1230,0.0,0.25,0x8899ff],[5,0x1b2548,0.0,0.3,0x8899ff],[6.5,0xf3a56b,0.9,0.7,0xffb070],[9,0x9fd4f5,1.8,1.0,0xfff2d6],[16,0x9fd4f5,1.8,1.0,0xfff2d6],[18,0xf08a5d,1.0,0.75,0xff9a5a],[19.5,0x2a2f55,0.1,0.35,0x8899ff],[24,0x0b1230,0.0,0.25,0x8899ff]];
 function skyAt(h) { let i=0; while(i<SKY.length-2&&h>=SKY[i+1][0])i++; const a=SKY[i],b=SKY[i+1],t=(h-a[0])/(b[0]-a[0]); const lc=(x,y)=>new THREE.Color(x).lerp(new THREE.Color(y),t); return {sky:lc(a[1],b[1]),sun:a[2]+(b[2]-a[2])*t,hemi:a[3]+(b[3]-a[3])*t,sunCol:lc(a[4],b[4])}; }
 const qs = new URLSearchParams(location.search);
-const fixedHour = qs.has("t") ? parseFloat(qs.get("t")) : null;
+const fixedHour = qs.has("t") ? parseFloat(qs.get("t")) : FIXED_HOUR;  // FEATURE: default = evening (17.5) per config
 const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const INTERIOR_BG = new THREE.Color(0x1a1510);
 let lastClock = "";
@@ -179,10 +300,13 @@ function _repositionLampPool(px, pz) {
   }
 }
 function applyTime() {
-  // FIX: time scale — 5 real minutes = 1 game hour (was 1 real minute = 1 game hour,
-  // which made a full day cycle in 24 minutes — too fast). Now one game day = 2 real hours.
+  // FEATURE: real-time clock (1 real hour = 1 game hour) clamped to daytime
+  // (6am-6pm) so the player never sees night. During real-life night hours,
+  // the game shows noon. Matches `_gameHour()` for consistency.
   const mins = Date.now() / REAL_MS_PER_GAME_HOUR; // game-hours since epoch
-  const hour = fixedHour ?? (mins % 24);
+  let rawHour = mins % 24;
+  // FEATURE: clamp to daytime — never show night.
+  const hour = fixedHour ?? (rawHour < 6 || rawHour > 18 ? 12 : rawHour);
   // ---- Init graphics once (after scene/sun/hemi are ready) ----
   if (!_graphicsInited) {
     _graphicsInited = true;
@@ -207,10 +331,13 @@ function applyTime() {
     // 1.3 gives a warm pool of light around each lamp post that overlaps with
     // the next one, so the player always has a lit path.
     if (world.lampLights) for (const pl of world.lampLights) { pl.intensity = 1.3; pl.visible = true; }
+    // FEATURE 3b: area lamp posts glow at night too
+    setAreaLampsNight(true);
   } else {
     traffic.setNight(false);
     world.lamps.material.color.set(0x555555);
     if (world.lampLights) for (const pl of world.lampLights) { pl.intensity = 0; pl.visible = false; }
+    setAreaLampsNight(false);
   }
   // FIX: Reposition the lamp pool to the 6 nearest lamp posts around the player.
   // The pool of 6 PointLights follows the player so the streets around them look
@@ -275,8 +402,12 @@ bindInteractKey(
 );
 function _gameHour() {
   if (fixedHour != null) return fixedHour;
-  // FIX: same time scale as applyTime() — 5 real min = 1 game hour
-  return (Date.now() / REAL_MS_PER_GAME_HOUR) % 24;
+  // FEATURE: real-time clock (1 real hour = 1 game hour) BUT clamped to
+  // daytime (6am-6pm) so the player never sees night. During real-life
+  // night hours, the game shows noon.
+  const h = (Date.now() / REAL_MS_PER_GAME_HOUR) % 24;
+  if (h < 6 || h > 18) return 12;  // noon during night hours
+  return h;
 }
 function _renderPlaceActions(def) {
   let bar = document.getElementById("place-actions");
@@ -597,6 +728,30 @@ function _showPhoneApp(appId) {
   if(appId==="realestate"){
     const rentInfo = getRentInfo(game.state);
     let h = '<div style="font-size:15px;margin-bottom:8px;font-weight:700;color:#f2f2f4;">🏡 Real Estate & Rent</div>';
+    // ---- FEATURE 4/5: "My House" card with lock toggle ----
+    if (game.state.homeArea && game.state.homePlot != null) {
+      const myArea = getArea(game.state.homeArea);
+      const myTier = HOUSE_TIERS.find(t => t.tier === (game.state.homeTier || 1));
+      h += '<div style="background:#1a2a1a;border:2px solid #4ade80;border-radius:12px;padding:12px;margin-bottom:12px;">';
+      h += '<div style="font-size:13px;font-weight:700;color:#4ade80;margin-bottom:4px;">🏠 Your House</div>';
+      h += '<div style="font-size:12px;color:#f2f2f4;">📍 ' + (myArea ? myArea.name : 'Unknown') + ' · Plot #' + game.state.homePlot + '</div>';
+      h += '<div style="font-size:11px;color:#9b9ba4;margin-top:2px;">' + (myTier ? myTier.emoji + ' ' + myTier.name : 'Tier ' + (game.state.homeTier || 1)) + '</div>';
+      h += '<div id="my-house-lock-row" style="margin-top:8px;font-size:11px;color:#9b9ba4;">Loading lock status...</div>';
+      h += '</div>';
+      (async () => {
+        try {
+          const house = await loadHouse(game.state.homeArea, game.state.homePlot);
+          const locked = house ? !!house.locked : false;
+          const row = document.getElementById("my-house-lock-row");
+          if (row) row.innerHTML = '<button onclick="window._toggleHouseLock(' + (locked ? 'false' : 'true') + ')" style="width:100%;background:' + (locked ? '#e11d48' : '#4ade80') + ';color:#000;border:none;border-radius:8px;padding:8px;cursor:pointer;font-size:12px;font-weight:600;">' + (locked ? '🔒 Locked — tap to UNLOCK' : '🔓 Unlocked — tap to LOCK') + '</button>';
+        } catch (e) {
+          const row = document.getElementById("my-house-lock-row");
+          if (row) row.textContent = 'Could not load lock status';
+        }
+      })();
+    } else {
+      h += '<div style="background:#3a1a1a;border:1px solid #e11d48;border-radius:10px;padding:10px;margin-bottom:12px;font-size:12px;color:#e11d48;text-align:center;">You haven\'t picked an area yet. <button onclick="window._showAreaPicker()" style="margin-top:6px;background:#f2b134;color:#000;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:11px;font-weight:600;">Pick an area now</button></div>';
+    }
     // Rent status
     h += '<div style="background:'+(rentInfo.due?'#3a1a1a':'#1a2a1a')+';border-radius:10px;padding:10px;margin-bottom:10px;border:1px solid '+(rentInfo.due?'#e11d48':'#2e7d4f')+';">';
     h += '<div style="font-size:12px;font-weight:600;color:'+(rentInfo.due?'#e11d48':'#4ade80')+';">'+(rentInfo.due?'🔔 RENT DUE!':'✅ Rent paid')+'</div>';
@@ -606,22 +761,33 @@ function _showPhoneApp(appId) {
     h += '</div>';
     if (rentInfo.due) h += '<button onclick="window._payRent()" style="width:100%;margin-top:6px;background:#f2b134;color:#000;border:none;border-radius:8px;padding:8px;cursor:pointer;font-size:12px;font-weight:600;">Pay Rent ₦'+rentInfo.amount.toLocaleString()+'</button>';
     h += '</div>';
-    // Housing tiers
-    h += '<div style="font-size:12px;font-weight:600;margin-bottom:6px;color:#f2b134;">🏠 Housing Tiers</div>';
-    h += '<div style="font-size:11px;color:#6b7280;margin-bottom:8px;">Balance: ₦'+game.state.money.toLocaleString()+'</div>';
-    for (const ht of HOUSE_TIERS) {
-      const canAfford = game.state.money >= ht.buyPrice;
-      const isCurrent = (game.state.homeTier || 1) === ht.tier;
-      h += '<div style="display:flex;align-items:center;gap:8px;padding:10px;background:#17181b;border-radius:10px;margin-bottom:6px;'+(isCurrent?'border:2px solid #4ade80;':'')+'">';
-      h += '<span style="font-size:24px;">'+ht.emoji+'</span>';
-      h += '<div style="flex:1;"><div style="font-size:13px;font-weight:600;color:#f2f2f4;">'+ht.name+(isCurrent?' ✅':'')+'</div>';
-      h += '<div style="font-size:10px;color:#9b9ba4;">Rent ₦'+ht.rent+'/wk · Buy ₦'+ht.buyPrice.toLocaleString()+' · Guests: '+ht.guestCap+'</div></div>';
-      if (isCurrent) h += '<span style="font-size:10px;color:#4ade80;">Current</span>';
-      else if (canAfford) h += '<button onclick="window._buyHouse('+ht.tier+','+ht.buyPrice+',\''+ht.name.replace(/'/g,"")+'\')" style="background:#f2b134;color:#000;border:none;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:11px;font-weight:600;">Buy</button>';
-      else h += '<span style="font-size:10px;color:#6b7280;">₦'+ht.buyPrice.toLocaleString()+'</span>';
-      h += '</div>';
+    // ---- FEATURE 5: Move to a new area ----
+    h += '<div style="font-size:12px;font-weight:600;margin:14px 0 6px;color:#f2b134;">🏠 Move to a New Area</div>';
+    h += '<div style="font-size:11px;color:#6b7280;margin-bottom:8px;">Balance: ₦'+game.state.money.toLocaleString()+' · Moving keeps your furniture (goes to storage)</div>';
+    const tiers = [
+      { id: "cheap",  label: "Budget Areas",   color: "#4ade80" },
+      { id: "middle", label: "Mid-Tier Areas", color: "#f2b134" },
+      { id: "rich",   label: "GRA / Upscale",  color: "#60a5fa" },
+    ];
+    for (const t of tiers) {
+      const areaList = AREAS.filter(a => a.tier === t.id);
+      if (!areaList.length) continue;
+      h += '<div style="font-size:11px;font-weight:700;color:'+t.color+';margin:8px 0 4px;">'+t.label+'</div>';
+      for (const a of areaList) {
+        const isCurrent = game.state.homeArea === a.id;
+        const canAfford = game.state.money >= a.buyPrice;
+        const canPick = canPickArea(game.state.origin, a);
+        h += '<div style="display:flex;align-items:center;gap:8px;padding:8px;background:#17181b;border-radius:8px;margin-bottom:5px;'+(isCurrent?'border:2px solid #4ade80;':'')+'">';
+        h += '<div style="flex:1;"><div style="font-size:12px;font-weight:600;color:#f2f2f4;">'+a.name+(isCurrent?' ✅':'')+'</div>';
+        h += '<div style="font-size:10px;color:#9b9ba4;">Rent ₦'+a.rentPrice.toLocaleString()+'/wk · Buy ₦'+a.buyPrice.toLocaleString()+'</div></div>';
+        if (isCurrent) h += '<span style="font-size:10px;color:#4ade80;">Current</span>';
+        else if (!canPick) h += '<span style="font-size:10px;color:#6b7280;">🔒 Origin</span>';
+        else if (canAfford) h += '<button onclick="window._moveToArea(\''+a.id+'\')" style="background:#f2b134;color:#000;border:none;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:11px;font-weight:600;">Move</button>';
+        else h += '<span style="font-size:10px;color:#6b7280;">₦'+a.buyPrice.toLocaleString()+'</span>';
+        h += '</div>';
+      }
     }
-    h += '<div style="font-size:11px;color:#6b7280;margin-top:8px;text-align:center;">💡 Walk to 🏠 My Home to enter. Rent due every 10 min.</div>';
+    h += '<div style="font-size:11px;color:#6b7280;margin-top:12px;text-align:center;">💡 Walk to 🏠 My Home to enter. Lock your house so visitors must knock.</div>';
     h += backBtn;
     c.innerHTML = h;
     return;
@@ -1679,6 +1845,27 @@ window._moveToArea = async (areaId) => {
   player.pos.set(pos.x, 0, pos.z + 4); player.heading = Math.PI;
   updateHUD(); showPhoneApp("realestate");
 };
+// FEATURE 5: Toggle the player's house locked state.
+window._toggleHouseLock = async (lock) => {
+  const uid = getMyUid();
+  if (!uid) { toast("Sign in first"); return; }
+  if (!game.state.homeArea || game.state.homePlot == null) { toast("Pick an area first"); return; }
+  try {
+    await setHouseLocked(game.state.homeArea, game.state.homePlot, lock);
+    toast(lock ? "🔒 House locked — visitors must knock" : "🔓 House unlocked — visitors can enter directly");
+    showPhoneApp("realestate");
+  } catch (e) {
+    console.warn("[lock] toggle failed:", e.message);
+    toast("Could not toggle lock — try again");
+  }
+};
+// FEATURE 4: Surface the area picker from the Real Estate app.
+window._showAreaPicker = () => {
+  if (game.state.homeArea) {
+    if (!confirm("You already live in " + (getArea(game.state.homeArea)?.name || "your area") + ". Open the area picker to MOVE?")) return;
+  }
+  _showAreaScreen();
+};
 // ---- Money Hunt HUD update (called by moneyhunt.js after a successful claim) ----
 function _updateHuntHud() {
   const stats = getHuntStats();
@@ -2007,7 +2194,17 @@ initAuth((user) => {
   let _lastFirebaseBal = null;
   onValue(ref(db, "economy/" + user.uid + "/balance"), (snap) => {
     const fbBal = snap.val();
-    if (fbBal == null) return; // no economy entry yet
+    if (fbBal == null) {
+      // FEATURE: Firebase has no balance entry yet (new account or first login
+      // after the rules update). Write the local balance (5000 starting money,
+      // or whatever localStorage had) to Firebase so it persists across
+      // devices + logout. Without this, the balance stayed local-only and
+      // was lost on logout (the user's "amount doesn't stay" complaint).
+      if (_lastFirebaseBal === null) {
+        update(ref(db, "economy/" + user.uid), { balance: game.state.money }).catch(() => {});
+      }
+      return;
+    }
     if (_lastFirebaseBal === null) {
       // First load — if Firebase has a balance, use it (admin may have set it)
       _lastFirebaseBal = fbBal;
@@ -2027,7 +2224,15 @@ initAuth((user) => {
   });
   // ---- Also write player's name to economy node so admin shows it ----
   const playerName = user.displayName || user.email?.split("@")[0] || "Player";
-  update(ref(db, "economy/" + user.uid), { name: playerName, balance: game.state.money });
+  // BUGFIX: only write the NAME here, NOT the balance. Writing the balance
+  // here would overwrite whatever admin had credited while the user was
+  // logged out (the "admin credit/debit not updating" complaint). The
+  // onValue listener above handles balance sync in both directions.
+  update(ref(db, "economy/" + user.uid), { name: playerName });
+  // FEATURE: arm the beforeunload + visibilitychange handlers so the
+  // current balance gets pushed to Firebase when the user closes the tab,
+  // refreshes, or backgrounds the app.
+  _armBeforeUnload(user.uid);
   // FEATURE: per-plot world doors + knock/invite flow (step 2c).
   // initPlotDoors subscribes to nearby areas' house records and renders door
   // markers. listenForKnocks lets the OWNER hear knocks from visitors in
@@ -2440,6 +2645,8 @@ function frame() {
   // ---- Plot doors tick: render doors at nearby occupied plots + detect knock range (step 2c) ----
   // Only tick when NOT inside a place (otherwise we waste cycles on doors the player can't see)
   if (!active) tickPlotDoors(player.pos.x, player.pos.z);
+  // FEATURE 3b: area world tick — chunk-streamed area roads + houses + lamp posts
+  if (!active) tickAreaWorld(player.pos.x, player.pos.z);
   else if (_currentPlotInfo) _onPlotPromptUpdate(null); // inside a place: hide the "Enter X's Home" box
   if (!active) savePos(dt);
   sendPosition(player.pos.x, player.pos.z, player.heading);

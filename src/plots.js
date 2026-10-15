@@ -46,8 +46,8 @@ const KNOCK_RANGE = 6;         // metres — within this, show knock/enter promp
 // AREA_GRID_RANGE of the player get markers. The whole grid is hidden when the
 // player is too far away. ONE InstancedMesh per area, allocated once when the
 // area first becomes nearby, disposed when the area unsubscribes.
-const AREA_GRID_RANGE = 220;  // metres — show plot grid markers within this of area center
-const AREA_NAME_RANGE = 320;  // metres — show the area name sign within this of area center
+const AREA_GRID_RANGE = 180;  // metres — show plot grid markers within this of area center
+const AREA_NAME_RANGE = 120; // metres — show area name sign within this of area center (was 320 — too far, every area in the city was visible)
 
 // ---- State ----
 let _scene = null;
@@ -291,6 +291,18 @@ export function tickPlotDoors(playerX, playerZ) {
 
 export function getNearestFriendPlot() { return _nearestFriendPlot; }
 
+// FEATURE: expose the cached houses data so areas_world.js can render
+// house exteriors ONLY at occupied plots (not every plot in the area).
+export function getAreaHouses(areaId) {
+  return _houses[areaId] || {};
+}
+
+// FEATURE: expose the area name sprites map so main.js's tap-raycaster can
+// detect when the player taps a floating area name sign → travel there.
+export function getAreaNameSprites() {
+  return _areaNameSprites;
+}
+
 // ---- Draw a label onto a canvas (called only when the label changes) ----
 function _drawLabel(canvas, ctx, text, accent) {
   ctx.fillStyle = "rgba(15,15,15,0.85)";
@@ -480,6 +492,9 @@ function _buildAreaName(areaId, area) {
   sprite.position.set(area.x, 12, area.z);
   sprite.scale.set(16, 4, 1);
   sprite.visible = false; // tickPlotDoors will toggle based on distance
+  // FEATURE: tag the area name sprite with userData so main.js's tap-raycaster
+  // can detect when the player taps an area name → travel there.
+  sprite.userData = { isAreaName: true, areaId: area.id, areaName: area.name };
   _scene.add(sprite);
   _areaNameSprites.set(areaId, { sprite, canvas, ctx, texture: tex });
 }

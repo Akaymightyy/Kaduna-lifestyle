@@ -15,15 +15,37 @@ export async function loadPlayer(manager, scene, look) {
   return { group: ch.group, model: ch.model, animate: ch.animate, height: 1.8, recolor: (newLook) => recolorCharacter(ch, newLook) };
 }
 
-export function collide(pos, colliders, r = 0.45) {
+export function collide(pos, colliders, r = 0.55) {
+  // FEATURE: clamp to world bounds first (so the player can't walk off the map).
   pos.x = Math.max(-PLAYER_LIMIT_X, Math.min(PLAYER_LIMIT_X, pos.x));
   pos.z = Math.max(-PLAYER_LIMIT_Z, Math.min(PLAYER_LIMIT_Z, pos.z));
-  for (const b of colliders) {
-    const cx = Math.max(b.minX, Math.min(pos.x, b.maxX)), cz = Math.max(b.minZ, Math.min(pos.z, b.maxZ));
-    const dx = pos.x - cx, dz = pos.z - cz, d2 = dx * dx + dz * dz;
-    if (d2 < r * r) {
-      if (d2 > 1e-6) { const d = Math.sqrt(d2), f = (r - d) / d; pos.x += dx * f; pos.z += dz * f; }
-      else pos.x = b.minX - r;
+  // BUGFIX: was a single pass — if the player is in a corner (touching 2+ walls),
+  // the single push-out could push them INTO another wall, then they'd tunnel.
+  // Now 3 iterations of push-out — each iteration resolves the closest
+  // collision, then the next iteration catches any new collisions introduced
+  // by the first push. This handles corners + overlapping colliders correctly.
+  // Also bumped the player radius from 0.45 to 0.55 for more forgiving hits
+  // (was too tight, the player could squeeze through gaps between colliders).
+  for (let iter = 0; iter < 3; iter++) {
+    let anyHit = false;
+    for (const b of colliders) {
+      // Skip degenerate colliders (e.g. area-house slots with no house this frame)
+      if (!isFinite(b.minX) || b.minX > b.maxX || b.minZ > b.maxZ) continue;
+      const cx = Math.max(b.minX, Math.min(pos.x, b.maxX));
+      const cz = Math.max(b.minZ, Math.min(pos.z, b.maxZ));
+      const dx = pos.x - cx, dz = pos.z - cz, d2 = dx * dx + dz * dz;
+      if (d2 < r * r) {
+        anyHit = true;
+        if (d2 > 1e-6) {
+          const d = Math.sqrt(d2), f = (r - d) / d;
+          pos.x += dx * f;
+          pos.z += dz * f;
+        } else {
+          // Player is exactly inside the box center — push out along +X
+          pos.x = b.maxX + r;
+        }
+      }
     }
+    if (!anyHit) break;  // no collisions this pass — done
   }
 }

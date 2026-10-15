@@ -330,6 +330,12 @@ export function tickShadows(playerX, playerZ, gameHour, renderer) {
 }
 
 // ---- Auto-detect quality based on device + first 3 seconds of FPS ----
+// FEATURE: the user requested "high graphics as default". So we return
+// "high" for everyone UNLESS the device is very low-end (mobile with ≤2GB
+// RAM or small screen). The user can still manually switch to Low/Medium
+// via Settings → Graphics, and the choice is saved to localStorage.
+// Previously defaulted to "low" on mobile + "medium" on mid mobile which
+// made the game look flat on capable phones.
 export function autoDetectQuality() {
   // Check saved preference first
   try {
@@ -342,7 +348,9 @@ export function autoDetectQuality() {
   const mem = navigator.deviceMemory || 4;
   const smallScreen = Math.min(innerWidth, innerHeight) < 480;
 
-  if (isMobile && (cores <= 4 || mem <= 3 || smallScreen)) return "low";
-  if (isMobile) return "medium";
+  // FEATURE: default to HIGH for everyone. Only drop to medium for very
+  // low-end phones (≤2 cores or ≤2GB RAM or tiny screen). The user can
+  // always downgrade in Settings if their device can't keep up.
+  if (isMobile && (cores <= 2 || mem <= 2 || smallScreen)) return "medium";
   return "high";
 }
