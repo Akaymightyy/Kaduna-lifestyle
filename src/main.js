@@ -145,6 +145,84 @@ function _armBeforeUnload(uid) {
   });
 }
 
+// ---- FEATURE: Vehicle driving controls (on-screen buttons) ----
+// When riding, dedicated left/right/accelerate/brake buttons appear.
+// These set window._vehBtnSteer / window._vehBtnThrottle which the
+// movement loop reads in addition to the joystick + keyboard.
+let _vehControlsEl = null;
+function _ensureVehicleControls() {
+  if (_vehControlsEl) return;
+  _vehControlsEl = document.createElement("div");
+  _vehControlsEl.id = "vehicle-controls";
+  _vehControlsEl.style.cssText =
+    "position:fixed;inset:0;z-index:28;pointer-events:none;display:none;";
+  // Accelerate (big green button, bottom-right)
+  const accelBtn = document.createElement("button");
+  accelBtn.innerHTML = "▲";
+  accelBtn.style.cssText = "position:absolute;right:20px;bottom:calc(130px + env(safe-area-inset-bottom));" +
+    "width:72px;height:72px;border-radius:50%;background:#4ade80;color:#000;border:3px solid #fff;" +
+    "font-size:32px;font-weight:700;cursor:pointer;pointer-events:auto;touch-action:none;" +
+    "box-shadow:0 4px 12px rgba(0,0,0,.4);user-select:none;-webkit-user-select:none;";
+  // Brake/reverse (red button, left of accelerate)
+  const brakeBtn = document.createElement("button");
+  brakeBtn.innerHTML = "▼";
+  brakeBtn.style.cssText = "position:absolute;right:100px;bottom:calc(130px + env(safe-area-inset-bottom));" +
+    "width:56px;height:56px;border-radius:50%;background:#e11d48;color:#fff;border:3px solid #fff;" +
+    "font-size:24px;font-weight:700;cursor:pointer;pointer-events:auto;touch-action:none;" +
+    "box-shadow:0 4px 12px rgba(0,0,0,.4);user-select:none;-webkit-user-select:none;";
+  // Steer left (bottom-center-left)
+  const leftBtn = document.createElement("button");
+  leftBtn.innerHTML = "◀";
+  leftBtn.style.cssText = "position:absolute;left:50%;transform:translateX(-80px);bottom:calc(130px + env(safe-area-inset-bottom));" +
+    "width:56px;height:56px;border-radius:50%;background:rgba(15,77,58,.92);color:#fff;border:2px solid rgba(255,255,255,.3);" +
+    "font-size:22px;font-weight:700;cursor:pointer;pointer-events:auto;touch-action:none;" +
+    "box-shadow:0 4px 12px rgba(0,0,0,.4);user-select:none;-webkit-user-select:none;";
+  // Steer right (bottom-center-right)
+  const rightBtn = document.createElement("button");
+  rightBtn.innerHTML = "▶";
+  rightBtn.style.cssText = "position:absolute;left:50%;transform:translateX(24px);bottom:calc(130px + env(safe-area-inset-bottom));" +
+    "width:56px;height:56px;border-radius:50%;background:rgba(15,77,58,.92);color:#fff;border:2px solid rgba(255,255,255,.3);" +
+    "font-size:22px;font-weight:700;cursor:pointer;pointer-events:auto;touch-action:none;" +
+    "box-shadow:0 4px 12px rgba(0,0,0,.4);user-select:none;-webkit-user-select:none;";
+  // Wire up pointer events for each button
+  const wireBtn = (el, steerVal, throttleVal) => {
+    const start = (e) => { e.preventDefault(); if (steerVal !== undefined) window._vehBtnSteer = (window._vehBtnSteer || 0) + steerVal; if (throttleVal !== undefined) window._vehBtnThrottle = (window._vehBtnThrottle || 0) + throttleVal; el.style.transform = el.style.transform.replace("scale(1)", "scale(0.92)"); };
+    const end = (e) => { e.preventDefault(); if (steerVal !== undefined) window._vehBtnSteer = (window._vehBtnSteer || 0) - steerVal; if (throttleVal !== undefined) window._vehBtnThrottle = (window._vehBtnThrottle || 0) - throttleVal; el.style.transform = el.style.transform.replace("scale(0.92)", "scale(1)"); };
+    el.addEventListener("pointerdown", start);
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", end);
+    el.addEventListener("pointerleave", end);
+  };
+  wireBtn(accelBtn, undefined, 1);     // accelerate
+  wireBtn(brakeBtn, undefined, -1);    // brake/reverse
+  wireBtn(leftBtn, -1, undefined);     // steer left
+  wireBtn(rightBtn, 1, undefined);     // steer right
+  _vehControlsEl.appendChild(accelBtn);
+  _vehControlsEl.appendChild(brakeBtn);
+  _vehControlsEl.appendChild(leftBtn);
+  _vehControlsEl.appendChild(rightBtn);
+  document.body.appendChild(_vehControlsEl);
+}
+
+// ---- FEATURE: Periodic Firebase balance pusher ----
+// Pushes the balance to Firebase every 5 seconds IF it changed since last push.
+// More reliable than beforeunload on mobile (which can be unreliable).
+let _lastPushedMoney = null;
+let _balancePushT = null;
+function _armBalancePusher(uid) {
+  if (_balancePushT) return;
+  _balancePushT = setInterval(() => {
+    try {
+      const u = uid || getMyUid();
+      if (!u || !game.state) return;
+      if (_lastPushedMoney !== game.state.money) {
+        _lastPushedMoney = game.state.money;
+        update(ref(db, "economy/" + u), { balance: game.state.money });
+      }
+    } catch (e) { /* non-critical */ }
+  }, 5000);
+}
+
 let tipI = 0;
 $("ltip").textContent = TIPS[0];
 setInterval(() => { tipI = (tipI + 1) % TIPS.length; $("ltip").textContent = TIPS[tipI]; }, 2600);
@@ -2392,6 +2470,8 @@ initAuth((user) => {
   // current balance gets pushed to Firebase when the user closes the tab,
   // refreshes, or backgrounds the app.
   _armBeforeUnload(user.uid);
+  _armBalancePusher(user.uid);
+  _ensureVehicleControls();
   // FEATURE: per-plot world doors + knock/invite flow (step 2c).
   // initPlotDoors subscribes to nearby areas' house records and renders door
   // markers. listenForKnocks lets the OWNER hear knocks from visitors in
@@ -2702,15 +2782,16 @@ function _frame() {
   if (isLiveMapOn()) { liveMapFrame(dt); perfBeforeRender(); renderer.render(scene, camera); perfAfterRender(renderer, getQuality()); requestAnimationFrame(frame); return; }
   const now = Date.now() / 1000;
   const _riding = isRiding();
+  // FEATURE: show/hide driving buttons based on riding state
+  if (_vehControlsEl) _vehControlsEl.style.display = _riding ? "block" : "none";
   if (_riding) {
-    // FEATURE: VEHICLE CONTROL SCHEME
-    // Joystick up/down = THROTTLE (accelerate / brake/reverse)
-    // Joystick left/right = STEERING (change heading — like a steering wheel)
-    // Speed ramps up gradually (acceleration feel, dt*3 vs dt*9 for walking)
-    // Vehicle top speed = getRideSpeed() * 1.8 (always faster than walking max 4.8)
+    // FEATURE: VEHICLE CONTROL — dedicated driving buttons + joystick + keyboard
+    // _vehBtnSteer / _vehBtnThrottle are set by the on-screen driving buttons.
+    // Joystick left/right also steers; joystick up/down also throttles.
+    // Keyboard WASD/arrows also work.
     const maxVehSpd = getRideSpeed() * 1.8;
-    // Get raw joystick + keyboard input (before camera-relative conversion)
-    let steer = ctl.joyX || 0, throttle = ctl.joyY || 0;
+    let steer = (window._vehBtnSteer || 0) + (ctl.joyX || 0);
+    let throttle = (window._vehBtnThrottle || 0) + (ctl.joyY || 0);
     const k = ctl.keys || {};
     if (k["w"] || k["arrowup"]) throttle += 1;
     if (k["s"] || k["arrowdown"]) throttle -= 1;
@@ -2718,15 +2799,18 @@ function _frame() {
     if (k["d"] || k["arrowright"]) steer += 1;
     steer = Math.max(-1, Math.min(1, steer));
     throttle = Math.max(-1, Math.min(1, throttle));
-    // Acceleration: throttle sets target, ramp is SLOWER (vehicle feel)
+    // Acceleration: throttle sets target speed, ramp is gradual (vehicle feel)
     const target = throttle * maxVehSpd;
     player.speed += (target - player.speed) * (1 - Math.exp(-dt * 3));
-    // Steering: change heading proportional to speed (can't steer when parked)
+    // BUGFIX: steering rate was 2.8 (too high — car "swung" instead of drove).
+    // Now 1.2 rad/s, scaled by speed factor so turns are wider at high speed
+    // (like a real car) and tighter at low speed. Feels like DRIVING not swinging.
     if (Math.abs(player.speed) > 0.3) {
-      const steerRate = 2.8;  // radians per second at full lock
-      player.heading += steer * steerRate * dt * (player.speed > 0 ? 1 : -1);
+      const speedFactor = Math.min(1, Math.abs(player.speed) / maxVehSpd);
+      const steerRate = 1.2;
+      player.heading += steer * steerRate * dt * (player.speed > 0 ? 1 : -1) * (0.4 + speedFactor * 0.6);
     }
-    // Move along heading direction (not camera-relative)
+    // Move forward along heading (not camera-relative)
     const fx = -Math.sin(player.heading), fz = -Math.cos(player.heading);
     player.pos.x += fx * player.speed * dt;
     player.pos.z += fz * player.speed * dt;
