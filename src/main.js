@@ -2010,7 +2010,7 @@ window._buyVehicle = async (vehicleId) => {
 window._rideVehicle = async (vehicleId) => {
   if (isRiding()) { toast("Already riding — dismount first"); return; }
   if (!ownsVehicle(vehicleId)) { toast("You don't own this vehicle"); return; }
-  const ok = await spawnRideVehicle(vehicleId, player.pos, player.heading);
+  const ok = await spawnRideVehicle(vehicleId, player.pos, player.heading, toast);
   if (ok) {
     closePhone();
     const v = getVehicle(vehicleId);

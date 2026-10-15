@@ -4,8 +4,8 @@
 // Ride → spawn the vehicle mesh at the player's position + boost movement speed.
 // Dismount → despawn the mesh + remove the speed boost.
 //
-// The vehicle mesh reuses the traffic.js geometry builders (sedan, hatch, suv,
-// bus, REMOVEDkeke, okada) so there's no new geometry to author.
+// Vehicles with a `glbPath` load a real 3D GLB model (Ferrari, Jeep, Danfo Bus, Keke).
+// Others use simplified box-geometry builders.
 
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
@@ -13,15 +13,25 @@ import { db } from "./firebase.js";
 import { ref, get, set, update, onValue } from "firebase/database";
 
 // ---- Catalog ----
+// glbPath = path to a real 3D model (loaded lazily via GLTFLoader on first ride)
+// glbScale = uniform scale multiplier (some models are too big/small)
+// glbRotY = Y-axis rotation offset (some models face a different direction)
+// glbY = Y-axis position offset (some models have origin at feet, others at center)
 export const VEHICLE_CATALOG = [
   { id: "okada",   name: "Okada (Motorcycle)",  emoji: "🏍️",  price: 15000,  speed: 5.5, desc: "Fast + cheap. Zips through traffic." },
-  { id: "keke",    name: "Keke Napep",           emoji: "🛺",   price: 25000,  speed: 4.0, desc: "The Kaduna classic. Steady + reliable." },
+  { id: "keke",    name: "Keke Napep",           emoji: "🛺",   price: 25000,  speed: 4.0, desc: "The Kaduna classic. Steady + reliable.",
+    glbPath: "/models/vehicles/keke_napep.glb", glbScale: 1.0, glbRotY: 0, glbY: 0 },
   { id: "bicycle", name: "Bicycle",              emoji: "🚲",   price: 8000,   speed: 3.0, desc: "Eco-friendly. No fuel needed." },
   { id: "sedan",   name: "Sedan",                emoji: "🚗",   price: 80000,  speed: 5.5, desc: "Comfortable daily driver. AC + stereo." },
   { id: "hatch",   name: "Hatchback",           emoji: "🚙",   price: 55000,  speed: 5.0, desc: "Compact + nimble. Easy to park." },
+  { id: "jeep",    name: "Jeep Wrangler",       emoji: "🚙",   price: 300000, speed: 5.2, desc: "Rugged + bold. Conquers any terrain.",
+    glbPath: "/models/vehicles/jeep.glb", glbScale: 1.0, glbRotY: 0, glbY: 0 },
   { id: "suv",     name: "SUV",                  emoji: "🚐",   price: 150000, speed: 4.8, desc: "Big + bold. Handles any road." },
-  { id: "bus",     name: "Danfo Bus",            emoji: "🚌",   price: 120000, speed: 3.5, desc: "Carry passengers. Slow but steady." },
+  { id: "bus",     name: "Lagos Danfo Bus",      emoji: "🚌",   price: 120000, speed: 3.5, desc: "The iconic yellow bus. Carry passengers.",
+    glbPath: "/models/vehicles/lagos_danfo_bus.glb", glbScale: 1.0, glbRotY: 0, glbY: 0 },
   { id: "sports",  name: "Sports Car",           emoji: "🏎️",   price: 500000, speed: 7.0, desc: "Flashy + fast. The ultimate flex." },
+  { id: "ferrari", name: "Ferrari",              emoji: "🏎️",   price: 2000000,speed: 8.5, desc: "Italian Stallion. The peak of Kaduna flex.",
+    glbPath: "/models/vehicles/ferrari.glb", glbScale: 1.0, glbRotY: 0, glbY: 0 },
   { id: "luxury",  name: "Luxury Sedan",         emoji: "🚘",   price: 1000000,speed: 6.5, desc: "VIP ride. Big oga energy." },
 ];
 
@@ -174,27 +184,90 @@ function _buildSimplifiedTypes() {
   };
 }
 
+// ---- GLB model loading (lazy + cached) ----
+// GLB models are loaded via GLTFLoader on first ride, then cached.
+// The GLTFLoader is dynamically imported so it doesn't bloat the main bundle.
+let _glbCache = new Map();   // vehicleId → THREE.Group (the loaded model, cloned per spawn)
+let _glbLoader = null;
+
+async function _getGlbLoader() {
+  if (_glbLoader) return _glbLoader;
+  const { GLTFLoader } = await import("three/examples/jsm/loaders/GLTFLoader.js");
+  _glbLoader = new GLTFLoader();
+  return _glbLoader;
+}
+
+async function _loadGlbModel(vehicleId, vehicle) {
+  if (_glbCache.has(vehicleId)) return _glbCache.get(vehicleId);
+  const loader = await _getGlbLoader();
+  return new Promise((resolve) => {
+    loader.load(
+      vehicle.glbPath,
+      (gltf) => {
+        const model = gltf.scene;
+        // Apply scale + rotation + Y offset from the catalog
+        model.scale.setScalar(vehicle.glbScale || 1.0);
+        model.rotation.y = vehicle.glbRotY || 0;
+        model.position.y = vehicle.glbY || 0;
+        // Perf: disable shadows on the model (only player character casts)
+        model.traverse((o) => {
+          if (o.isMesh) { o.castShadow = false; o.frustumCulled = false; }
+        });
+        _glbCache.set(vehicleId, model);
+        console.log("[vehicles] GLB loaded:", vehicle.glbPath);
+        resolve(model);
+      },
+      undefined,
+      (err) => {
+        console.warn("[vehicles] GLB load failed:", vehicle.glbPath, err.message);
+        resolve(null);  // fall back to simplified mesh
+      }
+    );
+  });
+}
+
 // ---- Spawn a ride vehicle at the player's position ----
-export async function spawnRideVehicle(vehicleId, playerPos, playerHeading) {
+export async function spawnRideVehicle(vehicleId, playerPos, playerHeading, toastFn) {
   if (_riding) despawnRideVehicle();
   const v = getVehicle(vehicleId);
   if (!v) return false;
-  const types = await _getTrafficTypes();
-  const builder = types[vehicleId];
-  if (!builder) {
-    console.warn("[vehicles] no builder for", vehicleId);
-    return false;
+
+  let mesh = null;
+
+  // Try GLB model first (if the vehicle has one)
+  if (v.glbPath) {
+    if (toastFn) toastFn("Loading " + v.name + " model...");
+    const glbModel = await _loadGlbModel(vehicleId, v);
+    if (glbModel) {
+      // Clone the cached model so we can position it without affecting the original
+      mesh = glbModel.clone(true);
+      // Reset the clone's world transform (the cache has scale/rot/y baked in)
+      mesh.position.set(playerPos.x, 0, playerPos.z);
+      mesh.rotation.y = playerHeading + (v.glbRotY || 0);
+    }
   }
-  const parts = builder();
-  const merged = mergeGeometries(parts, true);
-  parts.forEach(g => g.dispose());
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
-  const mesh = new THREE.Mesh(merged, mat);
-  mesh.castShadow = false; // perf — only the player character casts shadows
-  mesh.frustumCulled = false;
-  // Position at the player's spot, slightly lowered so the player "sits" on/in it
-  mesh.position.set(playerPos.x, 0, playerPos.z);
-  mesh.rotation.y = playerHeading;
+
+  // Fall back to simplified box-geometry mesh if no GLB or GLB failed
+  if (!mesh) {
+    const types = await _getTrafficTypes();
+    // Map new vehicle IDs to existing simplified builders as fallback
+    const fallbackType = vehicleId === "ferrari" ? "sports" : vehicleId === "jeep" ? "suv" : vehicleId;
+    const builder = types[fallbackType];
+    if (!builder) {
+      console.warn("[vehicles] no builder for", vehicleId, "(fallback:", fallbackType, ")");
+      return false;
+    }
+    const parts = builder();
+    const merged = mergeGeometries(parts, true);
+    parts.forEach(g => g.dispose());
+    const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    mesh = new THREE.Mesh(merged, mat);
+    mesh.castShadow = false;
+    mesh.frustumCulled = false;
+    mesh.position.set(playerPos.x, 0, playerPos.z);
+    mesh.rotation.y = playerHeading;
+  }
+
   _scene.add(mesh);
   _riding = { vehicleId, speed: v.speed, mesh };
   console.log("[vehicles] Riding " + v.name + " (speed boost +" + v.speed + ")");
