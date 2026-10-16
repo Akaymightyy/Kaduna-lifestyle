@@ -1,5 +1,6 @@
 // src/auth.js — Firebase Auth (Guest, Google, Email/Password) + Admin quick-login
 import { auth, authPersistReady, db } from "./firebase.js";
+import { getGameUid, setGameUid } from "./needs.js";
 import {
   signInAnonymously,
   signInWithPopup,
@@ -16,6 +17,12 @@ let _onAuth = null;
 
 export let isAuthed = false;
 let _started = false;
+let _freshBusy = false, _needReload = null;   // sign-up writes several records AFTER the account exists: reload only when it is done
+function _reloadForAccount(uid) {
+  try { sessionStorage.setItem("kaduna-uid-reload", uid); sessionStorage.setItem("kaduna-skip-welcome", "1"); } catch (e) {}
+  location.reload();
+}
+function _endFresh() { _freshBusy = false; if (_needReload) _reloadForAccount(_needReload); }
 let _freshLogin = false;      // true when the player just typed their details this visit -> skip the welcome screen
 export function initAuth(onAuth) {
   _onAuth = onAuth;
@@ -28,6 +35,13 @@ export function initAuth(onAuth) {
         hideAuthModal();
         if (!_started) {
           _started = true;
+          // The saved game is keyed by account and the 3D body is built at page start, so after a fresh login on
+          // this page we reload once so everything (body, outfit, save) belongs to THIS account.
+          if (getGameUid() !== user.uid) {
+            let again = false; try { again = sessionStorage.getItem("kaduna-uid-reload") === user.uid; } catch (e) {}
+            if (!again) { if (_freshBusy) _needReload = user.uid; else _reloadForAccount(user.uid); return; }
+            setGameUid(user.uid);   // safety net so a stuck reload can never loop
+          } else { try { sessionStorage.removeItem("kaduna-uid-reload"); } catch (e) {} }
           const wasNewLife = await _applyPendingNewLife(user);
           if (_onAuth) _onAuth(user);                       // the game loads behind the welcome screen
           if (!_freshLogin && !wasNewLife) showWelcome(user); // returning player: Continue / New life / Log out
@@ -54,7 +68,7 @@ function _avatarSvg(look) {
   const l = look || {};
   const skin = l.skin || "#8a5a3c", top = l.top || "#1f7a5a", hair = l.hair || "#111111";
   return '<svg viewBox="0 0 58 58" width="58" height="58" xmlns="http://www.w3.org/2000/svg">' +
-    '<rect width="58" height="58" fill="#dbeafe"/>' +
+    '<rect width="58" height="58" fill="#dfe8d8"/>' +
     '<path d="M6 58c0-14 10-21 23-21s23 7 23 21z" fill="' + top + '"/>' +
     '<circle cx="29" cy="24" r="12" fill="' + skin + '"/>' +
     '<path d="M17 23c0-9 6-13 12-13s12 4 12 13c-3-4-7-6-12-6s-9 2-12 6z" fill="' + hair + '"/></svg>';
@@ -63,6 +77,7 @@ function _esc(t) { return String(t == null ? "" : t).replace(/[&<>"']/g, (m) => 
 async function showWelcome(user) {
   const el = document.getElementById("welcome-modal");
   if (!el) return;
+  try { if (sessionStorage.getItem("kaduna-skip-welcome")) { sessionStorage.removeItem("kaduna-skip-welcome"); return; } } catch (e) {}
   const st = _savedState(user.uid);
   const fallbackName = user.displayName || (user.email ? user.email.split("@")[0] : "Player");
   const set$ = (id, html, asText) => { const n = document.getElementById(id); if (n) { if (asText) n.textContent = html; else n.innerHTML = html; } };
@@ -139,17 +154,17 @@ export async function loginGuest() {
 
 export async function loginGoogle() {
   try {
-    _freshLogin = true;
+    _freshLogin = true; _freshBusy = true;
     clearAuthError();
     await signInWithPopup(auth, new GoogleAuthProvider());
   } catch (e) {
     showAuthError(friendly(e, "Google sign-in failed"));
-  }
+  } finally { _endFresh(); }
 }
 
 export async function loginEmail(email, pass) {
   try {
-    _freshLogin = true;
+    _freshLogin = true; _freshBusy = true;
     clearAuthError();
     // Basic field validation BEFORE hitting Firebase — gives instant feedback.
     if (!email || !email.trim()) { showAuthError("Enter your email address."); return; }
@@ -160,12 +175,12 @@ export async function loginEmail(email, pass) {
     clearAuthError();
   } catch (e) {
     showAuthError(friendly(e, "Could not log in. Check your details."));
-  }
+  } finally { _endFresh(); }
 }
 
 export async function signupEmail(email, pass, name, username) {
   try {
-    _freshLogin = true;
+    _freshLogin = true; _freshBusy = true;
     clearAuthError();
     // ---- Field validation ----
     if (!name || !name.trim()) { showAuthError("Enter your full name."); return; }
@@ -229,7 +244,7 @@ export async function signupEmail(email, pass, name, username) {
     clearAuthError();
   } catch (e) {
     showAuthError(friendly(e, "Could not create account. Try again."));
-  }
+  } finally { _endFresh(); }
 }
 
 export async function logout() {
@@ -238,8 +253,9 @@ export async function logout() {
     toast("Signed out");
     // Clear ALL game state from localStorage so the next account starts fresh
     try {
-      const keys = Object.keys(localStorage).filter(k => k.startsWith("kaduna-state"));
+      const keys = Object.keys(localStorage).filter(k => k.startsWith("kaduna-state") || k.startsWith("kaduna-pos"));
       keys.forEach(k => localStorage.removeItem(k));
+      sessionStorage.removeItem("kaduna-uid-reload"); sessionStorage.removeItem("kaduna-gender-reload");
     } catch (e) {}
     setTimeout(() => location.reload(), 500);
   } catch (e) {

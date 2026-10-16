@@ -4,12 +4,27 @@
 // so the game doesn't start at zero while waiting for Firebase to load.
 import { NEEDS, FOOD_ITEMS, JOBS, RANKS } from "./config.js";
 
-let _uid = null;
+// BUGFIX: setGameUid() was never called, so EVERY account on a browser shared one save ("kaduna-state-guest"):
+// same outfit, gender, money, "character created" flag. Now the save is keyed by the signed-in account. The uid is
+// read synchronously from Firebase's own stored session, because the game state is built before auth finishes.
+function _readStoredUid() {
+  try {
+    for (const k of Object.keys(localStorage)) {
+      if (!k.startsWith("firebase:authUser:")) continue;
+      const u = JSON.parse(localStorage.getItem(k));
+      if (u && u.uid && !u.isAnonymous) return u.uid;
+    }
+  } catch (e) {}
+  return null;
+}
+let _uid = _readStoredUid();
+try { localStorage.removeItem("kaduna-state-guest"); } catch (e) {}   // old shared save: it belongs to nobody in particular
 
 export function setGameUid(uid) { _uid = uid; }
 export function getGameUid() { return _uid; }
 
-function _storageKey() { return _uid ? "kaduna-state-" + _uid : "kaduna-state-guest"; }
+// No signed-in account -> nothing is loaded or saved (there is no "guest" save any more).
+function _storageKey() { return _uid ? "kaduna-state-" + _uid : null; }
 
 export function createGameState() {
   const state = {
@@ -25,7 +40,8 @@ export function createGameState() {
 
   function _loadFromStorage(target) {
     try {
-      const saved = JSON.parse(localStorage.getItem(_storageKey()));
+      const key = _storageKey(); if (!key) return;
+      const saved = JSON.parse(localStorage.getItem(key));
       if (saved) {
         Object.assign(target, saved);
         target.lastUpdate = Date.now();
@@ -35,7 +51,8 @@ export function createGameState() {
 
   function save() {
     try {
-      localStorage.setItem(_storageKey(), JSON.stringify({
+      const key = _storageKey(); if (!key) return;
+      localStorage.setItem(key, JSON.stringify({
         money: state.money,
         needs: state.needs,
         rank: state.rank,

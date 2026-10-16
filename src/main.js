@@ -10,7 +10,7 @@ import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAIL
 import { createGameState } from "./needs.js";
 import { auth, db } from "./firebase.js";
 import { initAuth, showAuthModal, wireAuthUI, logout, isAuthed } from "./auth.js";
-import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition, getRemotePlayers, setMyPlace, setMyLook } from "./multiplayer.js";
+import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition, getRemotePlayers, setMyPlace, setMyLook, setBlockedUids } from "./multiplayer.js";
 import { startRide, travelToZone, travelToPlace, getDestinations } from "./travel.js";
 import { subscribeRichList } from "./economy.js";
 import { createNPCs } from "./npcs.js";
@@ -280,6 +280,40 @@ canvas.addEventListener("pointerup", (e) => {
   if (moved > 10 || elapsed > 500) return;  // drag, not tap
   _handleWorldTap(e.clientX, e.clientY);
 });
+
+// ---- Tap a player's name tag -> options (Chat / Say Hello / Send money / Invite home) ----
+function _plAvatar(look) {
+  const l = look || {}, skin = l.skin || "#8a5a3c", top = l.top || "#1f7a5a", hair = l.hair || "#111111";
+  return '<svg viewBox="0 0 58 58" width="56" height="56" style="border-radius:50%;flex:none;background:#dfe8d8"><path d="M6 58c0-14 10-21 23-21s23 7 23 21z" fill="' + top + '"/><circle cx="29" cy="24" r="12" fill="' + skin + '"/><path d="M17 23c0-9 6-13 12-13s12 4 12 13c-3-4-7-6-12-6s-9 2-12 6z" fill="' + hair + '"/></svg>';
+}
+function _showPlayerSheet(uid, name) {
+  let el = document.getElementById("player-sheet");
+  if (!el) { el = document.createElement("div"); el.id = "player-sheet"; document.body.appendChild(el); }
+  const m = getRemotePlayers()[uid];
+  window._plTarget = { uid, name };
+  el.innerHTML = '<div class="pl-grab"></div>' +
+    '<div class="pl-head">' + _plAvatar(m && m.look) + '<div><div class="pl-name">' + _mxEsc(name) + '</div><div class="pl-sub">Real player · nearby</div></div></div>' +
+    '<button class="pl-btn primary" onclick="window._plChat()">💬 Chat</button>' +
+    '<div class="pl-grid"><button class="pl-btn" onclick="window._plHello()">👋 Say Hello</button><button class="pl-btn" onclick="window._plMoney()">💸 Send money</button><button class="pl-btn" onclick="window._plInvite()">🏠 Invite to my home</button><button class="pl-btn ghost" onclick="window._plClose()">Close</button></div>' +
+    '<div class="pl-chips"><button onclick="window._plBlock()">🚫 Block</button><button onclick="window._plReport()">⚑ Report</button></div>';
+  requestAnimationFrame(() => el.classList.add("show"));
+}
+async function _plOpenDM() {
+  const t = window._plTarget; if (!t) throw new Error("no target");
+  const r = await openDM(t.uid, t.name);
+  if (!r) throw new Error("openDM failed");
+  window._openChatId = r.chatId; window._openChatOtherUid = t.uid;
+  window._openChatName = r.otherUsername ? "@" + r.otherUsername : (r.otherName || t.name);
+  return r;
+}
+window._plClose = () => document.getElementById("player-sheet")?.classList.remove("show");
+window._plChat = async () => { try { await _plOpenDM(); window._plClose(); showPhoneApp("messages"); } catch (e) { console.warn("[player] chat", e); toast("Could not open chat — try again"); } };
+window._plHello = async () => { try { const r = await _plOpenDM(); await sendMessage(r.chatId, "👋 Hello!"); toast("👋 You said hello to " + window._plTarget.name); window._plClose(); } catch (e) { console.warn("[player] hello", e); toast("Could not send — try again"); } };
+window._plMoney = async () => { try { await _plOpenDM(); window._plClose(); window._chatSendMoney(); } catch (e) { toast("Could not open — try again"); } };
+window._plBlock = async () => { const t = window._plTarget; if (!t || !confirm("Block " + t.name + "? You will no longer see their character.")) return; try { await blockUser(t.uid); window._plClose(); } catch (e) { toast("Could not block — try again"); } };
+window._plReport = async () => { const t = window._plTarget; if (!t) return; const why = prompt("Why are you reporting " + t.name + "?"); if (!why) return; try { await reportUser(t.uid, why.slice(0, 300)); toast("⚑ Report sent. Thank you."); window._plClose(); } catch (e) { toast("Could not send report — try again"); } };
+window._plInvite = async () => { try { await _plOpenDM(); window._plClose(); await window._chatInvite(); } catch (e) { toast("Could not send invite — try again"); } };
+
 function _handleWorldTap(clientX, clientY) {
   if (!camera || !scene) return;
   const rect = canvas.getBoundingClientRect();
@@ -314,15 +348,7 @@ function _handleWorldTap(clientX, clientY) {
     const otherUid = ud.playerUid;
     const otherName = ud.playerName || "Player";
     if (!otherUid || otherUid === getMyUid()) return;
-    toast("💬 Opening chat with " + otherName + "...");
-    openDM(otherUid, otherName).then((r) => {
-      if (r) {
-        window._openChatId = r.chatId;
-        window._openChatOtherUid = otherUid;
-        window._openChatName = otherName;
-        showPhoneApp("messages");
-      } else { toast("Could not open chat — try again"); }
-    }).catch((e) => { console.warn("[tap] openDM failed", e); toast("Could not open chat"); });
+    _showPlayerSheet(otherUid, otherName);
   } else if (ud.isAreaName) {
     const areaId = ud.areaId;
     const areaName = ud.areaName;
@@ -646,7 +672,7 @@ window.closePhone=closePhone;
 function _showPhoneApp(appId) {
   const c=$("phone-content");
   _showingApp = appId;
-  { const _mxLight = appId === "messages"; $("phone-card")?.classList.toggle("msg-light", _mxLight); c.classList.toggle("msg-light", _mxLight); }
+  { const _mxLight = appId === "messages"; $("phone-card")?.classList.toggle("msg-kd", _mxLight); c.classList.toggle("msg-kd", _mxLight); }
   const backBtn='<button onclick="window.showApp(\'home\')" style="margin-top:14px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;font-weight:600;">← Back to Phone</button>';
   if(appId==="home"){
     const apps=[
@@ -1729,7 +1755,7 @@ function _updateUnreadBadge() {
 }
 // ---- Messages app — Lagos-Life style (light theme, @username rows, Unread/Read filters) ----
 window._msgTabName = "chats"; window._msgPill = "all"; window._msgQuery = "";
-const _MX_COLORS = ["#10b981", "#6366f1", "#f59e0b", "#ec4899", "#06b6d4", "#ef4444", "#8b5cf6", "#14b8a6"];
+const _MX_COLORS = ["#0f4d3a", "#2e7d4f", "#c98a0b", "#b45309", "#7c5a2b", "#1d6f6b", "#8a3b2e", "#4d6b2f"];
 function _mxEsc(t) { return String(t == null ? "" : t).replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m])); }
 function _mxAvatar(label, key, size) {
   const ch = (String(label || "?").replace(/^@/, "").trim().charAt(0) || "?").toUpperCase();
@@ -1804,19 +1830,19 @@ function _renderChatScreen(c, chatId, otherName) {
       const time = new Date(m.ts || 0).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
       if (m.type === "system") {
         const div = document.createElement("div");
-        div.style.cssText = "text-align:center;margin:6px 0;color:#6b7280;font-size:11px;";
+        div.style.cssText = "text-align:center;margin:6px 0;color:#5d6b64;font-size:11px;";
         div.textContent = m.text;
         container.appendChild(div);
       } else if (m.type === "money") {
         const div = document.createElement("div");
-        div.style.cssText = "text-align:center;margin:6px 0;background:#ecfdf3;border:1px solid #86efac;border-radius:12px;padding:6px 12px;color:#15803d;font-size:12px;font-weight:600;";
+        div.style.cssText = "text-align:center;margin:6px 0;background:#fff6dd;border:1px solid #f2b134;border-radius:12px;padding:6px 12px;color:#7a5200;font-size:12px;font-weight:600;";
         div.textContent = "💸 " + (isMe ? "You sent" : "You received") + " ₦" + (m.amount || 0).toLocaleString();
         container.appendChild(div);
       } else if (m.type === "house_invite") {
         // FEATURE: house invite bubble — shows the inviter's name + a Visit button.
         // The button stores the invite payload globally so _visitFromInvite can use it.
         const div = document.createElement("div");
-        div.style.cssText = "text-align:center;margin:6px 0;background:#fffbeb;border:1px solid #f2b134;border-radius:12px;padding:8px 12px;color:#111;font-size:12px;";
+        div.style.cssText = "text-align:center;margin:6px 0;background:#fff;border:1px solid #f2b134;border-radius:12px;padding:8px 12px;color:#12261e;font-size:12px;";
         const label = document.createElement("div");
         label.style.cssText = "font-weight:600;margin-bottom:6px;";
         const inviterName = (m.extra && m.extra.ownerName) || (isMe ? "You" : "Friend");
@@ -1859,10 +1885,10 @@ function _renderChatScreen(c, chatId, otherName) {
         const div = document.createElement("div");
         div.style.cssText = "display:flex;justify-content:" + (isMe ? "flex-end" : "flex-start") + ";margin:4px 0;";
         const bubble = document.createElement("div");
-        bubble.style.cssText = "max-width:75%;padding:8px 12px;border-radius:14px;font-size:13px;word-break:break-word;" + (isMe ? "background:#0f4d3a;color:#fff;border-bottom-right-radius:4px;" : "background:#eef0f3;color:#111;border-bottom-left-radius:4px;");
+        bubble.style.cssText = "max-width:75%;padding:8px 12px;border-radius:14px;font-size:13px;word-break:break-word;" + (isMe ? "background:#0f4d3a;color:#fff;border-bottom-right-radius:4px;" : "background:#fff;color:#12261e;border:1px solid rgba(15,77,58,.15);border-bottom-left-radius:4px;");
         bubble.textContent = m.text; // textContent — never innerHTML (blocks injection)
         const timeSpan = document.createElement("div");
-        timeSpan.style.cssText = "font-size:9px;margin-top:2px;text-align:right;color:" + (isMe ? "rgba(255,255,255,.75)" : "#6b7280") + ";";
+        timeSpan.style.cssText = "font-size:9px;margin-top:2px;text-align:right;color:" + (isMe ? "rgba(255,255,255,.75)" : "#7a877f") + ";";
         timeSpan.textContent = time + (isMe ? " ✓" : "");
         bubble.appendChild(timeSpan);
         div.appendChild(bubble);
@@ -2492,6 +2518,7 @@ initAuth((user) => {
     listenForKnocks(user.uid, (knocks) => _onIncomingKnocks(knocks));
   } catch (e) { console.warn("[plots] init failed", e); }
   // ---- Sync look across devices: the account's saved outfit in Firebase WINS over this device's local copy ----
+  onValue(ref(db, "blocks/" + user.uid), (snap) => setBlockedUids(Object.keys(snap.val() || {})), () => {});
   let _lookFirst = true;
   onValue(ref(db, "players/" + user.uid + "/look"), (snap) => {
     const fb = snap.val();
@@ -2520,11 +2547,20 @@ initAuth((user) => {
         }
       }
     }
+    if (first) setMyLook(game.state.look);   // others see the look that was on this device at page start, not the account's saved one
     if (!fb) { if (first) update(ref(db, "players/" + user.uid + "/look"), game.state.look); return; }
     if (JSON.stringify(fb) === JSON.stringify(game.state.look)) return;
     game.state.look = { ...game.state.look, ...fb };
     game.save?.();
+    // The 3D body (male / female) is built once at page start. If the account's saved gender differs (new device,
+    // or another account was used here before) a recolour cannot change the shape, so reload once into the right body.
+    { const g = game.state.look.gender || "male";
+      if (g !== _loadedGender) {
+        let done = null; try { done = sessionStorage.getItem("kaduna-gender-reload"); } catch (e) {}
+        if (done !== g) { try { sessionStorage.setItem("kaduna-gender-reload", g); } catch (e) {} location.reload(); return; }
+      } else { try { sessionStorage.removeItem("kaduna-gender-reload"); } catch (e) {} } }
     if (rig?.recolor) rig.recolor(game.state.look);
+    setMyLook(game.state.look);
   });
   // ---- Sync origin / housing / rent state from Firebase so a refresh on a new
   // device (or after clearing localStorage) still remembers the player's chosen

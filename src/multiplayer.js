@@ -7,6 +7,7 @@ import { createCharacter } from "./characters.js";
 
 
 let _uid=null, _name="Guest", _players={}, _meshes={}, _scene=null, _sendT=null, _onCount=null, _onChat=null;
+let _blocked = new Set();
 let _myPlace="", _myLook=null, _liveOk=true, _unsubPlayers=null;
 
 function makeNameTag(name, color) {
@@ -50,6 +51,7 @@ export function initMultiplayer(scene, onCount, onChat) {
       _players = {};
       for (const [k, d] of Object.entries(all)) {
         if (k === _uid || !d) continue;
+        if (_blocked.has(k)) continue;                         // blocked by me: not drawn
         if (d.online === false) continue;
         const t = typeof d.ts === "number" ? d.ts : now;
         if (now - t > 180000) continue;                       // not seen for 3 minutes: gone
@@ -91,10 +93,40 @@ export function sendChat(text) {
   push(ref(db,"chat"),{uid:_uid,name:_name,text:text.trim().slice(0,200),ts:Date.now()});
 }
 
-async function createAvatarFor(uid, d) {
+// BUGFIX: updateAvatars() runs on every Firebase update (~5/s) but building a character is async, so the same player was
+// built several times at once: extra copies were added to the scene and never moved or removed (ghosts / stuck figures).
+const _creating = new Set();
+function createAvatarFor(uid, d) {
+  if (_creating.has(uid)) return;
+  _creating.add(uid);
+  _buildAvatar(uid, d).finally(() => _creating.delete(uid));
+}
+// keep only plain colour / style strings so one odd saved field can never stop a character from being built
+function _cleanLook(l) {
+  const o = {}; l = l || {};
+  for (const k of ["top", "bottom", "skin", "hair", "shoes", "topStyle", "bottomStyle", "gender", "build"]) if (typeof l[k] === "string") o[k] = l[k];
+  return o;
+}
+function _disposeMesh(uid) {
+  const m = _meshes[uid]; if (!m) return;
+  _scene.remove(m.group);
+  m.group.traverse((o) => {
+    o.geometry?.dispose();
+    if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); }
+  });
+  delete _meshes[uid];
+}
+async function _buildAvatar(uid, d) {
   try {
     // Use the player's saved look from Firebase (d.look), or fall back to seed
-    const ch = await createCharacter({ seed: Math.abs(hashStr(uid)) % 100000, height: 1.75, look: d.look || {} });
+    const seed = Math.abs(hashStr(uid)) % 100000;
+    let ch = null;
+    for (const lk of [d.look || {}, _cleanLook(d.look), {}]) {
+      try { ch = await createCharacter({ seed, height: 1.75, look: lk }); break; }
+      catch (e) { console.warn("[multiplayer] avatar build failed, trying a simpler look", e); }
+    }
+    if (!ch) throw new Error("avatar build failed");
+    if (!_players[uid] || _meshes[uid]) return;          // they left (or were built) while we were loading
     const model = ch.model;
     const group = ch.group;
     // PERFORMANCE: remote players don't cast shadows (only the local player does)
@@ -111,7 +143,7 @@ async function createAvatarFor(uid, d) {
     group.userData = { isRemotePlayer: true, playerUid: uid, playerName: d.name || "Player" };
     group.add(sp);
     _scene.add(group);
-    _meshes[uid] = { group, model, ch, walker: { animate: (dt, speed, moving) => ch.animate(dt, moving ? speed : 0) }, lastX: d.x||0, lastZ: d.z||0, phase: 0, look: d.look };
+    _meshes[uid] = { group, model, ch, builtGender: (ch.look && ch.look.gender) || "male", walker: { animate: (dt, speed, moving) => ch.animate(dt, moving ? speed : 0) }, lastX: d.x||0, lastZ: d.z||0, phase: 0, look: d.look };
     // Apply current position immediately
     group.position.set(d.x||0, 0, d.z||0);
     group.rotation.y = d.heading||0;
@@ -130,7 +162,8 @@ async function createAvatarFor(uid, d) {
     sp.userData = { isRemotePlayer: true, playerUid: uid, playerName: d.name || "Player" };
     g.userData = { isRemotePlayer: true, playerUid: uid, playerName: d.name || "Player" };
     _scene.add(g);
-    _meshes[uid] = { group: g, model: null, walker: null, lastX: d.x||0, lastZ: d.z||0, phase: 0 };
+    if (_meshes[uid]) return;
+    _meshes[uid] = { group: g, model: null, walker: null, lastX: d.x||0, lastZ: d.z||0, phase: 0, fallback: true, retryAt: Date.now() + 6000 };
     g.position.set(d.x||0, 0, d.z||0);
     g.rotation.y = d.heading||0;
   }
@@ -145,6 +178,7 @@ function hashStr(s) {
 // Local player position (set from main.js each frame) so we can skip animating
 // remote players who are too far away to be seen.
 let _myX = 0, _myZ = 0;
+export function setBlockedUids(list) { _blocked = new Set(list || []); updateAvatars(); }
 export function setMyPosition(x, z) { _myX = x; _myZ = z; }
 
 function updateAvatars() {
@@ -160,11 +194,15 @@ function updateAvatars() {
     }
     const m = _meshes[uid];
     const px = d.x||0, pz = d.z||0;
-    // Check if look changed (player changed clothes) → recolor
-    if (d.look && m.look && JSON.stringify(d.look) !== JSON.stringify(m.look)) {
-      m.look = d.look;
-      if (m.ch) {
-        import("./characters.js").then(({ recolorCharacter }) => recolorCharacter(m.ch, d.look));
+    // A red capsule is only the "could not build the character" stand-in: try the real character again
+    if (m.fallback && Date.now() > m.retryAt) { _disposeMesh(uid); createAvatarFor(uid, d); continue; }
+    if (d.look && !m.fallback) {
+      // Different body (male <-> female)? A recolour cannot change that: build the right one
+      if ((d.look.gender || "male") !== (m.builtGender || "male")) { _disposeMesh(uid); createAvatarFor(uid, d); continue; }
+      // Outfit changed, or the look only arrived after the player was first drawn -> apply it
+      if (!m.look || JSON.stringify(d.look) !== JSON.stringify(m.look)) {
+        m.look = d.look;
+        if (m.ch) import("./characters.js").then(({ recolorCharacter }) => recolorCharacter(m.ch, d.look));
       }
     }
     // Only show people who are in the same room as me (city / the same house / the same shop)
@@ -190,17 +228,7 @@ function updateAvatars() {
     else if (m.walker) m.walker.animate(_dt, 0, false);
   }
   for(const [uid,m] of Object.entries(_meshes)) {
-    if(!seen.has(uid)) {
-      _scene.remove(m.group);
-      m.group.traverse(o => {
-        o.geometry?.dispose();
-        if (o.material) {
-          if (o.material.map) o.material.map.dispose();
-          o.material.dispose();
-        }
-      });
-      delete _meshes[uid];
-    }
+    if(!seen.has(uid)) _disposeMesh(uid);
   }
 }
 
