@@ -16,6 +16,7 @@ let _onAuth = null;
 
 export let isAuthed = false;
 let _started = false;
+let _freshLogin = false;      // true when the player just typed their details this visit -> skip the welcome screen
 export function initAuth(onAuth) {
   _onAuth = onAuth;
   authPersistReady.then(() => {
@@ -25,13 +26,87 @@ export function initAuth(onAuth) {
       if (user) {
         isAuthed = true;
         hideAuthModal();
-        if (!_started) { _started = true; if (_onAuth) _onAuth(user); }
+        if (!_started) {
+          _started = true;
+          const wasNewLife = await _applyPendingNewLife(user);
+          if (_onAuth) _onAuth(user);                       // the game loads behind the welcome screen
+          if (!_freshLogin && !wasNewLife) showWelcome(user); // returning player: Continue / New life / Log out
+        }
       } else {
         isAuthed = false;
+        hideWelcome();
         showAuthModal();
       }
     });
   });
+}
+
+// ---------- Welcome back screen (like Lagos Life) ----------
+function _savedState(uid) { try { return JSON.parse(localStorage.getItem("kaduna-state-" + uid)) || null; } catch (e) { return null; } }
+function _fmtNaira(n) {
+  n = Number(n) || 0;
+  if (n >= 1e12) return "₦" + (n / 1e12).toFixed(1) + "tn";
+  if (n >= 1e9) return "₦" + (n / 1e9).toFixed(1) + "bn";
+  if (n >= 1e6) return "₦" + (n / 1e6).toFixed(1) + "m";
+  return "₦" + Math.round(n).toLocaleString();
+}
+function _avatarSvg(look) {
+  const l = look || {};
+  const skin = l.skin || "#8a5a3c", top = l.top || "#1f7a5a", hair = l.hair || "#111111";
+  return '<svg viewBox="0 0 58 58" width="58" height="58" xmlns="http://www.w3.org/2000/svg">' +
+    '<rect width="58" height="58" fill="#dbeafe"/>' +
+    '<path d="M6 58c0-14 10-21 23-21s23 7 23 21z" fill="' + top + '"/>' +
+    '<circle cx="29" cy="24" r="12" fill="' + skin + '"/>' +
+    '<path d="M17 23c0-9 6-13 12-13s12 4 12 13c-3-4-7-6-12-6s-9 2-12 6z" fill="' + hair + '"/></svg>';
+}
+function _esc(t) { return String(t == null ? "" : t).replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m])); }
+async function showWelcome(user) {
+  const el = document.getElementById("welcome-modal");
+  if (!el) return;
+  const st = _savedState(user.uid);
+  const fallbackName = user.displayName || (user.email ? user.email.split("@")[0] : "Player");
+  const set$ = (id, html, asText) => { const n = document.getElementById(id); if (n) { if (asText) n.textContent = html; else n.innerHTML = html; } };
+  set$("wl-name", fallbackName, true);
+  set$("wl-handle", "@" + fallbackName, true);
+  set$("wl-av", _avatarSvg(st && st.look));
+  const day = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" });
+  set$("wl-meta", day + " · " + _fmtNaira(st && st.money != null ? st.money : 5000), true);
+  el.classList.add("show");
+  document.getElementById("wl-continue").onclick = hideWelcome;
+  document.getElementById("wl-logout").onclick = () => { if (confirm("Log out of Kaduna Life?")) logout(); };
+  document.getElementById("wl-newlife").onclick = () => {
+    if (!confirm("Start a NEW life? Your character, money and progress will be reset.")) return;
+    startNewLife(user.uid);
+  };
+  // Fill in the real @username and the latest balance (both optional - the screen already works without them)
+  try { const p = (await get(ref(db, "userProfiles/" + user.uid))).val(); if (p) { set$("wl-handle", "@" + (p.username || p.name || fallbackName), true); set$("wl-name", p.username || p.name || fallbackName, true); } } catch (e) {}
+  try {
+    const b = (await get(ref(db, "economy/" + user.uid + "/balance"))).val();
+    if (typeof b === "number") set$("wl-meta", day + " · " + _fmtNaira(b), true);
+  } catch (e) {}
+  try { const lk = (await get(ref(db, "players/" + user.uid + "/look"))).val(); if (lk) set$("wl-av", _avatarSvg(lk)); } catch (e) {}
+}
+function hideWelcome() { document.getElementById("welcome-modal")?.classList.remove("show"); }
+
+// "New life": clear this device's saved game, flag it, and reload. The Firebase part is done on the next
+// load (before the game starts) so the old balance can't be pushed back over the reset while the tab closes.
+function startNewLife(uid) {
+  try {
+    Object.keys(localStorage).filter((k) => k.startsWith("kaduna-state") || k.startsWith("kaduna-pos")).forEach((k) => localStorage.removeItem(k));
+    localStorage.setItem("kaduna-newlife", uid);
+  } catch (e) {}
+  location.reload();
+}
+async function _applyPendingNewLife(user) {
+  let pending = null;
+  try { pending = localStorage.getItem("kaduna-newlife"); } catch (e) {}
+  if (pending !== user.uid) return false;
+  try {
+    await update(ref(db, "players/" + user.uid), { look: null, origin: null, homeArea: null, homePlot: null, homeTier: null });
+    await update(ref(db, "economy/" + user.uid), { balance: 5000 });
+  } catch (e) { console.warn("[new life] reset failed", e); }
+  try { localStorage.removeItem("kaduna-newlife"); } catch (e) {}
+  return true;
 }
 
 export function showAuthModal() {
@@ -64,6 +139,7 @@ export async function loginGuest() {
 
 export async function loginGoogle() {
   try {
+    _freshLogin = true;
     clearAuthError();
     await signInWithPopup(auth, new GoogleAuthProvider());
   } catch (e) {
@@ -73,6 +149,7 @@ export async function loginGoogle() {
 
 export async function loginEmail(email, pass) {
   try {
+    _freshLogin = true;
     clearAuthError();
     // Basic field validation BEFORE hitting Firebase — gives instant feedback.
     if (!email || !email.trim()) { showAuthError("Enter your email address."); return; }
@@ -88,6 +165,7 @@ export async function loginEmail(email, pass) {
 
 export async function signupEmail(email, pass, name, username) {
   try {
+    _freshLogin = true;
     clearAuthError();
     // ---- Field validation ----
     if (!name || !name.trim()) { showAuthError("Enter your full name."); return; }

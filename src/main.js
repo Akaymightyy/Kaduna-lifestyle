@@ -50,7 +50,7 @@ import { initAreaWorld, tickAreaWorld, setAreaLampsNight, disposeAreaWorld, getR
 // Way is filtered out (already rendered by world.js) to avoid double-render.
 import { fetchKadunaData, buildRealMap } from "./realmap.js";
 import { VEHICLE_CATALOG, getVehicle, initVehicles, buyVehicle, getOwned, ownsVehicle, isRiding, getRideSpeed, getRideId, spawnRideVehicle, despawnRideVehicle, tickRideVehicle } from "./vehicles.js";
-import { initMessages, searchUsers, openDM, sendMessage, sendHouseInvite, openChat, closeChat, getChatList, sendMoney, createGroup, leaveGroup, blockUser, reportUser, getChatMeta, cleanupMessages, getPresence, listenToPresence } from "./messages.js";
+import { initMessages, searchUsers, openDM, sendMessage, sendHouseInvite, openChat, closeChat, getChatList, sendMoney, createGroup, leaveGroup, blockUser, reportUser, getChatMeta, cleanupMessages, getPresence, listenToPresence, getProfile } from "./messages.js";
 import { initEvents, tickNepa, isNepaCut, getNepaStatus, hasPowerBackup, getModifiedDrain, tickMoodlets, addMoodlet, getActiveMoodlets, getConsequences, getWalkSpeedMultiplier, MOODLET_DEFS } from "./events.js";
 import { SKILLS, CAREERS, SHIFT_TONES, initCareers, getSkills, getCareer, getCareerDef, canJoinCareer, canPromote, joinCareer, promote, doShift, trainSkill } from "./careers.js";
 import { WISH_POOL, PERKS, initWishes, getTodaysWishes, getWishPoints, getPerks, hasPerk, checkWishes, buyPerk } from "./wishes.js";
@@ -645,9 +645,12 @@ window.closePhone=closePhone;
 
 function _showPhoneApp(appId) {
   const c=$("phone-content");
+  _showingApp = appId;
+  { const _mxLight = appId === "messages"; $("phone-card")?.classList.toggle("msg-light", _mxLight); c.classList.toggle("msg-light", _mxLight); }
   const backBtn='<button onclick="window.showApp(\'home\')" style="margin-top:14px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;font-weight:600;">← Back to Phone</button>';
   if(appId==="home"){
     const apps=[
+      {id:"messages",icon:"💬",label:"Messages"},
       {id:"food",icon:"🍛",label:"Chop"},
       {id:"jobs",icon:"💼",label:"Hustle"},
       {id:"bank",icon:"🏦",label:"Bank"},
@@ -674,7 +677,6 @@ function _showPhoneApp(appId) {
       {id:"boutique",icon:"👕",label:"Boutique"},
       {id:"myoutfits",icon:"👜",label:"My Outfits"},
       {id:"wardrobe",icon:"👔",label:"Wardrobe"},
-      {id:"messages",icon:"💬",label:"Messages"},
       {id:"contacts",icon:"📲",label:"Contacts"},
       {id:"settings",icon:"⚙️",label:"Settings"}
     ];
@@ -1688,7 +1690,7 @@ function _showOriginScreen() {
   document.body.appendChild(el);
 }
 // ---- Messages app rendering ----
-let _showingApp = null;
+var _showingApp = null;
 let _totalUnread = 0;
 let _lastUnreadCount = 0;
 function _updateUnreadBadge() {
@@ -1725,62 +1727,71 @@ function _updateUnreadBadge() {
   }
   _lastUnreadCount = _totalUnread;
 }
-function _renderMessagesList(c) {
-  const backBtnMsg = '<button onclick="window.showApp(\'home\')" style="margin-top:14px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;font-weight:600;">← Back to Phone</button>';
-  const chats = getChatList();
-  let h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">';
-  h += '<div style="font-size:16px;font-weight:700;color:#f2f2f4;">💬 Messages</div>';
-  // FIX: Show total unread badge in header
-  const totalUnread = chats.reduce((s, c2) => s + (c2.unread || 0), 0);
-  if (totalUnread > 0) h += '<span style="background:#e11d48;color:#fff;border-radius:10px;padding:2px 8px;font-size:11px;font-weight:700;">' + totalUnread + ' unread</span>';
-  h += '</div>';
-  // Tabs: Chats | Groups
-  h += '<div style="display:flex;gap:4px;margin-bottom:10px;">';
-  h += '<button id="msg-tab-chats" onclick="window._msgTab(\'chats\')" style="flex:1;padding:8px;background:#0f4d3a;color:#fff;border:none;border-radius:8px;font:600 12px Poppins,sans-serif;">Chats</button>';
-  h += '<button id="msg-tab-groups" onclick="window._msgTab(\'groups\')" style="flex:1;padding:8px;background:#17181b;color:#9b9ba4;border:1px solid #26272b;border-radius:8px;font:600 12px Poppins,sans-serif;">Groups</button>';
-  h += '</div>';
-  // Search box
-  h += '<div style="display:flex;gap:4px;margin-bottom:10px;"><input id="msg-search" type="text" placeholder="Message someone: @username" style="flex:1;padding:8px 10px;border:1px solid #26272b;border-radius:8px;background:#0b0b0c;color:#fff;font-size:12px;outline:none;" oninput="window._searchUsers(this.value)" /><button onclick="window._newGroup()" style="background:#f2b134;color:#000;border:none;border-radius:8px;padding:8px 12px;cursor:pointer;font:600 11px Poppins,sans-serif;white-space:nowrap;">+ Group</button></div>';
-  // Search results
-  h += '<div id="msg-search-results" style="margin-bottom:8px;"></div>';
-  // Chat list
-  h += '<div id="msg-chat-list" style="font-size:12px;font-weight:600;margin:8px 0 6px;color:#f2b134;">📋 Chats (' + chats.length + ')</div>';
-  if (chats.length === 0) {
-    h += '<div style="text-align:center;padding:20px;color:#6b7280;font-size:12px;">No chats yet. Search for someone by @username to start chatting!</div>';
-  } else {
-    for (const chat of chats) {
-      const unread = chat.unread || 0;
-      const time = chat.lastTs ? new Date(chat.lastTs).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "";
-      // FIX: Show chat name (from meta) not just lastText — look up name from chat meta
-      const chatName = chat.name || chat.lastText || "Tap to chat";
-      h += '<div onclick="window._openChatView(\'' + chat.chatId + '\')" style="display:flex;align-items:center;gap:8px;padding:10px;background:' + (unread > 0 ? '#1a2a1a' : '#17181b') + ';border-radius:10px;margin-bottom:4px;cursor:pointer;">';
-      h += '<div style="width:36px;height:36px;background:#0f4d3a;color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;">💬</div>';
-      h += '<div style="flex:1;min-width:0;"><div style="font-size:12px;font-weight:600;color:#f2f2f4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (chat.lastText || "Tap to chat") + '</div>';
-      h += '<div style="font-size:10px;color:#9b9ba4;">' + time + '</div></div>';
-      if (unread > 0) h += '<span style="background:#e11d48;color:#fff;border-radius:10px;padding:2px 7px;font-size:10px;font-weight:700;">' + unread + '</span>';
-      h += '</div>';
-    }
+// ---- Messages app — Lagos-Life style (light theme, @username rows, Unread/Read filters) ----
+window._msgTabName = "chats"; window._msgPill = "all"; window._msgQuery = "";
+const _MX_COLORS = ["#10b981", "#6366f1", "#f59e0b", "#ec4899", "#06b6d4", "#ef4444", "#8b5cf6", "#14b8a6"];
+function _mxEsc(t) { return String(t == null ? "" : t).replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m])); }
+function _mxAvatar(label, key, size) {
+  const ch = (String(label || "?").replace(/^@/, "").trim().charAt(0) || "?").toUpperCase();
+  let h = 0; const k = String(key || label || ""); for (let i = 0; i < k.length; i++) h = (h * 31 + k.charCodeAt(i)) | 0;
+  return '<div style="width:' + size + 'px;height:' + size + 'px;border-radius:50%;background:' + _MX_COLORS[Math.abs(h) % _MX_COLORS.length] + ';color:#fff;display:flex;align-items:center;justify-content:center;font-size:' + Math.round(size * 0.42) + 'px;font-weight:700;flex:none;">' + _mxEsc(ch) + '</div>';
+}
+function _mxAgo(ts) {
+  if (!ts) return "";
+  const m = Math.floor((Date.now() - ts) / 60000);
+  if (m < 1) return "now"; if (m < 60) return m + "m";
+  const h = Math.floor(m / 60); if (h < 24) return h + "h";
+  return new Date(ts).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+function _mxRowsHtml() {
+  const wantGroups = window._msgTabName === "groups", pill = window._msgPill;
+  let list = getChatList().filter((c) => (wantGroups ? c.isGroup : !c.isGroup));
+  if (pill === "unread") list = list.filter((c) => (c.unread || 0) > 0);
+  else if (pill === "read") list = list.filter((c) => !(c.unread || 0));
+  const q = (window._msgQuery || "").trim().toLowerCase().replace(/^@/, "");
+  if (q) list = list.filter((c) => ((c.title || "") + " " + (c.username || "") + " " + (c.lastText || "")).toLowerCase().includes(q));
+  if (!list.length) {
+    if (q) return '<div class="mx-empty">No chats match "' + _mxEsc(q) + '"</div>';
+    if (pill === "unread") return '<div class="mx-empty"><div style="font-size:34px">✅</div><div>No unread chats. You\'re all caught up ✓</div><button class="mx-link" onclick="window._msgSetPill(\'all\')">See all chats</button></div>';
+    return '<div class="mx-empty">' + (wantGroups ? 'No groups yet. Tap "+ Group" to create one.' : 'No chats yet. Search for someone by @username to start chatting!') + '</div>';
   }
-  h += backBtnMsg;
+  return list.map((c) => {
+    const unread = c.unread || 0;
+    const name = c.isGroup ? c.title : (c.username ? "@" + c.username : (c.title || "Player"));
+    return '<div class="mx-row" onclick="window._openChatView(\'' + c.chatId + '\')">' + _mxAvatar(name, c.otherUid || c.chatId, 44) +
+      '<div class="mx-mid"><div class="mx-name">' + _mxEsc(name) + '</div><div class="mx-prev' + (unread ? ' unread' : '') + '">' + _mxEsc(c.lastText || "Tap to chat") + '</div></div>' +
+      '<div class="mx-right"><div class="mx-time">' + _mxAgo(c.lastTs) + '</div>' + (unread ? '<span class="mx-badge">' + unread + '</span>' : '') + '</div></div>';
+  }).join("");
+}
+function _renderMessagesList(c) {
+  const total = getChatList().reduce((n, x) => n + (x.unread || 0), 0);
+  const tab = window._msgTabName, pill = window._msgPill;
+  let h = '<div class="mx">';
+  h += '<div class="mx-head"><button class="ph-back mx-back" onclick="window.showApp(\'home\')">‹</button><div class="mx-title">Messages</div><div id="mx-total">' + (total > 0 ? '<span class="mx-badge">' + total + '</span>' : '') + '</div></div>';
+  h += '<div class="mx-seg"><button id="msg-tab-chats" class="' + (tab === "chats" ? "on" : "") + '" onclick="window._msgTab(\'chats\')">Chats</button><button id="msg-tab-groups" class="' + (tab === "groups" ? "on" : "") + '" onclick="window._msgTab(\'groups\')">Groups</button></div>';
+  h += '<div class="mx-new"><span>✏️</span><input id="msg-search" type="text" autocomplete="off" placeholder="Message someone: @username" oninput="window._searchUsers(this.value)" /><button class="mx-grp" onclick="window._newGroup()">+ Group</button></div>';
+  h += '<div id="msg-search-results"></div>';
+  h += '<div class="mx-pills">' + ["all", "unread", "read"].map((p) => '<button class="' + (pill === p ? "on" : "") + '" onclick="window._msgSetPill(\'' + p + '\')">' + p.charAt(0).toUpperCase() + p.slice(1) + '</button>').join("") + '</div>';
+  h += '<input id="msg-filter" class="mx-filter" type="text" autocomplete="off" placeholder="Search your chats" value="' + _mxEsc(window._msgQuery || "") + '" oninput="window._msgFilter(this.value)" />';
+  h += '<div id="msg-chat-list">' + _mxRowsHtml() + '</div></div>';
   c.innerHTML = h;
 }
+// Refresh only the list (keeps the keyboard / typed text) — used when chats update in the background.
+window._msgRefreshList = () => {
+  const el = document.getElementById("msg-chat-list"); if (!el) return;
+  el.innerHTML = _mxRowsHtml();
+  const t = document.getElementById("mx-total"); if (t) { const n = getChatList().reduce((s, x) => s + (x.unread || 0), 0); t.innerHTML = n > 0 ? '<span class="mx-badge">' + n + '</span>' : ""; }
+};
+window._msgSetPill = (p) => { window._msgPill = p; const c = $("phone-content"); if (c && _showingApp === "messages" && !window._openChatId) _renderMessagesList(c); };
+window._msgFilter = (v) => { window._msgQuery = v; window._msgRefreshList(); };
+window._msgTab = (t) => { window._msgTabName = t; const c = $("phone-content"); if (c) _renderMessagesList(c); };
 function _renderChatScreen(c, chatId, otherName) {
-  let h = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">';
-  h += '<button onclick="window._closeChatView()" style="background:none;border:none;color:#f2b134;font-size:18px;cursor:pointer;padding:4px;">←</button>';
-  h += '<div style="flex:1;font-size:14px;font-weight:700;color:#f2f2f4;">' + otherName + '</div>';
-  h += '</div>';
-  // Quick actions
-  h += '<div style="display:flex;gap:4px;margin-bottom:10px;">';
-  h += '<button onclick="window._chatInvite()" style="flex:1;background:#17181b;color:#f2f2f4;border:1px solid #26272b;border-radius:8px;padding:6px;cursor:pointer;font:600 10px Poppins,sans-serif;">🏠 Invite</button>';
-  h += '<button onclick="window._chatVisit()" style="flex:1;background:#17181b;color:#f2f2f4;border:1px solid #26272b;border-radius:8px;padding:6px;cursor:pointer;font:600 10px Poppins,sans-serif;">🚪 Visit</button>';
-  h += '<button onclick="window._chatSendMoney()" style="flex:1;background:#17181b;color:#f2b134;border:1px solid #f2b134;border-radius:8px;padding:6px;cursor:pointer;font:600 10px Poppins,sans-serif;">💸 Send money</button>';
-  h += '</div>';
-  // Messages container
-  h += '<div id="msg-bubbles" style="min-height:200px;max-height:45vh;overflow-y:auto;margin-bottom:10px;"></div>';
-  // Input row
-  h += '<div style="display:flex;gap:4px;align-items:center;">';
-  h += '<input id="msg-input" type="text" placeholder="Message..." style="flex:1;padding:10px;border:1px solid #26272b;border-radius:10px;background:#0b0b0c;color:#fff;font-size:13px;outline:none;" onkeydown="if(event.key===\'Enter\')window._sendMsg()" />';
-  h += '<button onclick="window._sendMsg()" style="background:#f2b134;color:#000;border:none;border-radius:10px;padding:10px 14px;cursor:pointer;font:700 13px Poppins,sans-serif;">Send</button>';
+  const nm = _mxEsc(otherName);
+  let h = '<div class="mx mx-chat">';
+  h += '<div class="mx-head"><button class="ph-back mx-back" onclick="window._closeChatView()">‹</button>' + _mxAvatar(otherName, window._openChatOtherUid || chatId, 34) + '<div class="mx-title" style="margin-left:6px;">' + nm + '</div></div>';
+  h += '<div class="mx-actions"><button onclick="window._chatInvite()">🏠 Invite</button><button onclick="window._chatVisit()">🚪 Visit</button><button class="money" onclick="window._chatSendMoney()">💸 Send money</button></div>';
+  h += '<div id="msg-bubbles" style="min-height:200px;max-height:44vh;overflow-y:auto;margin-bottom:10px;"></div>';
+  h += '<div class="mx-compose"><input id="msg-input" type="text" autocomplete="off" placeholder="Message..." onkeydown="if(event.key===\'Enter\')window._sendMsg()" /><button class="mx-send" onclick="window._sendMsg()">➤</button></div>';
   h += '</div>';
   c.innerHTML = h;
   // Listen to messages
@@ -1793,19 +1804,19 @@ function _renderChatScreen(c, chatId, otherName) {
       const time = new Date(m.ts || 0).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
       if (m.type === "system") {
         const div = document.createElement("div");
-        div.style.cssText = "text-align:center;margin:6px 0;";
+        div.style.cssText = "text-align:center;margin:6px 0;color:#6b7280;font-size:11px;";
         div.textContent = m.text;
         container.appendChild(div);
       } else if (m.type === "money") {
         const div = document.createElement("div");
-        div.style.cssText = "text-align:center;margin:6px 0;background:#1a2a1a;border:1px solid #4ade80;border-radius:12px;padding:6px 12px;color:#4ade80;font-size:12px;font-weight:600;";
+        div.style.cssText = "text-align:center;margin:6px 0;background:#ecfdf3;border:1px solid #86efac;border-radius:12px;padding:6px 12px;color:#15803d;font-size:12px;font-weight:600;";
         div.textContent = "💸 " + (isMe ? "You sent" : "You received") + " ₦" + (m.amount || 0).toLocaleString();
         container.appendChild(div);
       } else if (m.type === "house_invite") {
         // FEATURE: house invite bubble — shows the inviter's name + a Visit button.
         // The button stores the invite payload globally so _visitFromInvite can use it.
         const div = document.createElement("div");
-        div.style.cssText = "text-align:center;margin:6px 0;background:#1a2a1a;border:1px solid #f2b134;border-radius:12px;padding:8px 12px;color:#f2f2f4;font-size:12px;";
+        div.style.cssText = "text-align:center;margin:6px 0;background:#fffbeb;border:1px solid #f2b134;border-radius:12px;padding:8px 12px;color:#111;font-size:12px;";
         const label = document.createElement("div");
         label.style.cssText = "font-weight:600;margin-bottom:6px;";
         const inviterName = (m.extra && m.extra.ownerName) || (isMe ? "You" : "Friend");
@@ -1848,10 +1859,10 @@ function _renderChatScreen(c, chatId, otherName) {
         const div = document.createElement("div");
         div.style.cssText = "display:flex;justify-content:" + (isMe ? "flex-end" : "flex-start") + ";margin:4px 0;";
         const bubble = document.createElement("div");
-        bubble.style.cssText = "max-width:75%;padding:8px 12px;border-radius:14px;font-size:13px;word-break:break-word;" + (isMe ? "background:#0f4d3a;color:#fff;border-bottom-right-radius:4px;" : "background:#26272b;color:#f2f2f4;border-bottom-left-radius:4px;");
+        bubble.style.cssText = "max-width:75%;padding:8px 12px;border-radius:14px;font-size:13px;word-break:break-word;" + (isMe ? "background:#0f4d3a;color:#fff;border-bottom-right-radius:4px;" : "background:#eef0f3;color:#111;border-bottom-left-radius:4px;");
         bubble.textContent = m.text; // textContent — never innerHTML (blocks injection)
         const timeSpan = document.createElement("div");
-        timeSpan.style.cssText = "font-size:9px;color:#9b9ba4;margin-top:2px;text-align:right;";
+        timeSpan.style.cssText = "font-size:9px;margin-top:2px;text-align:right;color:" + (isMe ? "rgba(255,255,255,.75)" : "#6b7280") + ";";
         timeSpan.textContent = time + (isMe ? " ✓" : "");
         bubble.appendChild(timeSpan);
         div.appendChild(bubble);
@@ -1862,49 +1873,44 @@ function _renderChatScreen(c, chatId, otherName) {
   });
 }
 // ---- Messages window functions ----
-window._searchUsers = async (q) => {
-  const results = await searchUsers(q);
-  const el = document.getElementById("msg-search-results");
-  if (!el) return;
-  if (!results.length) { el.innerHTML = ""; return; }
-  el.innerHTML = results.map(r => '<div onclick="window._startChat(\'' + r.uid + '\',\'' + (r.name || r.username).replace(/'/g, "") + '\')" style="display:flex;align-items:center;gap:8px;padding:8px;background:#17181b;border-radius:8px;margin-bottom:4px;cursor:pointer;"><div style="width:28px;height:28px;background:#0f4d3a;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:700;">' + (r.name || r.username).charAt(0).toUpperCase() + '</div><div><div style="font-size:12px;font-weight:600;color:#f2f2f4;">' + r.name + '</div><div style="font-size:10px;color:#9b9ba4;">@' + r.username + '</div></div></div>').join("");
+window._searchUsers = (q) => {
+  clearTimeout(window._srchT);
+  window._srchT = setTimeout(async () => {
+    const results = await searchUsers(q);
+    const el = document.getElementById("msg-search-results");
+    if (!el) return;
+    if (!results.length) { el.innerHTML = ""; return; }
+    el.innerHTML = results.map((r) => '<div class="mx-row" onclick="window._startChat(\'' + r.uid + '\')">' + _mxAvatar(r.username || r.name, r.uid, 38) + '<div class="mx-mid"><div class="mx-name">' + _mxEsc(r.name) + '</div><div class="mx-prev">@' + _mxEsc(r.username) + '</div></div></div>').join("");
+  }, 250);
 };
 window._startChat = async (uid, name) => {
-  const r = await openDM(uid, name);
-  if (r) {
+  try {
+    const r = await openDM(uid, name || "Chat");
+    if (!r) return;
     window._openChatId = r.chatId;
-    window._openChatName = name;
+    window._openChatName = r.otherUsername ? "@" + r.otherUsername : (r.otherName || name || "Chat");
     window._openChatOtherUid = uid;
     showPhoneApp("messages");
-  }
+  } catch (e) { console.warn("[messages] startChat failed", e); toast("Could not open chat"); }
 };
-window._openChatView = (chatId) => {
-  // Get chat meta to determine the name
-  getChatMeta(chatId).then((meta) => {
-    if (meta && meta.type === "group") {
-      window._openChatId = chatId;
-      window._openChatName = (meta.icon || "👥") + " " + (meta.name || "Group");
-      window._openChatOtherUid = null;
-    } else if (meta) {
-      // DM — find the other person's uid
-      const members = Object.keys(meta.members || {});
-      const otherUid = members.find(u => u !== getMyUid());
-      window._openChatId = chatId;
-      window._openChatOtherUid = otherUid;
-      // Get their name
-      if (otherUid) {
-        import("firebase/database").then(({ ref, get }) => {
-          get(ref(db, "players/" + otherUid + "/name")).then((snap) => {
-            window._openChatName = snap.val() || "Chat";
-            showPhoneApp("messages");
-          });
-        });
-      } else {
-        window._openChatName = "Chat";
-        showPhoneApp("messages");
-      }
+// Opens a chat from the list. Uses the person stored on the chat (or the public userProfiles node) —
+// never players/{uid}, which only that player may read (that read used to fail and the DM never opened).
+window._openChatView = async (chatId) => {
+  try {
+    const chat = getChatList().find((c) => c.chatId === chatId);
+    window._openChatId = chatId;
+    if (chat && chat.isGroup) {
+      window._openChatName = chat.title || "👥 Group"; window._openChatOtherUid = null;
+    } else {
+      let otherUid = chat && chat.otherUid;
+      if (!otherUid) { const meta = await getChatMeta(chatId); otherUid = meta && meta.members ? Object.keys(meta.members).find((u) => u !== getMyUid()) : null; }
+      window._openChatOtherUid = otherUid || null;
+      let nm = chat && (chat.username ? "@" + chat.username : chat.title);
+      if (!nm && otherUid) { const p = await getProfile(otherUid); nm = p ? (p.username ? "@" + p.username : p.name) : ""; }
+      window._openChatName = nm || "Chat";
     }
-  });
+  } catch (e) { console.warn("[messages] openChatView failed", e); window._openChatName = window._openChatName || "Chat"; }
+  showPhoneApp("messages");
 };
 window._closeChatView = () => {
   closeChat();
@@ -1969,43 +1975,6 @@ window._newGroup = () => {
     if (validUids.length === 0) { toast("No valid usernames found"); return; }
     createGroup(name, "👥", validUids).then((r) => { toast(r.ok ? "🎉 Group created!" : r.msg); if (r.ok) showPhoneApp("messages"); });
   });
-};
-// FIX: Tab switching for Messages app (Chats | Groups)
-window._msgTab = (tab) => {
-  const c = document.getElementById("phone-content");
-  if (!c) return;
-  const chatsBtn = document.getElementById("msg-tab-chats");
-  const groupsBtn = document.getElementById("msg-tab-groups");
-  if (tab === "chats") {
-    if (chatsBtn) { chatsBtn.style.background = "#0f4d3a"; chatsBtn.style.color = "#fff"; chatsBtn.style.border = "none"; }
-    if (groupsBtn) { groupsBtn.style.background = "#17181b"; groupsBtn.style.color = "#9b9ba4"; groupsBtn.style.border = "1px solid #26272b"; }
-    _renderMessagesList(c);
-  } else if (tab === "groups") {
-    if (groupsBtn) { groupsBtn.style.background = "#0f4d3a"; groupsBtn.style.color = "#fff"; groupsBtn.style.border = "none"; }
-    if (chatsBtn) { chatsBtn.style.background = "#17181b"; chatsBtn.style.color = "#9b9ba4"; chatsBtn.style.border = "1px solid #26272b"; }
-    // Render groups list
-    const allChats = getChatList();
-    const groups = allChats.filter(c => c.chatId && c.chatId.startsWith("grp_"));
-    let h = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">';
-    h += '<div style="font-size:16px;font-weight:700;color:#f2f2f4;">👥 Groups</div>';
-    h += '<button onclick="window._newGroup()" style="background:#f2b134;color:#000;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font:600 11px Poppins,sans-serif;">+ New</button>';
-    h += '</div>';
-    if (groups.length === 0) {
-      h += '<div style="text-align:center;padding:20px;color:#6b7280;font-size:12px;">No groups yet. Tap "+ New" to create one.</div>';
-    } else {
-      for (const g of groups) {
-        const unread = g.unread || 0;
-        h += '<div onclick="window._openChatView(\'' + g.chatId + '\')" style="display:flex;align-items:center;gap:8px;padding:10px;background:' + (unread > 0 ? '#1a2a1a' : '#17181b') + ';border-radius:10px;margin-bottom:4px;cursor:pointer;">';
-        h += '<div style="width:36px;height:36px;background:#f2b134;color:#000;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;">👥</div>';
-        h += '<div style="flex:1;min-width:0;"><div style="font-size:12px;font-weight:600;color:#f2f2f4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + (g.lastText || "Group chat") + '</div>';
-        h += '<div style="font-size:10px;color:#9b9ba4;">' + (g.lastTs ? new Date(g.lastTs).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "") + '</div></div>';
-        if (unread > 0) h += '<span style="background:#e11d48;color:#fff;border-radius:10px;padding:2px 7px;font-size:10px;font-weight:700;">' + unread + '</span>';
-        h += '</div>';
-      }
-    }
-    h += '<button onclick="window.showApp(\'home\')" style="margin-top:14px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;font-weight:600;">← Back to Phone</button>';
-    c.innerHTML = h;
-  }
 };
 function _showAreaScreen() {
   if (game.state.homeArea) return;
@@ -2437,7 +2406,7 @@ initAuth((user) => {
   initVehicles(scene, user.uid, () => {});
   // ---- Init Messages app ----
   const myName = user.displayName || user.email?.split("@")[0] || "Player";
-  initMessages(user.uid, myName, toast, () => { _updateUnreadBadge(); if (_showingApp === "messages") showPhoneApp("messages"); });
+  initMessages(user.uid, myName, toast, () => { _updateUnreadBadge(); if (_showingApp === "messages" && !window._openChatId) window._msgRefreshList?.(); });
   initFlavour((headline) => { if (headline) toast("📰 " + headline.text); });
   // ---- Sync home entrance to player's plot (so Home button + entrance prompt work) ----
   _syncHomeEntrance();

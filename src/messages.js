@@ -1,15 +1,42 @@
 // src/messages.js — Messages app: DMs, groups, search users, send money.
 import { db } from "./firebase.js";
-import { ref, get, set, update, push, onValue, query, limitToLast, runTransaction, onDisconnect, serverTimestamp } from "firebase/database";
+import { ref, get, set, update, push, onValue, query, limitToLast, runTransaction, onDisconnect, serverTimestamp, increment } from "firebase/database";
 
 let _uid = null, _name = "Player", _userChats = {}, _openChatId = null, _unsubOpenChat = null, _unsubUserChats = null, _onUpdate = null, _toast = null, _lastMsgTime = 0;
 
 export function initMessages(uid, name, toast, onUpdate) {
   _uid = uid; _name = name || "Player"; _toast = toast; _onUpdate = onUpdate;
-  _unsubUserChats = onValue(ref(db, "userChats/" + uid), (snap) => { _userChats = snap.val() || {}; _onUpdate?.(); });
+  _unsubUserChats = onValue(ref(db, "userChats/" + uid), (snap) => { _userChats = snap.val() || {}; _onUpdate?.(); _resolveMissingProfiles(); });
   const pRef = ref(db, "presence/" + uid);
   update(pRef, { online: true, lastSeen: Date.now() });
   onDisconnect(pRef).update({ online: false, lastSeen: serverTimestamp() });
+}
+
+
+// ---- Public profile lookup (userProfiles is readable by every signed-in user; players/{uid} is NOT) ----
+const _profCache = {};
+export async function getProfile(uid) {
+  if (!uid) return null;
+  if (_profCache[uid]) return _profCache[uid];
+  try {
+    const snap = await get(ref(db, "userProfiles/" + uid));
+    const p = snap.val();
+    _profCache[uid] = p ? { uid, name: p.name || p.username || "Player", username: p.username || "" } : { uid, name: "Player", username: "", missing: true };
+  } catch (e) { return null; }
+  return _profCache[uid];
+}
+export function getCachedProfile(uid) { return _profCache[uid] || null; }
+// For a DM the chatId is the two uids sorted and joined by "_"; strip mine to get theirs.
+function _otherUidFromChatId(chatId) {
+  if (!chatId || chatId.startsWith("grp_") || !_uid) return null;
+  const rest = chatId.replace(_uid, "").replace(/^_+|_+$/g, "");
+  return rest && rest !== chatId ? rest : null;
+}
+async function _resolveMissingProfiles() {
+  const need = Object.keys(_userChats).map((id) => _userChats[id]?.type === "group" ? null : _otherUidFromChatId(id)).filter((u) => u && !_profCache[u]);
+  if (!need.length) return;
+  await Promise.all([...new Set(need)].map(getProfile));
+  _onUpdate?.();
 }
 
 export async function searchUsers(q, limit = 10) {
@@ -60,7 +87,8 @@ export async function openDM(otherUid, otherName) {
   const metaRef = ref(db, "chats/" + chatId + "/meta");
   const metaSnap = await get(metaRef);
   if (!metaSnap.exists()) { await set(metaRef, { type: "dm", members: { [_uid]: true, [otherUid]: true }, createdAt: Date.now() }); }
-  return { chatId, otherUid, otherName };
+  const prof = await getProfile(otherUid);
+  return { chatId, otherUid, otherName: (prof && prof.name) || otherName, otherUsername: prof ? prof.username : "" };
 }
 
 export async function sendMessage(chatId, text, type = "text", amount = 0, extra = null) {
@@ -84,12 +112,30 @@ export async function sendMessage(chatId, text, type = "text", amount = 0, extra
   const preview = type === "money" ? "💸 Sent ₦" + (amount || 0).toLocaleString() :
                   type === "house_invite" ? "🏠 Sent a house invite" :
                   text.slice(0, 50);
-  for (const memberUid of Object.keys(members)) {
+  const isGroup = meta.type === "group";
+  const memberUids = Object.keys(members);
+  const profs = {};
+  if (!isGroup) { for (const mu of memberUids) profs[mu] = await getProfile(mu); }
+  for (const memberUid of memberUids) {
     const isMe = memberUid === _uid;
-    updates["userChats/" + memberUid + "/" + chatId + "/lastText"] = (isMe ? "You: " : "") + preview;
-    updates["userChats/" + memberUid + "/" + chatId + "/lastTs"] = now;
-    updates["userChats/" + memberUid + "/" + chatId + "/lastFrom"] = _uid;
-    if (!isMe) { updates["userChats/" + memberUid + "/" + chatId + "/unread"] = (await getUnread(memberUid, chatId)) + 1; }
+    const base = "userChats/" + memberUid + "/" + chatId + "/";
+    updates[base + "lastText"] = (isMe ? "You: " : "") + preview;
+    updates[base + "lastTs"] = now;
+    updates[base + "lastFrom"] = _uid;
+    // Remember WHO this chat is with, so the list can show the name and open the DM without a search.
+    if (isGroup) {
+      updates[base + "type"] = "group";
+      updates[base + "name"] = meta.name || "Group";
+      updates[base + "icon"] = meta.icon || "👥";
+    } else {
+      const otherUid = memberUids.find((u) => u !== memberUid) || null;
+      const op = otherUid ? profs[otherUid] : null;
+      updates[base + "type"] = "dm";
+      updates[base + "otherUid"] = otherUid;
+      updates[base + "otherName"] = (op && op.name) || "";
+      updates[base + "otherUsername"] = (op && op.username) || "";
+    }
+    if (!isMe) updates[base + "unread"] = increment(1);   // was a read of the other user's node (not allowed) -> count never grew
   }
   await update(ref(db), updates);
 }
@@ -127,7 +173,17 @@ export function openChat(chatId, onMessages) {
 }
 
 export function closeChat() { if (_unsubOpenChat) { _unsubOpenChat(); _unsubOpenChat = null; } _openChatId = null; }
-export function getChatList() { return Object.entries(_userChats).map(([chatId, info]) => ({ chatId, ...info })).sort((a, b) => (b.lastTs || 0) - (a.lastTs || 0)); }
+export function getChatList() {
+  return Object.entries(_userChats).map(([chatId, info]) => {
+    info = info || {};
+    const isGroup = info.type === "group" || chatId.startsWith("grp_");
+    const otherUid = isGroup ? null : (info.otherUid || _otherUidFromChatId(chatId));
+    const prof = otherUid ? _profCache[otherUid] : null;
+    const title = isGroup ? ((info.icon || "👥") + " " + (info.name || "Group")) : ((prof && !prof.missing && prof.name) || info.otherName || "");
+    const username = (prof && prof.username) || info.otherUsername || "";
+    return { chatId, ...info, isGroup, otherUid, title, username };
+  }).sort((a, b) => (b.lastTs || 0) - (a.lastTs || 0));
+}
 
 const MAX_TRANSFER = 10000000, MAX_TRANSFERS_PER_MIN = 10;
 let _transferTimes = [];
