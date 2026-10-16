@@ -1,83 +1,45 @@
-// public/sw.js — Service Worker for Kaduna Lifestyle PWA
-// Caches the app shell (HTML, JS, CSS, fonts) for offline use.
-// Uses a cache-first strategy for static assets and network-first for API calls.
+// public/sw.js — Service Worker for Kaduna Lifestyle (v2, safe).
+// v1 served an OLD index.html first (cache-first), so after every update Chrome could mix old and new
+// game files and the game froze. v2 rules:
+//   - the page, scripts, styles and data ALWAYS come from the network first (cache only if offline)
+//   - only the hashed /assets/ files and /models/ files are cached (their names change when they change)
+//   - big files (over ~6 MB, like the car models) are never stored, so they can't fill the phone
+const CACHE_NAME = "kaduna-lifestyle-v2";
 
-const CACHE_NAME = "kaduna-lifestyle-v1";
-const APP_SHELL = [
-  "/",
-  "/index.html",
-  "/data/kaduna.json",
-  "/manifest.json",
-  "/icon-192.png",
-  "/icon-512.png",
-  "/icon-maskable.png",
-];
+self.addEventListener("install", () => { self.skipWaiting(); });
 
-// ---- Install: pre-cache the app shell ----
-self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(APP_SHELL).catch((e) => {
-        console.warn("[SW] Some app shell assets failed to cache:", e.message);
-      });
-    })
-  );
-  self.skipWaiting();
-});
-
-// ---- Activate: clean old caches ----
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
-        keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
-      );
-    })
+    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
-// ---- Fetch: cache-first for same-origin GETs, network-first for Firebase ----
 self.addEventListener("fetch", (event) => {
-  if (event.request.method !== "GET") return;
+  const req = event.request;
+  if (req.method !== "GET") return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;                       // Firebase, fonts, etc: browser handles it
+  if (req.headers.has("range")) return;                                   // never touch partial downloads
+  if (url.pathname.startsWith("/@vite") || url.pathname.startsWith("/__vite")) return;
 
-  const url = new URL(event.request.url);
-
-  // Don't intercept Firebase API calls (they need fresh data)
-  if (url.hostname.includes("firebaseio.com") || url.hostname.includes("googleapis.com")) {
-    return;
-  }
-
-  // Don't intercept Vercel hot-reload / HMR (dev only)
-  if (url.pathname.startsWith("/@vite") || url.pathname.startsWith("/__vite")) {
-    return;
-  }
-
-  // Cache-first for everything else
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) {
-        // Return cached + fetch in background to update
-        fetch(event.request).then((res) => {
-          if (res.ok && url.origin === self.location.origin) {
-            const clone = res.clone();
-            caches.open(CACHE_NAME).then((c) => c.put(event.request, clone));
-          }
-        }).catch(() => {});
-        return cached;
-      }
-      // Not cached — fetch from network
-      return fetch(event.request).then((res) => {
-        // Cache successful same-origin responses
-        if (res.ok && url.origin === self.location.origin) {
-          const clone = res.clone();
-          caches.open(CACHE_NAME).then((c) => c.put(event.request, clone));
-        }
+  const immutable = url.pathname.startsWith("/assets/") || url.pathname.startsWith("/models/");
+  if (!immutable) {
+    // network first, cache only as an offline fallback
+    event.respondWith(
+      fetch(req).then((res) => {
+        if (res.ok && res.status === 200) { const c = res.clone(); caches.open(CACHE_NAME).then((ca) => ca.put(req, c)).catch(() => {}); }
         return res;
-      }).catch(() => {
-        // Offline fallback — try to return the cached index.html
-        return caches.match("/index.html");
-      });
-    })
+      }).catch(() => caches.match(req).then((m) => m || caches.match("/index.html")))
+    );
+    return;
+  }
+  // cache first for hashed assets / models
+  event.respondWith(
+    caches.match(req).then((cached) => cached || fetch(req).then((res) => {
+      const len = Number(res.headers.get("content-length") || 0);
+      if (res.ok && res.status === 200 && len < 6 * 1024 * 1024) { const c = res.clone(); caches.open(CACHE_NAME).then((ca) => ca.put(req, c)).catch(() => {}); }
+      return res;
+    }))
   );
 });
