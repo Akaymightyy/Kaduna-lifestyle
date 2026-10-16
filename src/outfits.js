@@ -7,6 +7,10 @@ export const MEN_OUTFITS = [
   { id: "m-senator", name: "Senator (navy)", top: "#2d3a4a", bottom: "#2d3a4a", shoes: "#222222", topStyle: "kaftan", bottomStyle: "trousers" },
   { id: "m-street", name: "Street (red tee, shorts)", top: "#c0392b", bottom: "#3b3b3b", shoes: "#f2f2ee", topStyle: "casual", bottomStyle: "shorts" },
   { id: "m-corporate", name: "Corporate (blue shirt)", top: "#3c8dbc", bottom: "#1f2a36", shoes: "#222222", topStyle: "casual", bottomStyle: "trousers" },
+  { id: "m-jogger", name: "Joggers & Hoodie", top: "#4a4a4a", bottom: "#2a2a2a", shoes: "#f2f2ee", topStyle: "casual", bottomStyle: "trousers" },
+  { id: "m-ankara-2", name: "Ankara Native (green)", top: "#2e7d4f", bottom: "#1a5a3a", shoes: "#8a5a3c", topStyle: "kaftan", bottomStyle: "trousers" },
+  { id: "m-danbani", name: "Dan Fani (indigo)", top: "#3b4a8a", bottom: "#2a3a6a", shoes: "#222222", topStyle: "kaftan", bottomStyle: "trousers" },
+  { id: "m-jalabiya", name: "Jalabiya (gold trim)", top: "#e8c04a", bottom: "#c9a030", shoes: "#8a5a3c", topStyle: "kaftan", bottomStyle: "trousers" },
 ];
 export const WOMEN_OUTFITS = [
   { id: "w-ankara", name: "Ankara Gown (gold)", top: "#d98e2b", bottom: "#a23b72", shoes: "#222222", topStyle: "kaftan", bottomStyle: "gown" },
@@ -15,6 +19,10 @@ export const WOMEN_OUTFITS = [
   { id: "w-blouse", name: "Blouse & Skirt (purple)", top: "#6b4a8a", bottom: "#2b3a55", shoes: "#c0392b", topStyle: "casual", bottomStyle: "skirt" },
   { id: "w-casual", name: "Crop top & Jeans", top: "#e8c547", bottom: "#44546a", shoes: "#f2f2ee", topStyle: "casual", bottomStyle: "trousers" },
   { id: "w-gown", name: "Evening Gown (wine)", top: "#a23b72", bottom: "#a23b72", shoes: "#222222", topStyle: "kaftan", bottomStyle: "gown" },
+  { id: "w-ankara-2", name: "Ankara Two-Piece (teal)", top: "#1a8a7a", bottom: "#a23b72", shoes: "#222222", topStyle: "casual", bottomStyle: "trousers" },
+  { id: "w-iro-buba", name: "Iro & Buba (coral)", top: "#e06a5a", bottom: "#d4a04a", shoes: "#8a5a3c", topStyle: "kaftan", bottomStyle: "gown" },
+  { id: "w-hijab-dress", name: "Hijab Dress (olive)", top: "#6a7a4a", bottom: "#6a7a4a", shoes: "#222222", topStyle: "kaftan", bottomStyle: "gown" },
+  { id: "w-jeans-top", name: "Off-shoulder & Jeans", top: "#d4577a", bottom: "#2a3a55", shoes: "#f2f2ee", topStyle: "casual", bottomStyle: "trousers" },
 ];
 export const outfitsFor = (gender) => (gender === "female" ? WOMEN_OUTFITS : MEN_OUTFITS);
 export const SKINS = ["#f1c9a5", "#c28a5c", "#a5714a", "#8a5a3c", "#7a4b2e", "#6b4429", "#5a3825", "#3d2517"];

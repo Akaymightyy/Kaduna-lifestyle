@@ -730,7 +730,6 @@ function _showPhoneApp(appId) {
     return;
   }
   if(appId==="ride"){
-    // Use the place registry for destinations (places + legacy zones)
     const dests = getDestinations(_gameHour());
     const rideOpts = [
       { id: "walk", name: "Walk", price: 0, time: 8, icon: "🚶" },
@@ -739,14 +738,49 @@ function _showPhoneApp(appId) {
       { id: "okada", name: "Okada", price: 500, time: 2, icon: "🏍️" },
       { id: "taxi", name: "Taxi", price: 1500, time: 2, icon: "🚕" },
     ];
-    c.innerHTML='<div style="font-size:14px;margin-bottom:8px;font-weight:700;color:var(--green);">🛺 Book a Ride</div>'+
-      '<div style="font-size:11px;color:#666;margin-bottom:8px;">Pick where you want to go:</div>'+
-      '<select id="ride-dest-select" style="width:100%;padding:8px;border:1.5px solid var(--green);border-radius:8px;font-family:inherit;font-size:13px;margin-bottom:12px;">'+
-        dests.map(d => '<option value="'+d.id+'"'+(d.open===false?' disabled':'')+'>'+(d.icon||'📍')+' '+d.name+(d.open===false?' (closed)':'')+'</option>').join('')+
-      '</select>'+
-      '<div style="font-size:11px;color:#666;margin-bottom:8px;">Choose how to get there:</div>'+
-      rideOpts.map(r => '<div style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid #eee;border-radius:8px;margin-bottom:6px;"><span style="font-size:24px;">'+r.icon+'</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;">'+r.name+'</div><div style="font-size:11px;color:#666;">'+r.time+'s ride · '+(r.price===0?'Free':'₦'+r.price)+'</div></div><button onclick="window.bookRide(\''+r.id+'\')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:600;">Go</button></div>').join("")+
-      backBtn;
+    // FEATURE: build a combined destination list — places + areas + owned houses
+    let h = '<div style="font-size:14px;margin-bottom:8px;font-weight:700;color:var(--green);">🛺 Book a Ride</div>';
+    h += '<div style="font-size:11px;color:#666;margin-bottom:8px;">Pick where you want to go:</div>';
+    // Destination dropdown — places first, then areas, then owned houses
+    let options = '';
+    // 1. All registered places
+    options += '<optgroup label="📍 Places">';
+    for (const d of dests) {
+      options += '<option value="'+d.id+'"'+(d.open===false?' disabled':'')+'>'+(d.icon||'📍')+' '+d.name+(d.open===false?' (closed)':'')+'</option>';
+    }
+    options += '</optgroup>';
+    // 2. All 14 areas (districts) — tap to travel to the area center
+    options += '<optgroup label="🏘️ Areas">';
+    for (const a of AREAS) {
+      options += '<option value="area:'+a.id+'">📍 '+a.name+' (₦'+a.rentPrice+'/wk)</option>';
+    }
+    options += '</optgroup>';
+    // 3. Owned houses — from the houses cache
+    const allHouses = getAllHouses();
+    const myUid = getMyUid();
+    if (myUid) {
+      const ownedHouseOpts = [];
+      for (const [areaId, houses] of Object.entries(allHouses || {})) {
+        if (!houses) continue;
+        const area = getArea(areaId);
+        if (!area) continue;
+        for (const [plotNoStr, houseRec] of Object.entries(houses)) {
+          if (houseRec && houseRec.ownerUid === myUid) {
+            ownedHouseOpts.push('<option value="house:'+areaId+':'+plotNoStr+'">🏠 '+area.name+' · Plot #'+plotNoStr+'</option>');
+          }
+        }
+      }
+      if (ownedHouseOpts.length) {
+        options += '<optgroup label="🏠 My Houses">';
+        options += ownedHouseOpts.join('');
+        options += '</optgroup>';
+      }
+    }
+    h += '<select id="ride-dest-select" style="width:100%;padding:8px;border:1.5px solid var(--green);border-radius:8px;font-family:inherit;font-size:13px;margin-bottom:12px;">'+options+'</select>';
+    h += '<div style="font-size:11px;color:#666;margin-bottom:8px;">Choose how to get there:</div>';
+    h += rideOpts.map(r => '<div style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid #eee;border-radius:8px;margin-bottom:6px;"><span style="font-size:24px;">'+r.icon+'</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;">'+r.name+'</div><div style="font-size:11px;color:#666;">'+r.time+'s ride · '+(r.price===0?'Free':'₦'+r.price)+'</div></div><button onclick="window.bookRide(\''+r.id+'\')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:600;">Go</button></div>').join("");
+    h += backBtn;
+    c.innerHTML = h;
     return;
   }
   if(appId==="cars"){
@@ -2250,23 +2284,51 @@ window.bookRide=(rideId)=>{
   const destSel=document.getElementById("ride-dest-select");
   if(!destSel){toast("No destination selected");return;}
   const destId=destSel.value;
-  // Determine fare from the new ride list (walk=0, keke=300, bus=200, okada=500, taxi=1500)
   const fareMap={walk:0,keke:300,bus:200,okada:500,taxi:1500};
   const fare=fareMap[rideId] ?? 0;
   if(game.state.money<fare){toast("Not enough money");return;}
   game.state.money-=fare;
   closePhone();
+  // FEATURE: handle new destination types — area:xxx and house:areaId:plotNo
+  if (destId.startsWith("area:")) {
+    const areaId = destId.slice(5);
+    const area = getArea(areaId);
+    if (area) {
+      player.pos.set(area.x, 0, area.z);
+      player.heading = 0;
+      toast("📍 " + (rideId === "walk" ? "Walked" : "Rode to") + " " + area.name);
+      updateHUD();
+      const titleEl=document.querySelector(".chip.title");
+      if(titleEl) titleEl.firstChild.textContent = "📍 " + area.name;
+      return;
+    }
+  }
+  if (destId.startsWith("house:")) {
+    const parts = destId.split(":");
+    const areaId = parts[1], plotNo = parseInt(parts[2], 10);
+    const area = getArea(areaId);
+    if (area) {
+      const pos = getPlotPosition(area, plotNo);
+      player.pos.set(pos.x, 0, pos.z + 4);
+      player.heading = Math.PI;
+      toast("🏠 " + (rideId === "walk" ? "Walked" : "Rode to") + " " + area.name + " · Plot #" + plotNo);
+      updateHUD();
+      _syncHomeEntrance();
+      const titleEl=document.querySelector(".chip.title");
+      if(titleEl) titleEl.firstChild.textContent = "📍 " + area.name;
+      return;
+    }
+  }
+  // Standard place / zone destination (existing flow)
   startRide(rideId,destId,game.state.money,()=>{},(result)=>{
     if(result.ok){
       toast("Welcome to "+result.dest.name+"!");
       updateHUD();
-      // If destination is a place, move player to its entrance
       if(result.dest.isPlace && result.dest.entrance){
         player.pos.set(result.dest.entrance.x, 0, result.dest.entrance.z);
-        player.heading = Math.PI; // face the door
+        player.heading = Math.PI;
         travelToPlace(getMyUid(), result.dest.id);
       } else {
-        // Legacy zone — reset to default position
         player.pos.set(-9,0,11);
         player.heading=Math.PI;
         travelToZone(getMyUid(), result.dest.id);
