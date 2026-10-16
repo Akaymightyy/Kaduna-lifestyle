@@ -57,7 +57,34 @@ export async function build(scene, ctx) {
   group.visible = false;
 
   // ---- Build the room based on tier ----
-  group.add(floor(W, D, cfg.floorCol, tier <= 2 ? 1 : 2));
+  // FEATURE: tier 2+ gets multiple rooms with internal walls + different floor colors
+  // (matching the reference screenshot: light gray living area, tan bedroom, gray patio).
+  // Tier 1 stays a single room.
+  if (tier === 1) {
+    group.add(floor(W, D, cfg.floorCol, 1));
+  } else {
+    // Front living area (55% of depth) — light gray floor
+    const frontFloor = floor(W, D * 0.55, 0xf3f4f6, 1);
+    frontFloor.position.z = D * 0.225; // offset to front
+    group.add(frontFloor);
+    // Back bedroom area (45% of depth) — warm tan/brown floor
+    const backFloor = floor(W, D * 0.45, cfg.floorCol, 2);
+    backFloor.position.z = -D * 0.275; // offset to back
+    group.add(backFloor);
+    // For tier 3+: add a side room (kitchen) with different floor
+    if (tier >= 3) {
+      const sideW = Math.min(4, W * 0.25);
+      const sideFloor = floor(sideW, D * 0.45, 0xc8c8c8, 1);
+      sideFloor.position.set(W / 2 - sideW / 2, 0, -D * 0.275);
+      group.add(sideFloor);
+    }
+    // For tier 4+: add a patio outside the front (gray concrete)
+    if (tier >= 4) {
+      const patioFloor = floor(W * 0.8, 3, 0x9ca3af, 9);
+      patioFloor.position.z = HD + 1.5;
+      group.add(patioFloor);
+    }
+  }
 
   const wallMat = cfg.wallCol;
   const windowMat = 0x4a6177;
@@ -82,6 +109,21 @@ export async function build(scene, ctx) {
       // Tier 1: small vent window high on the back wall
       box(1.2, 0.6, 0.05, 0, 3.4, -HD + 0.05, windowMat),
     ]),
+    // FEATURE: internal wall separating living area (front) from bedroom (back) — tier 2+
+    // Creates two distinct rooms with a doorway between them (matching reference screenshot).
+    ...(tier >= 2 ? (() => {
+      const idw = Math.min(1.5, W * 0.15); // internal door gap width
+      const ids = (W - idw) / 2;
+      return [
+        box(ids, 3, 0.2, -(idw/2 + ids/2), 1.5, 0, wallMat, 3),
+        box(ids, 3, 0.2,  (idw/2 + ids/2), 1.5, 0, wallMat, 3),
+      ];
+    })() : []),
+    // FEATURE: side room wall (kitchen separator) — tier 3+
+    ...(tier >= 3 ? (() => {
+      const sideW = Math.min(4, W * 0.25);
+      return [box(0.2, 3, D * 0.45, W/2 - sideW/2, 1.5, -D * 0.275, wallMat, 3)];
+    })() : []),
   ]));
 
   // ---- Stylised dressing: trims, windows, curtains, pictures, props (never blocks the room) ----
