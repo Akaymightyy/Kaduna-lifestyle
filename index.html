@@ -137,6 +137,63 @@
   #phone-content .ph-ic { width:56px; height:56px; border-radius:16px; display:flex; align-items:center; justify-content:center; font-size:28px; box-shadow:0 4px 12px rgba(0,0,0,.4); }
   #phone-content .ph-app:active .ph-ic { transform:scale(.93); }
 
+  /* ===== Messages app — Lagos-Life style light theme ===== */
+  #phone-card.msg-light { background:#fff; border-color:#e5e7eb; }
+  #phone-card.msg-light #phone-statusbar { color:#111; }
+  #phone-card.msg-light #phone-close { background:rgba(0,0,0,.08); color:#111; }
+  #phone-card.msg-light #phone-home-bar { background:rgba(0,0,0,.28); }
+  #phone-content.msg-light { background:#fff; color:#111; padding:4px 14px 22px; }
+  #phone-content.msg-light .mx-head { display:flex; align-items:center; gap:4px; margin:0 0 10px; }
+  #phone-content.msg-light .mx-back { font-size:30px; line-height:1; padding:0 8px 4px 0; color:#111; display:block; }
+  #phone-content.msg-light .mx-title { flex:1; font-size:20px; font-weight:700; color:#111; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #phone-content.msg-light .mx-seg { display:flex; background:#eef0f3; border-radius:12px; padding:3px; margin-bottom:10px; }
+  #phone-content.msg-light .mx-seg button { flex:1; border:none; background:transparent; padding:8px; border-radius:10px; font:600 13px Poppins,sans-serif; color:#6b7280; cursor:pointer; }
+  #phone-content.msg-light .mx-seg button.on { background:#fff; color:#111; box-shadow:0 1px 3px rgba(0,0,0,.14); }
+  #phone-content.msg-light .mx-new { display:flex; align-items:center; gap:6px; background:#f3f4f6; border-radius:12px; padding:2px 6px 2px 10px; margin-bottom:8px; }
+  #phone-content.msg-light .mx-new input, #phone-content.msg-light .mx-filter, #phone-content.msg-light .mx-compose input { background:transparent !important; border:none !important; color:#111 !important; font-size:13px; outline:none; border-radius:12px !important; }
+  #phone-content.msg-light .mx-new input { flex:1; min-width:0; padding:9px 4px; }
+  #phone-content.msg-light .mx-grp { background:#f2b134; color:#111; border:none; border-radius:9px; padding:7px 10px; font:700 11px Poppins,sans-serif; cursor:pointer; white-space:nowrap; }
+  #phone-content.msg-light .mx-pills { display:flex; gap:8px; margin:8px 0; }
+  #phone-content.msg-light .mx-pills button { border:none; background:#eef0f3; color:#374151; border-radius:999px; padding:6px 14px; font:600 12px Poppins,sans-serif; cursor:pointer; }
+  #phone-content.msg-light .mx-pills button.on { background:#dbeafe; color:#1d4ed8; }
+  #phone-content.msg-light .mx-filter { display:block; width:100%; box-sizing:border-box; background:#f3f4f6 !important; padding:10px 12px; margin-bottom:6px; }
+  #phone-content.msg-light .mx-row { display:flex; align-items:center; gap:12px; padding:10px 4px; cursor:pointer; border:none !important; border-radius:10px; }
+  #phone-content.msg-light .mx-row:active { background:#f3f4f6; }
+  #phone-content.msg-light .mx-mid { flex:1; min-width:0; }
+  #phone-content.msg-light .mx-name { font-weight:700; font-size:14px; color:#111; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #phone-content.msg-light .mx-prev { font-size:12.5px; color:#6b7280; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:2px; }
+  #phone-content.msg-light .mx-prev.unread { color:#111; font-weight:600; }
+  #phone-content.msg-light .mx-right { display:flex; flex-direction:column; align-items:flex-end; gap:5px; flex:none; }
+  #phone-content.msg-light .mx-time { font-size:11px; color:#9ca3af; }
+  #phone-content.msg-light .mx-badge { background:#ef4444; color:#fff; border-radius:999px; min-width:18px; height:18px; display:inline-flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; padding:0 5px; }
+  #phone-content.msg-light .mx-empty { text-align:center; color:#6b7280; font-size:13px; padding:28px 12px; display:flex; flex-direction:column; align-items:center; gap:8px; }
+  #phone-content.msg-light .mx-link { background:none; border:none; color:#2563eb; font:600 13px Poppins,sans-serif; cursor:pointer; }
+  #phone-content.msg-light .mx-actions { display:flex; gap:6px; margin:4px 0 10px; }
+  #phone-content.msg-light .mx-actions button { flex:1; background:#f3f4f6; border:none; border-radius:10px; padding:8px 4px; font:600 11px Poppins,sans-serif; color:#111; cursor:pointer; }
+  #phone-content.msg-light .mx-actions button.money { background:#fef3c7; color:#92400e; }
+  #phone-content.msg-light .mx-compose { display:flex; gap:8px; align-items:center; }
+  #phone-content.msg-light .mx-compose input { flex:1; min-width:0; background:#f3f4f6 !important; padding:11px 14px; border-radius:999px !important; }
+  #phone-content.msg-light .mx-send { width:42px; height:42px; border-radius:50%; border:none; background:#12c986; color:#fff; font-size:16px; cursor:pointer; flex:none; }
+
+  /* ===== Welcome back (Continue / New life) ===== */
+  #welcome-modal { position:fixed; inset:0; z-index:46; display:none; flex-direction:column; justify-content:space-between; align-items:center; background:linear-gradient(180deg,rgba(191,224,245,.97) 0%,rgba(191,224,245,.6) 34%,rgba(0,0,0,0) 62%); font-family:'Poppins',sans-serif; padding:calc(env(safe-area-inset-top,0px) + 34px) 0 calc(env(safe-area-inset-bottom,0px) + 18px); }
+  #welcome-modal.show { display:flex; }
+  #welcome-modal .wl-top { text-align:center; pointer-events:none; }
+  #welcome-modal .wl-crown { font-size:52px; line-height:1; }
+  #welcome-modal .wl-title { font-size:46px; font-weight:800; color:#1b2438; letter-spacing:-1.5px; margin:6px 0 2px; }
+  #welcome-modal .wl-sub { font-size:17px; color:#5b6477; }
+  #welcome-modal .wl-card { width:min(420px,calc(100vw - 32px)); background:#fff; border-radius:30px; padding:18px; box-shadow:0 12px 40px rgba(0,0,0,.25); }
+  #welcome-modal .wl-user { display:flex; align-items:center; gap:14px; background:#f3f4f8; border-radius:20px; padding:12px; margin-bottom:14px; }
+  #welcome-modal .wl-av { width:58px; height:58px; border-radius:50%; background:#dbeafe; overflow:hidden; flex:none; }
+  #welcome-modal .wl-name { font-size:21px; font-weight:700; color:#1b2438; }
+  #welcome-modal .wl-meta { font-size:14px; color:#6b7280; }
+  #welcome-modal .wl-btn { display:block; width:100%; border:none; border-radius:999px; padding:17px; font:700 18px Poppins,sans-serif; cursor:pointer; margin-bottom:10px; }
+  #welcome-modal .wl-go { background:#22b573; color:#fff; box-shadow:0 8px 20px rgba(34,181,115,.35); }
+  #welcome-modal .wl-new { background:#fff; color:#1b2438; border:1.5px solid #e5e7eb; }
+  #welcome-modal .wl-foot { display:flex; justify-content:space-between; align-items:center; font-size:14px; color:#6b7280; padding:4px 6px 0; }
+  #welcome-modal .wl-foot b { color:#1b2438; }
+  #welcome-modal .wl-out { background:none; border:none; color:#2563eb; font:600 14px Poppins,sans-serif; cursor:pointer; }
+
   #loading { position:fixed; inset:0; z-index:50; background:linear-gradient(160deg,#0f4d3a,#1d7a5b); color:#fff; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:24px; text-align:center; transition:opacity .5s; }
   #loading.done { opacity:0; pointer-events:none; }
   #loading h1 { margin:0; font-size:30px; font-weight:700; }
@@ -290,6 +347,25 @@
       <button id="auth-signup-btn" class="btn wide" style="flex:1;height:44px;font-size:14px;">Sign Up</button>
     </div>
     <p style="font-size:11px;color:#888;text-align:center;margin:4px 0 0;">Create a free account to start playing (18+).</p>
+  </div>
+</div>
+
+
+<!-- Welcome back (shown to returning, still-signed-in players) -->
+<div id="welcome-modal">
+  <div class="wl-top">
+    <div class="wl-crown">👑</div>
+    <div class="wl-title">Kaduna Life</div>
+    <div class="wl-sub">Live your Kaduna story.</div>
+  </div>
+  <div class="wl-card">
+    <div class="wl-user">
+      <div class="wl-av" id="wl-av"></div>
+      <div><div class="wl-name" id="wl-name">Player</div><div class="wl-meta" id="wl-meta"></div></div>
+    </div>
+    <button class="wl-btn wl-go" id="wl-continue">Continue</button>
+    <button class="wl-btn wl-new" id="wl-newlife">New life</button>
+    <div class="wl-foot"><span>Signed in as <b id="wl-handle"></b></span><button class="wl-out" id="wl-logout">Log out</button></div>
   </div>
 </div>
 
