@@ -468,7 +468,7 @@ function applyTime() {
   // FEATURE: real-time clock (1 real hour = 1 game hour) clamped to daytime
   // (6am-6pm) so the player never sees night. During real-life night hours,
   // the game shows noon. Matches `_gameHour()` for consistency.
-  const mins = Date.now() / REAL_MS_PER_GAME_HOUR; // game-hours since epoch
+  const mins = Date.now() / REAL_MS_PER_GAME_HOUR + 1; // game-hours since epoch (+1 = Nigeria time, WAT)
   let rawHour = mins % 24;
   // FEATURE: clamp to daytime — never show night.
   const hour = fixedHour ?? (rawHour < 6 || rawHour > 18 ? 12 : rawHour);
@@ -570,7 +570,7 @@ function _gameHour() {
   // FEATURE: real-time clock (1 real hour = 1 game hour) BUT clamped to
   // daytime (6am-6pm) so the player never sees night. During real-life
   // night hours, the game shows noon.
-  const h = (Date.now() / REAL_MS_PER_GAME_HOUR) % 24;
+  const h = (Date.now() / REAL_MS_PER_GAME_HOUR + 1) % 24;
   if (h < 6 || h > 18) return 12;  // noon during night hours
   return h;
 }
@@ -2625,6 +2625,13 @@ function _onPlotPromptUpdate(info) {
   }
   _plotPromptEl.style.display = "block";
 }
+// keep the two prompts from sitting on top of each other (own-home "Enter" + a neighbour's "knock")
+setInterval(() => {
+  const a = document.getElementById("plot-knock-prompt"), b = document.getElementById("place-prompt");
+  if (!a) return;
+  const both = a.style.display === "block" && b && b.style.display !== "none" && b.offsetHeight > 0;
+  a.style.bottom = both ? "calc(40% + 78px + env(safe-area-inset-bottom))" : "calc(38% + env(safe-area-inset-bottom))";
+}, 250);
 function _onPlotPromptTap() {
   if (!_currentPlotInfo) return;
   const info = _currentPlotInfo;

@@ -20,7 +20,7 @@ export const MAP_HALF_X = 360, MAP_HALF_Z = 340;      // size of the whole city 
 // at 8am and close at 10pm in REAL time, so a player who plays in the evening
 // sees evening in-game too.
 export const TIME_SCALE = 1;  // 1 real minute per game minute (real-time)
-export const REAL_MS_PER_GAME_HOUR = TIME_SCALE * 60 * 1000;  // 60000 ms = 1 minute real = 1 minute game
+export const REAL_MS_PER_GAME_HOUR = TIME_SCALE * 60 * 60 * 1000;  // 1 real hour = 1 game hour (real-time clock)
 
 // FEATURE: time-of-day mode.
 //   null = natural day/night cycle (day default, evening at sunset, night after dark).

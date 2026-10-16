@@ -52,8 +52,6 @@ export function createMinimap(canvas, shapes) {
   for (const a of AREAS) {
     g.fillStyle = a.tier === "rich" ? "#e6d49a" : a.tier === "middle" ? "#b7d3a0" : "#d3c19a";
     g.fillRect(X(a.x - 44), Z(a.z - 40), 88 * S, 96 * S);
-    g.fillStyle = "#33413a"; g.font = "bold " + (9 * S) + "px Arial"; g.textAlign = "center"; g.textBaseline = "middle";
-    g.fillText(a.name, X(a.x), Z(a.z));
   }
   for (const b of shapes.buildings) {
     if (b.place) {
@@ -81,6 +79,12 @@ export function createMinimap(canvas, shapes) {
     ctx.scale(sc / S, sc / S);
     ctx.translate(-X(px), -Z(pz));
     ctx.drawImage(base, 0, 0);
+    // district names: drawn here (not baked) and counter-rotated so the words always read upright
+    ctx.fillStyle = "#33413a"; ctx.font = "bold " + (9 * S) + "px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    for (const a of AREAS) {
+      if (Math.abs(a.x - px) > range * 1.6 || Math.abs(a.z - pz) > range * 1.6) continue;
+      ctx.save(); ctx.translate(X(a.x), Z(a.z)); ctx.rotate(-(yaw + Math.PI)); ctx.fillText(a.name, 0, 0); ctx.restore();
+    }
     ctx.fillStyle = "#f2b134";
     for (const c of cars) { if (Math.abs(c.x - px) < range * 1.5 && Math.abs(c.z - pz) < range * 1.5) ctx.fillRect(X(c.x) - 2.5 * S / 2, Z(c.z) - 1, 5 * S / 2 * 1.6, 2 * S / 1.4); }
     // ---- Draw "My Home" marker if the player has a home ----
