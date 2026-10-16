@@ -73,25 +73,25 @@
           ".write": "auth != null && (!data.exists() || data.child('ownerUid').val() === auth.uid)",
           "furniture": {
             ".read": "auth != null",
-            ".write": "data.parent().child('ownerUid').val() === auth.uid"
+            ".write": "data.parent.child('ownerUid').val() === auth.uid"
           },
           "locked": {
-            ".write": "data.parent().child('ownerUid').val() === auth.uid"
+            ".write": "data.parent.child('ownerUid').val() === auth.uid"
           },
           "forSale": {
-            ".write": "data.parent().child('ownerUid').val() === auth.uid"
+            ".write": "data.parent.child('ownerUid').val() === auth.uid"
           },
           "forRent": {
-            ".write": "data.parent().child('ownerUid').val() === auth.uid"
+            ".write": "data.parent.child('ownerUid').val() === auth.uid"
           },
           "price": {
-            ".write": "data.parent().child('ownerUid').val() === auth.uid"
+            ".write": "data.parent.child('ownerUid').val() === auth.uid"
           },
           "tier": {
-            ".write": "data.parent().child('ownerUid').val() === auth.uid"
+            ".write": "data.parent.child('ownerUid').val() === auth.uid"
           },
           "colors": {
-            ".write": "data.parent().child('ownerUid').val() === auth.uid"
+            ".write": "data.parent.child('ownerUid').val() === auth.uid"
           }
         }
       }
@@ -160,6 +160,12 @@
     "transfers": {
       ".read": "auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
       ".write": "auth != null"
+    },
+    "live": {
+      ".read": "auth != null",
+      "$uid": {
+        ".write": "auth.uid === $uid"
+      }
     }
   }
-  }
+}
