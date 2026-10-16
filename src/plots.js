@@ -297,6 +297,12 @@ export function getAreaHouses(areaId) {
   return _houses[areaId] || {};
 }
 
+// FEATURE: expose ALL subscribed houses data (all nearby areas combined)
+// so main.js can check proximity to ALL the player's owned houses.
+export function getAllHouses() {
+  return _houses;
+}
+
 // FEATURE: expose the area name sprites map so main.js's tap-raycaster can
 // detect when the player taps a floating area name sign → travel there.
 export function getAreaNameSprites() {

@@ -102,12 +102,29 @@ export function kioskShape() {
 }
 
 // ---------- people ----------
-export function personBody() {                                    // torso + legs (tinted per person)
-  const L = []; B(L, 0.45, 0.6, 0.26, 0, 1.25, 0, 1); B(L, 0.16, 0.8, 0.18, -0.12, 0.4, 0, 0.18); B(L, 0.16, 0.8, 0.18, 0.12, 0.4, 0, 0.18);
-  B(L, 0.12, 0.55, 0.14, -0.3, 1.2, 0, 0.9); B(L, 0.12, 0.55, 0.14, 0.3, 1.2, 0, 0.9);
+export function personBody() {
+  // FEATURE: improved proportions + shoes + belt for a more human look (was basic boxes = robotic)
+  const L = [];
+  B(L, 0.42, 0.55, 0.24, 0, 1.28, 0, 1);       // torso (tinted shirt)
+  B(L, 0.38, 0.12, 0.22, 0, 0.98, 0, 0.15);    // belt/waist (dark)
+  B(L, 0.15, 0.82, 0.17, -0.11, 0.41, 0, 0.22); // left leg (dark trousers)
+  B(L, 0.15, 0.82, 0.17, 0.11, 0.41, 0, 0.22);  // right leg (dark trousers)
+  B(L, 0.10, 0.50, 0.12, -0.28, 1.25, 0, 0.85); // left arm (skin tone)
+  B(L, 0.10, 0.50, 0.12, 0.28, 1.25, 0, 0.85);   // right arm (skin tone)
+  B(L, 0.17, 0.08, 0.26, -0.11, 0.04, 0.03, 0.08); // left shoe (dark)
+  B(L, 0.17, 0.08, 0.26, 0.11, 0.04, 0.03, 0.08);  // right shoe (dark)
   return done(L);
 }
-export function personHead() { const g = new THREE.SphereGeometry(0.17, 8, 6); g.translate(0, 1.72, 0); return paint(flatten(g), 1); }
+export function personHead() {
+  // FEATURE: head + hair cap for a more human look (was a bare sphere = robotic)
+  const g = new THREE.SphereGeometry(0.17, 12, 10);
+  g.translate(0, 1.72, 0);
+  // Hair: half-sphere on top, dark, slightly wider than the head
+  const hair = new THREE.SphereGeometry(0.19, 10, 5, 0, Math.PI * 2, 0, Math.PI * 0.55);
+  hair.translate(0, 1.72, 0);
+  hair.scale(1, 0.7, 1);
+  return done([paint(flatten(g), 1), paint(flatten(hair), 0.10)]); // head=skin(1), hair=dark(0.10)
+}
 
 // ---------- landmark per district (merged, true colours) ----------
 export function landmark(kind) {

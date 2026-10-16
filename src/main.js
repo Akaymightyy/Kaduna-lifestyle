@@ -43,6 +43,7 @@ import {
   getNearestFriendPlot,
   disposePlotDoors,
   getAreaNameSprites,
+  getAllHouses,
 } from "./plots.js";
 import { initAreaWorld, tickAreaWorld, setAreaLampsNight, disposeAreaWorld, getRentSigns } from "./areas_world.js";
 // FEATURE 3c: load real Kaduna road + river + building data from kaduna.json
@@ -2596,9 +2597,40 @@ function _syncHomeEntrance() {
   if (!area) return;
   const pos = getPlotPosition(area, game.state.homePlot);
   updateHomeEntrance(pos.x, pos.z + 4, Math.PI);
-  // Update minimap home marker
   _updateHomeMinimapMarker(pos.x, pos.z);
 }
+
+// FEATURE: check if the player is near ANY house they own (not just the most
+// recently bought one). If so, update the "My Home" entrance to that house's
+// position so the "Press here to enter" prompt fires at the correct door.
+// This fixes the "I have two houses but can only enter the second one" bug.
+function _checkOwnedHouseProximity() {
+  const uid = getMyUid();
+  if (!uid) return;
+  const px = player.pos.x, pz = player.pos.z;
+  // Check all nearby areas' houses for ones owned by this player
+  for (const [areaId, houses] of Object.entries(_allHouses || {})) {
+    if (!houses) continue;
+    const area = getArea(areaId);
+    if (!area) continue;
+    for (const [plotNoStr, houseRec] of Object.entries(houses)) {
+      if (!houseRec || houseRec.ownerUid !== uid) continue;
+      const plotNo = parseInt(plotNoStr, 10);
+      const pos = getPlotPosition(area, plotNo);
+      const dx = pos.x - px, dz = (pos.z + 4) - pz;
+      const d2 = dx * dx + dz * dz;
+      // If within 6m of this house's entrance, update the "My Home" entrance
+      if (d2 < 36) {
+        updateHomeEntrance(pos.x, pos.z + 4, Math.PI);
+        _updateHomeMinimapMarker(pos.x, pos.z);
+        return; // found the closest one — done
+      }
+    }
+  }
+}
+// Cache of all area houses (populated by plots.js's subscriptions)
+let _allHouses = null;
+export function _setAllHousesCache(data) { _allHouses = data; }
 
 // ---- FEATURE (step 2c): per-plot knock/enter prompt ----
 // Fires when the player walks within KNOCK_RANGE of a friend's plot door.
@@ -3015,6 +3047,8 @@ function _frame() {
   // ---- Plot doors tick: render doors at nearby occupied plots + detect knock range (step 2c) ----
   // Only tick when NOT inside a place (otherwise we waste cycles on doors the player can't see)
   if (!active) tickPlotDoors(player.pos.x, player.pos.z);
+  // FEATURE: check if the player is near ANY house they own → update "My Home" entrance
+  if (!active) { _allHouses = getAllHouses(); _checkOwnedHouseProximity(); }
   // FEATURE 3b: area world tick — chunk-streamed area roads + houses + lamp posts
   tickLife(player.pos.x, player.pos.z, !active);
   if (!active) tickAreaWorld(player.pos.x, player.pos.z);
