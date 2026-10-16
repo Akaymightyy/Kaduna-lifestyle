@@ -10,7 +10,7 @@ import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAIL
 import { createGameState } from "./needs.js";
 import { auth, db } from "./firebase.js";
 import { initAuth, showAuthModal, wireAuthUI, logout, isAuthed } from "./auth.js";
-import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition, getRemotePlayers } from "./multiplayer.js";
+import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition, getRemotePlayers, setMyPlace, setMyLook } from "./multiplayer.js";
 import { startRide, travelToZone, travelToPlace, getDestinations } from "./travel.js";
 import { subscribeRichList } from "./economy.js";
 import { createNPCs } from "./npcs.js";
@@ -28,6 +28,7 @@ import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpots
 import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
 import { celebrate } from "./celebrate.js";
 import { addScenery, SCENERY_LABELS } from "./scenery.js";
+import { initLife, tickLife } from "./life.js";
 import { initLiveMap, openLiveMap, closeLiveMap, isLiveMapOn, liveMapFrame } from "./livemap.js";
 import { perfFrameStart, perfBeforeRender, perfAfterRender } from "./perf.js";
 import { initGraphics, updateSky, tickGraphics, tickShadows, applyQuality, autoDetectQuality, getQuality, QUALITY_PRESETS } from "./graphics.js";
@@ -377,6 +378,7 @@ addEventListener("resize", resize); resize();
 
 const world = buildWorld(scene);
 addScenery(scene, world);
+initLife(scene);
 const traffic = createTraffic(scene);
 let mmDraw = createMinimap($("mm"), world.mapShapes);
 // FEATURE 3b: init the chunk-streamed area world (roads + NPC houses + lamp posts).
@@ -1446,7 +1448,7 @@ window.buyMed=(id)=>{
   game.save?.(); updateHUD(); toast("Medicine taken! Feel better now.");
   showPhoneApp("health");
 };
-function _pushLook(){ clearTimeout(window._lookT); window._lookT=setTimeout(()=>{const u=getMyUid(); if(u) update(ref(db,"players/"+u+"/look"),game.state.look).catch(()=>{});},300); }
+function _pushLook(){ setMyLook(game.state.look); clearTimeout(window._lookT); window._lookT=setTimeout(()=>{const u=getMyUid(); if(u) update(ref(db,"players/"+u+"/look"),game.state.look).catch(()=>{});},300); }
 window.buyClothing=(id)=>{
   const it=SHOP.find(x=>x.id===id); if(!it) return;
   const L=game.state.look; L.owned=L.owned||[];
@@ -2449,6 +2451,7 @@ initAuth((user) => {
       player.heading = homeDef.entranceFacing;
     }
   });
+  setMyLook(game.state.look);
   initMultiplayer(scene, (count) => {
     const el=$("online-count"); if(el) el.textContent=count+" here";
     const hudEl=$("online-count-hud"); if(hudEl) hudEl.textContent=count;
@@ -2795,7 +2798,7 @@ function governor(raw) {
 initLiveMap({ scene, camera, player, AREAS, listPlaces, getHomePos: () => window._myHomePos, limits: { x: 560, z: 400 }, extraLabels: SCENERY_LABELS,
   travelPlace: (id) => { closeLiveMap(); window.travelToPlace(id); },
   travelArea: (id) => { closeLiveMap(); window.travelToArea(id); },
-  tickWorld: (x, z, r) => { tickAreaWorld(x, z, r); tickPlotDoors(x, z); } });
+  tickWorld: (x, z, r) => { tickAreaWorld(x, z, r); tickPlotDoors(x, z); tickLife(x, z, true); } });
 
 let _lastFrameT = 0;
 // Safety net: if anything throws inside a frame the game used to freeze for good (buttons work, world never moves).
@@ -3008,9 +3011,11 @@ function _frame() {
   // Only tick when NOT inside a place (otherwise we waste cycles on doors the player can't see)
   if (!active) tickPlotDoors(player.pos.x, player.pos.z);
   // FEATURE 3b: area world tick — chunk-streamed area roads + houses + lamp posts
+  tickLife(player.pos.x, player.pos.z, !active);
   if (!active) tickAreaWorld(player.pos.x, player.pos.z);
   else if (_currentPlotInfo) _onPlotPromptUpdate(null); // inside a place: hide the "Enter X's Home" box
   if (!active) savePos(dt);
+  setMyPlace(active ? (active.id === "home" ? "home:" + (placeCtx.visitingHouse?.ownerUid || getMyUid() || "me") : active.id) : "");
   sendPosition(player.pos.x, player.pos.z, player.heading);
   setMyPosition(player.pos.x, player.pos.z);
   mmT += dt; if (mmT > 0.1) { mmT = 0; mmDraw(player.pos.x, player.pos.z, ctl.yaw, player.heading, traffic.positions); }

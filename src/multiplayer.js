@@ -7,6 +7,7 @@ import { createCharacter } from "./characters.js";
 
 
 let _uid=null, _name="Guest", _players={}, _meshes={}, _scene=null, _sendT=null, _onCount=null, _onChat=null;
+let _myPlace="", _myLook=null, _liveOk=true, _unsubPlayers=null;
 
 function makeNameTag(name, color) {
   const c = document.createElement("canvas");
@@ -39,7 +40,27 @@ export function initMultiplayer(scene, onCount, onChat) {
     // Only clear the "online" flag on disconnect — do NOT remove the whole player node,
     // otherwise look/origin/homeTier are lost between sessions.
     onDisconnect(pRef).update({online:false,ts:serverTimestamp()});
-    onValue(ref(db,"players"),(s)=>{ _players=s.val()||{}; delete _players[_uid]; updateAvatars(); _onCount?.(Object.keys(_players).length+1); });
+    // Who is around: read the PUBLIC "live" node (every signed-in player may read it). If the rules for it are not
+    // published yet, fall back to the old "players" node (works for the admin only).
+    const liveRef = ref(db, "live/" + _uid);
+    update(liveRef, { name: _name, x: -9, z: 11, heading: Math.PI, place: "", online: true, ts: Date.now(), ...(_myLook ? { look: _myLook } : {}) }).catch(() => { _liveOk = false; });
+    onDisconnect(liveRef).update({ online: false, ts: Date.now() }).catch(() => {});
+    const apply = (val) => {
+      const now = Date.now(), all = val || {};
+      _players = {};
+      for (const [k, d] of Object.entries(all)) {
+        if (k === _uid || !d) continue;
+        if (d.online === false) continue;
+        const t = typeof d.ts === "number" ? d.ts : now;
+        if (now - t > 180000) continue;                       // not seen for 3 minutes: gone
+        _players[k] = d;
+      }
+      updateAvatars(); _onCount?.(Object.keys(_players).length + 1);
+    };
+    const subscribePlayers = () => { _unsubPlayers = onValue(ref(db, "players"), (s) => apply(s.val())); };
+    onValue(ref(db, "live"), (s) => apply(s.val()), () => { if (_unsubPlayers == null) subscribePlayers(); });
+    // keep "online" fresh so a quiet player is still listed
+    setInterval(() => { if (_uid && _liveOk) update(ref(db, "live/" + _uid), { ts: Date.now(), online: true }).catch(() => {}); }, 60000);
     onValue(ref(db,"chat"),(s)=>{ const m=s.val()||{}; const a=Object.values(m).sort((x,y)=>(x.ts||0)-(y.ts||0)); if(a.length&&_onChat) _onChat(a[a.length-1],a.length); });
   });
 }
@@ -48,6 +69,21 @@ export function sendPosition(x,z,heading) {
   if(!_uid) return;
   if(_sendT) return; _sendT=setTimeout(()=>{_sendT=null;},200);
   update(ref(db,"players/"+_uid),{x,z,heading,ts:serverTimestamp()});
+  if (_liveOk) update(ref(db,"live/"+_uid),{x,z,heading,place:_myPlace,online:true,ts:Date.now()}).catch(()=>{ _liveOk=false; });
+}
+// Which room am I in? "" = outside in the city, "home:<ownerUid>" = inside that player's house, otherwise the place id.
+// Other players only show up for me when we are in the SAME room (before, someone inside a house stood in the road
+// for people outside, and nobody inside a house could be seen).
+export function setMyPlace(key) {
+  key = key || "";
+  if (key === _myPlace) return;
+  _myPlace = key;
+  if (_uid && _liveOk) update(ref(db,"live/"+_uid),{place:_myPlace}).catch(()=>{});
+  updateAvatars();
+}
+export function setMyLook(look) {
+  _myLook = look || null;
+  if (_uid && _liveOk && _myLook) update(ref(db,"live/"+_uid),{look:_myLook}).catch(()=>{});
 }
 
 export function sendChat(text) {
@@ -131,6 +167,8 @@ function updateAvatars() {
         import("./characters.js").then(({ recolorCharacter }) => recolorCharacter(m.ch, d.look));
       }
     }
+    // Only show people who are in the same room as me (city / the same house / the same shop)
+    if ((d.place || "") !== _myPlace) { m.group.visible = false; continue; }
     // Distance from local player
     const ddx = px - _myX, ddz = pz - _myZ;
     const distSq = ddx * ddx + ddz * ddz;
