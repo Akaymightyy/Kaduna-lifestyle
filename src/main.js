@@ -44,7 +44,7 @@ import {
   disposePlotDoors,
   getAreaNameSprites,
 } from "./plots.js";
-import { initAreaWorld, tickAreaWorld, setAreaLampsNight, disposeAreaWorld, getRentSigns, districtFunLabels } from "./areas_world.js";
+import { initAreaWorld, tickAreaWorld, setAreaLampsNight, disposeAreaWorld, getRentSigns, districtFunLabels, districtLayout } from "./areas_world.js";
 // FEATURE 3c: load real Kaduna road + river + building data from kaduna.json
 // (a static OSM-derived file shipped in public/data/). The main Ahmadu Bello
 // Way is filtered out (already rendered by world.js) to avoid double-render.
@@ -704,10 +704,14 @@ function _showPhoneApp(appId) {
       {id:"myoutfits",icon:"👜",label:"My Outfits"},
       {id:"wardrobe",icon:"👔",label:"Wardrobe"},
       {id:"contacts",icon:"📲",label:"Contacts"},
+      {id:"wallet",icon:"👛",label:"Wallet"},
+      {id:"tunes",icon:"🎵",label:"Tunes"},
+      {id:"gallery",icon:"📸",label:"Gallery"},
+      {id:"invest",icon:"📈",label:"Invest"},
       {id:"settings",icon:"⚙️",label:"Settings"}
     ];
     if(isAdmin()) apps.push({id:"admin",icon:"🔐",label:"Admin"});
-    const COL={food:["#f59e0b","#f97316"],jobs:["#8b5cf6","#6366f1"],bank:["#3b82f6","#2563eb"],ride:["#10b981","#059669"],cars:["#6366f1","#4f46e5"],map:["#06b6d4","#0891b2"],daily:["#ec4899","#db2777"],health:["#ef4444","#dc2626"],richlist:["#f59e0b","#d97706"],profile:["#6366f1","#4f46e5"],events:["#d946ef","#c026d3"],news:["#64748b","#475569"],boutique:["#d946ef","#a855f7"],myoutfits:["#f97316","#ea580c"],wardrobe:["#14b8a6","#0d9488"],contacts:["#6366f1","#818cf8"],settings:["#64748b","#475569"],admin:["#ef4444","#b91c1c"],hunt:["#f2b134","#d97706"],missions:["#dc2626","#b91c1c"],realestate:["#16a34a","#15803d"],homestore:["#ea580c","#c2410c"],storage:["#0891b2","#0e7490"],messages:["#22c55e","#16a34a"]};
+    const COL={food:["#f59e0b","#f97316"],jobs:["#8b5cf6","#6366f1"],bank:["#3b82f6","#2563eb"],ride:["#10b981","#059669"],cars:["#6366f1","#4f46e5"],map:["#06b6d4","#0891b2"],daily:["#ec4899","#db2777"],health:["#ef4444","#dc2626"],richlist:["#f59e0b","#d97706"],profile:["#6366f1","#4f46e5"],events:["#d946ef","#c026d3"],news:["#64748b","#475569"],boutique:["#d946ef","#a855f7"],myoutfits:["#f97316","#ea580c"],wardrobe:["#14b8a6","#0d9488"],contacts:["#6366f1","#818cf8"],wallet:["#f59e0b","#d97706"],tunes:["#a855f7","#9333ea"],gallery:["#06b6d4","#0891b2"],invest:["#10b981","#059669"],settings:["#64748b","#475569"],admin:["#ef4444","#b91c1c"],hunt:["#f2b134","#d97706"],missions:["#dc2626","#b91c1c"],realestate:["#16a34a","#15803d"],homestore:["#ea580c","#c2410c"],storage:["#0891b2","#0e7490"],messages:["#22c55e","#16a34a"]};
     const now=new Date(), hh=String(now.getHours()).padStart(2,"0"), mm=String(now.getMinutes()).padStart(2,"0");
     const dateTxt=now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})+" · Kaduna";
     c.innerHTML='<div class="ph-home-clock">'+hh+':'+mm+'</div><div class="ph-home-date">'+dateTxt+'</div><div class="ph-home-bal"><span>₦'+(game.state.money||0).toLocaleString()+'</span></div>'+
@@ -1427,6 +1431,104 @@ function _showPhoneApp(appId) {
     h+='<div style="font-size:12px;font-weight:600;margin:12px 0 6px;color:#f2b134;">🗓️ Weekly Missions</div>';
     for(const w of weeklies){h+='<div style="background:#17181b;border-radius:8px;padding:8px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;"><span style="font-size:11px;color:'+(w.done?'#4ade80':'#f2f2f4')+';">'+(w.done?'✅':'⬜')+' '+w.text+'</span>'+(w.done?'<span style="font-size:10px;color:#4ade80;">+₦'+w.reward.toLocaleString()+'</span>':'<button onclick="window._claimWeekly(\''+w.id+'\')" style="background:#f2b134;color:#000;border:none;border-radius:6px;padding:3px 8px;cursor:pointer;font-size:10px;font-weight:600;">Claim ₦'+w.reward.toLocaleString()+'</button>')+'</div>';}
     h+=backBtn;c.innerHTML=h;return;
+  }
+  if(appId==="wallet"){
+    const uid = getMyUid();
+    let h = '<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">👛 Wallet</div>';
+    h += '<div style="text-align:center;padding:14px;background:linear-gradient(135deg,var(--green),#1a1a2e);color:#fff;border-radius:14px;margin-bottom:14px;">';
+    h += '<div style="font-size:11px;opacity:0.8;">Balance</div><div style="font-size:28px;font-weight:800;margin-top:4px;">₦'+game.state.money.toLocaleString()+'</div></div>';
+    h += '<div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--green);">📋 Recent Transactions</div>';
+    h += '<div id="wallet-transactions" style="font-size:12px;color:#666;">Loading...</div>';
+    h += backBtn;
+    c.innerHTML = h;
+    // Async load transaction log from Firebase
+    if (uid) {
+      import("firebase/database").then(async ({ ref, get, query, limitToLast }) => {
+        try {
+          const snap = await get(query(ref(db, "economy/" + uid + "/log"), limitToLast(20)));
+          const log = snap.val() || {};
+          const entries = Object.entries(log).sort((a, b) => Number(b[0]) - Number(a[0]));
+          const el = document.getElementById("wallet-transactions");
+          if (!el) return;
+          if (entries.length === 0) { el.innerHTML = '<div style="text-align:center;padding:10px;color:#999;">No transactions yet.</div>'; return; }
+          el.innerHTML = entries.map(([ts, e]) => {
+            const date = new Date(Number(ts)).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+            const isPos = e.type === "hunt" || e.type === "job" || e.type === "reward";
+            const amt = (isPos ? "+" : "−") + "₦" + (e.reward || e.amount || 0).toLocaleString();
+            const col = isPos ? "#4ade80" : "#e11d48";
+            const icon = e.type === "hunt" ? "💎" : e.type === "job" ? "💼" : e.type === "money" ? "💸" : e.type === "reward" ? "🎁" : "💰";
+            return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #eee;">'+
+              '<span style="font-size:18px;">'+icon+'</span>'+
+              '<div style="flex:1;"><div style="font-size:11px;font-weight:600;color:#333;">'+(e.type||"transaction")+'</div>'+
+              '<div style="font-size:9px;color:#999;">'+date+'</div></div>'+
+              '<span style="font-size:12px;font-weight:700;color:'+col+';">'+amt+'</span></div>';
+          }).join("");
+        } catch (e) { const el = document.getElementById("wallet-transactions"); if (el) el.textContent = "Could not load transactions"; }
+      });
+    } else { document.getElementById("wallet-transactions").innerHTML = "Sign in to see transactions"; }
+    return;
+  }
+  if(appId==="tunes"){
+    const stations = [
+      { id: "afrobeat", name: "Afrobeat FM", emoji: "🎵", desc: "Burna Boy, Wizkid, Davido vibes" },
+      { id: "hausa", name: "Hausa Traditional", emoji: "🥁", desc: "Mamman Shata, Dan Maraya" },
+      { id: "hiphop", name: "Kaduna Hip-Hop", emoji: "🎤", desc: "Local rap + trap beats" },
+      { id: "gospel", name: "Gospel FM", emoji: "🙏", desc: "Inspirational + worship" },
+      { id: "oldies", name: "Old School Naija", emoji: "📼", desc: "Fela, Onyeka, Sonny Okosun" },
+    ];
+    let h = '<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">🎵 Tunes</div>';
+    h += '<div style="font-size:11px;color:#666;margin-bottom:8px;">Pick a station to vibe to:</div>';
+    for (const st of stations) {
+      const isPlaying = window._tuneStation === st.id;
+      h += '<div onclick="window._playTune(\''+st.id+'\')" style="display:flex;align-items:center;gap:8px;padding:10px;background:'+(isPlaying?'#1a2a1a':'#f8f5e8')+';border-radius:8px;margin-bottom:6px;cursor:pointer;border:1px solid '+(isPlaying?'#4ade80':'#ddd')+';">';
+      h += '<span style="font-size:24px;">'+st.emoji+'</span><div style="flex:1;"><div style="font-size:12px;font-weight:600;color:#333;">'+st.name+(isPlaying?' ✅':'')+'</div>';
+      h += '<div style="font-size:10px;color:#999;">'+st.desc+'</div></div>';
+      h += '<span style="font-size:18px;">'+(isPlaying?'⏸':'▶')+'</span></div>';
+    }
+    h += '<div style="font-size:10px;color:#999;margin-top:8px;text-align:center;">💡 Tunes play in the background while you play.</div>';
+    h += backBtn;
+    c.innerHTML = h;
+    return;
+  }
+  if(appId==="gallery"){
+    let h = '<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">📸 Gallery</div>';
+    h += '<button onclick="window._takeScreenshot()" style="width:100%;background:var(--green);color:#fff;border:none;border-radius:10px;padding:12px;cursor:pointer;font:600 13px Poppins,sans-serif;margin-bottom:10px;">📸 Take Screenshot</button>';
+    let shots = [];
+    try { shots = JSON.parse(localStorage.getItem("kaduna-screenshots") || "[]"); } catch (e) {}
+    if (shots.length === 0) {
+      h += '<div style="text-align:center;padding:20px;color:#999;font-size:12px;">No screenshots yet. Tap the button above to capture one!</div>';
+    } else {
+      h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">';
+      for (let i = 0; i < shots.length; i++) {
+        h += '<div style="position:relative;border-radius:8px;overflow:hidden;"><img src="'+shots[i]+'" style="width:100%;display:block;border-radius:8px;" /><button onclick="window._deleteScreenshot('+i+')" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:10px;cursor:pointer;">✕</button></div>';
+      }
+      h += '</div>';
+    }
+    h += backBtn;
+    c.innerHTML = h;
+    return;
+  }
+  if(appId==="invest"){
+    let h = '<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">📈 Invest</div>';
+    h += '<div style="font-size:11px;color:#666;margin-bottom:8px;">Balance: ₦'+game.state.money.toLocaleString()+'</div>';
+    const options = [
+      { id: "treasury", name: "Treasury Bills", emoji: "🏦", min: 5000, rate: 1.10, days: 1, desc: "Safe. 10% return in 1 game-day." },
+      { id: "keke-fund", name: "Keke Fleet", emoji: "🛺", min: 20000, rate: 1.25, days: 2, desc: "Buy a keke, hire a driver. 25% return." },
+      { id: "realestate", name: "Land Flip", emoji: "🏠", min: 100000, rate: 1.50, days: 3, desc: "Buy land, sell for profit. 50% return." },
+      { id: "crypto", name: "Crypto Trade", emoji: "₿", min: 50000, rate: 2.00, days: 1, desc: "High risk! 2x or lose 50%." },
+    ];
+    for (const opt of options) {
+      const canAfford = game.state.money >= opt.min;
+      h += '<div style="display:flex;align-items:center;gap:8px;padding:10px;background:#f8f5e8;border-radius:8px;margin-bottom:6px;'+(canAfford?'':'opacity:0.5;')+'">';
+      h += '<span style="font-size:24px;">'+opt.emoji+'</span><div style="flex:1;"><div style="font-size:12px;font-weight:600;color:#333;">'+opt.name+'</div>';
+      h += '<div style="font-size:10px;color:#999;">'+opt.desc+'</div></div>';
+      if (canAfford) h += '<button onclick="window._invest(\''+opt.id+'\','+opt.min+','+opt.rate+','+opt.days+')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font:600 11px Poppins,sans-serif;">₦'+opt.min.toLocaleString()+'</button>';
+      else h += '<span style="font-size:10px;color:#999;">₦'+opt.min.toLocaleString()+'</span>';
+      h += '</div>';
+    }
+    h += backBtn;
+    c.innerHTML = h;
+    return;
   }
   if(appId==="settings"){
     const s=game.state;
@@ -2148,6 +2250,129 @@ window._dismountVehicle = () => {
   toast("🚶 Dismounted. Walking now.");
   showPhoneApp("cars");
 };
+// FEATURE: Tunes — play/stop radio station (toast only, no actual audio streaming yet)
+window._playTune = (stationId) => {
+  if (window._tuneStation === stationId) { window._tuneStation = null; toast("🔇 Tunes stopped"); }
+  else { window._tuneStation = stationId; const names = { afrobeat: "Afrobeat FM", hausa: "Hausa Traditional", hiphop: "Kaduna Hip-Hop", gospel: "Gospel FM", oldies: "Old School Naija" }; toast("🎵 Now playing: " + (names[stationId] || stationId)); }
+  showPhoneApp("tunes");
+};
+// FEATURE: Gallery — take a screenshot of the current canvas
+window._takeScreenshot = () => {
+  try {
+    const canvas = document.getElementById("game");
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+    let shots = JSON.parse(localStorage.getItem("kaduna-screenshots") || "[]");
+    shots.unshift(dataUrl);
+    if (shots.length > 12) shots = shots.slice(0, 12);
+    localStorage.setItem("kaduna-screenshots", JSON.stringify(shots));
+    toast("📸 Screenshot saved to Gallery!");
+    showPhoneApp("gallery");
+  } catch (e) { toast("Could not take screenshot — " + e.message); }
+};
+window._deleteScreenshot = (idx) => {
+  try {
+    let shots = JSON.parse(localStorage.getItem("kaduna-screenshots") || "[]");
+    shots.splice(idx, 1);
+    localStorage.setItem("kaduna-screenshots", JSON.stringify(shots));
+    showPhoneApp("gallery");
+  } catch (e) {}
+};
+// FEATURE: Invest — put money into an investment, get return after game-days
+window._invest = (id, min, rate, days) => {
+  if (game.state.money < min) { toast("Need ₦" + min.toLocaleString()); return; }
+  const isCrypto = id === "crypto";
+  if (isCrypto && !confirm("⚠️ HIGH RISK! You could lose 50% of your investment. Continue?")) return;
+  if (!isCrypto && !confirm("Invest ₦" + min.toLocaleString() + " in this option? You'll get your return in " + days + " game-day(s).")) return;
+  game.state.money -= min;
+  // Determine return (crypto has 50% chance of losing)
+  const win = isCrypto ? Math.random() > 0.4 : true;
+  const returnAmt = win ? Math.floor(min * rate) : Math.floor(min * 0.5);
+  const profit = returnAmt - min;
+  // Schedule the return (simulated — pay immediately for simplicity in this build)
+  setTimeout(() => {
+    game.state.money += returnAmt;
+    game.save?.(); updateHUD();
+    const uid = getMyUid();
+    if (uid) update(ref(db, "economy/" + uid), { balance: game.state.money });
+    if (win) toast("📈 Investment paid off! +₦" + profit.toLocaleString() + " profit!");
+    else toast("📉 Investment lost. -₦" + (min - returnAmt).toLocaleString());
+    showPhoneApp("invest");
+  }, days * 60000); // 1 game-day = 1 real minute (TIME_SCALE=1)
+  toast("💰 Invested ₦" + min.toLocaleString() + ". Check back in " + days + " min.");
+  game.save?.(); updateHUD();
+  showPhoneApp("invest");
+};
+// FEATURE: Activity interactions at fun places
+// Each fun place type has an activity that boosts a need + costs money (or is free)
+const FUN_ACTIVITIES = {
+  pitch:      { label: "Play Football",    icon: "⚽", need: "fun",     amount: 25, cost: 100,  energyCost: 10 },
+  park:       { label: "Relax in Park",   icon: "🌳", need: "energy",  amount: 20, cost: 0,    energyCost: 0 },
+  playground: { label: "Play at Playground", icon: "🛝", need: "fun",  amount: 20, cost: 0,    energyCost: 5 },
+  suya:       { label: "Buy Suya",         icon: "🍢", need: "hunger",  amount: 30, cost: 500,  energyCost: 0 },
+  bazaar:     { label: "Shop at Bazaar",  icon: "🛍️", need: "fun",    amount: 15, cost: 1000, energyCost: 5 },
+  petrol:     { label: "Buy Fuel",        icon: "⛽", need: "energy",  amount: 15, cost: 200,  energyCost: 0 },
+  hotel:      { label: "Rest at Hotel",   icon: "🏨", need: "energy",  amount: 40, cost: 2000, energyCost: 0 },
+  shops:      { label: "Browse Shops",    icon: "🏪", need: "fun",     amount: 10, cost: 0,    energyCost: 2 },
+  borehole:   { label: "Drink Water",     icon: "💧", need: "hunger",  amount: 10, cost: 0,    energyCost: 0 },
+  bukka:      { label: "Eat at Bukka",    icon: "🍲", need: "hunger",  amount: 35, cost: 800,  energyCost: 0 },
+  pool:       { label: "Swim at Pool",    icon: "🏊", need: "fun",     amount: 30, cost: 1000, energyCost: 10 },
+  tennis:     { label: "Play Tennis",      icon: "🎾", need: "fun",     amount: 25, cost: 500,  energyCost: 8 },
+};
+let _funActivityPromptEl = null;
+let _nearestFunPlace = null;
+function _checkFunPlaceProximity() {
+  const px = player.pos.x, pz = player.pos.z;
+  let nearest = null, nearestDist = 999;
+  for (const area of AREAS) {
+    const layout = districtLayout(area);
+    if (!layout || !layout.fun) continue;
+    for (const f of layout.fun) {
+      const dx = f.x - px, dz = f.z - pz;
+      const d2 = dx * dx + dz * dz;
+      const range = Math.max(f.w, f.d) / 2 + 4;
+      if (d2 < range * range && d2 < nearestDist) {
+        nearest = { ...f, areaId: area.id, areaName: area.name, dist: Math.sqrt(d2) };
+        nearestDist = d2;
+      }
+    }
+  }
+  _nearestFunPlace = nearest;
+  if (!nearest) { if (_funActivityPromptEl) _funActivityPromptEl.style.display = "none"; return; }
+  const act = FUN_ACTIVITIES[nearest.kind];
+  if (!act) return;
+  if (!_funActivityPromptEl) {
+    _funActivityPromptEl = document.createElement("div");
+    _funActivityPromptEl.id = "fun-activity-prompt";
+    _funActivityPromptEl.style.cssText = "position:fixed;left:50%;bottom:calc(45% + env(safe-area-inset-bottom));transform:translateX(-50%);background:rgba(15,77,58,.92);color:#fff;padding:10px 18px;border-radius:14px;font:600 13px Poppins,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.3);display:none;z-index:30;border:1px solid rgba(255,255,255,.2);text-align:center;max-width:90vw;cursor:pointer;";
+    document.body.appendChild(_funActivityPromptEl);
+    _funActivityPromptEl.addEventListener("click", _onFunActivityTap);
+  }
+  const costStr = act.cost > 0 ? "₦" + act.cost : "Free";
+  _funActivityPromptEl.innerHTML = act.icon + " <b>" + nearest.name + "</b><br><span style='color:#4ade80;font-weight:600;'>" + act.label + " (" + costStr + " · " + act.need + " +" + act.amount + ")</span>";
+  _funActivityPromptEl.style.display = "block";
+}
+function _onFunActivityTap() {
+  if (!_nearestFunPlace) return;
+  const act = FUN_ACTIVITIES[_nearestFunPlace.kind];
+  if (!act) return;
+  if (act.cost > 0 && game.state.money < act.cost) { toast("Need ₦" + act.cost.toLocaleString()); return; }
+  if (act.cost > 0) game.state.money -= act.cost;
+  if (act.energyCost > 0) game.state.needs.energy = Math.max(0, (game.state.needs.energy || 0) - act.energyCost);
+  game.state.needs[act.need] = Math.min(100, (game.state.needs[act.need] || 0) + act.amount);
+  game.save?.(); updateHUD();
+  const uid = getMyUid();
+  if (uid && act.cost > 0) update(ref(db, "economy/" + uid), { balance: game.state.money });
+  toast(act.icon + " " + act.label + "! " + act.need + " +" + act.amount + (act.cost > 0 ? " (−₦" + act.cost.toLocaleString() + ")" : " (free)"));
+}
+// FEATURE: Emotes — character wave/dance/sit
+window._emote = (type) => {
+  if (!rig) { toast("Character not loaded yet"); return; }
+  if (type === "wave") { toast("👋 " + (getMyName() || "You") + " waved!"); if (rig.animate) rig.animate(0.1, 0, false); }
+  else if (type === "dance") { toast("💃 " + (getMyName() || "You") + " is dancing!"); if (rig.animate) rig.animate(0.2, 3, true); }
+  else if (type === "sit") { toast("🪑 " + (getMyName() || "You") + " sat down."); if (rig.animate) rig.animate(0, 0, false); }
+  // Also send a position update so other players see the emote
+  sendPosition(player.pos.x, player.pos.z, player.heading);
+};
 // ---- Money Hunt HUD update (called by moneyhunt.js after a successful claim) ----
 function _updateHuntHud() {
   const stats = getHuntStats();
@@ -2571,6 +2796,24 @@ initAuth((user) => {
   _armBeforeUnload(user.uid);
   _armBalancePusher(user.uid);
   _ensureVehicleControls();
+  // FEATURE: add emote buttons (wave, dance, sit) — floating buttons above the bottom bar
+  if (!document.getElementById("emote-bar")) {
+    const bar = document.createElement("div");
+    bar.id = "emote-bar";
+    bar.style.cssText = "position:fixed;left:12px;bottom:calc(130px + env(safe-area-inset-bottom));z-index:28;display:flex;gap:6px;pointer-events:none;";
+    const makeEmoteBtn = (emoji, label, type) => {
+      const b = document.createElement("button");
+      b.innerHTML = emoji;
+      b.style.cssText = "width:40px;height:40px;border-radius:50%;background:rgba(15,77,58,.92);color:#fff;border:1px solid rgba(255,255,255,.2);font-size:18px;cursor:pointer;pointer-events:auto;box-shadow:0 2px 8px rgba(0,0,0,.3);user-select:none;-webkit-user-select:none;touch-action:none;";
+      b.title = label;
+      b.addEventListener("click", () => window._emote(type));
+      return b;
+    };
+    bar.appendChild(makeEmoteBtn("👋", "Wave", "wave"));
+    bar.appendChild(makeEmoteBtn("💃", "Dance", "dance"));
+    bar.appendChild(makeEmoteBtn("🪑", "Sit", "sit"));
+    document.body.appendChild(bar);
+  }
   // FEATURE: per-plot world doors + knock/invite flow (step 2c).
   // initPlotDoors subscribes to nearby areas' house records and renders door
   // markers. listenForKnocks lets the OWNER hear knocks from visitors in
@@ -3123,6 +3366,9 @@ function _frame() {
   if (!active) tickPlotDoors(player.pos.x, player.pos.z);
   // FEATURE: check if the player is near ANY house they own → update "My Home" entrance
   if (!active) _checkOwnedHouseProximity();
+  // FEATURE: check if the player is near a fun place (football pitch, suya spot, etc.)
+  if (!active) _checkFunPlaceProximity();
+  else if (_funActivityPromptEl) _funActivityPromptEl.style.display = "none";
   // FEATURE 3b: area world tick — chunk-streamed area roads + houses + lamp posts
   tickLife(player.pos.x, player.pos.z, !active);
   if (!active) tickAreaWorld(player.pos.x, player.pos.z);
