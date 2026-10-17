@@ -19,7 +19,7 @@ import { checkDailyReward, getDailyStatus, claimQuestReward } from "./daily.js";
 import { ref, get, onValue, update, set } from "firebase/database";
 import { openCreator } from "./creator.js";
 import { outfitsFor, BUILDS, SHOP, SLOT_KEYS } from "./outfits.js";
-import { initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, getActivePlace, enterPlace, enterPlaceAsVisitor, exitPlace, sendUIEvent } from "./places/manager.js";
+import { peekWorld, initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, getActivePlace, enterPlace, enterPlaceAsVisitor, exitPlace, sendUIEvent } from "./places/manager.js";
 import { listPlaces, getPlace, updateHomeEntrance } from "./places/registry.js";
 import { initMissions, getActiveMission, getAllChapters, getDailyMissions, getWeeklyMissions, checkStep, createMissionState, claimDailyReward, claimWeeklyReward, setCelebrateCallback } from "./missions.js";
 import { FURNITURE_CATALOG, CATEGORIES, getItem, calcComfort } from "./furniture.js";
@@ -2410,7 +2410,7 @@ document.querySelectorAll("#bottom-nav .nav-btn").forEach(btn=>{
     btn.classList.add("active");
     const n=btn.dataset.nav;
     if(n==="phone")openPhone();
-    else if(n==="map"){closePhone();$("profile-sheet")?.classList.remove("show");openLiveMap();}
+    else if(n==="map"){closePhone();$("profile-sheet")?.classList.remove("show");const _ap=getActivePlace();if(_ap){const _d=getPlace(_ap.id);_mapMe=_d?{x:_d.entranceX,z:_d.entranceZ}:null;if(_mapMe)peekWorld(true);}else _mapMe=null;openLiveMap();}
     else if(n==="home"){
       closePhone();$("profile-sheet")?.classList.remove("show");
       // Travel to the player's home entrance (dynamic coordinates)
@@ -2905,7 +2905,8 @@ function governor(raw) {
   console.log("[quality] fps", fps.toFixed(0), "-> level", _gLevel);
 }
 
-initLiveMap({ scene, camera, player, AREAS, listPlaces, getHomePos: () => window._myHomePos, getHomes: () => window._myHomes || [], limits: { x: 560, z: 400 }, extraLabels: SCENERY_LABELS.concat(districtFunLabels()),
+let _mapMe = null;
+initLiveMap({ getMe: () => _mapMe, onClose: () => { if (_mapMe) { peekWorld(false); _mapMe = null; } }, scene, camera, player, AREAS, listPlaces, getHomePos: () => window._myHomePos, getHomes: () => window._myHomes || [], limits: { x: 560, z: 400 }, extraLabels: SCENERY_LABELS.concat(districtFunLabels()),
   travelPlace: (id) => { closeLiveMap(); window.travelToPlace(id); },
   travelArea: (id) => { closeLiveMap(); window.travelToArea(id); },
   tickWorld: (x, z, r) => { tickAreaWorld(x, z, r); tickPlotDoors(x, z); tickLife(x, z, true); } });

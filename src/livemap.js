@@ -43,7 +43,7 @@ function build() {
   labelBox = root.querySelector("#lm-labels");
   root.querySelector("#lm-back").onclick = closeLiveMap;
   root.querySelector("#lm-names").onclick = (e) => { names = !names; e.currentTarget.classList.toggle("on", names); labelBox.style.display = names ? "" : "none"; };
-  root.querySelector("#lm-me").onclick = () => { st.tx = S.player.pos.x; st.tz = S.player.pos.z; };
+  root.querySelector("#lm-me").onclick = () => { const p = me(); st.tx = p.x; st.tz = p.z; };
   root.querySelector("#lm-in").onclick = () => { st.tdist = Math.max(MIN_D, st.tdist * 0.68); };
   root.querySelector("#lm-out").onclick = () => { st.tdist = Math.min(MAX_D, st.tdist * 1.45); };
 
@@ -63,6 +63,9 @@ function build() {
   root.addEventListener("wheel", (e) => { st.tdist = Math.max(MIN_D, Math.min(MAX_D, st.tdist * (e.deltaY > 0 ? 1.15 : 0.87))); }, { passive: true });
   root._moved = () => moved;
 }
+
+// where "You" are on the map: outside the house door when you are inside a building
+function me() { return (S.getMe && S.getMe()) || S.player.pos; }
 
 function makeLabels() {
   labelBox.innerHTML = ""; labels = [];
@@ -84,7 +87,7 @@ export function openLiveMap() {
   if (!S || on) return;
   if (!root) build();
   on = true;
-  st.x = st.tx = S.player.pos.x; st.z = st.tz = S.player.pos.z; st.dist = st.tdist = 200;
+  { const p = me(); st.x = st.tx = p.x; st.z = st.tz = p.z; } st.dist = st.tdist = 200;
   saved = { near: S.camera.near, far: S.camera.far, fogNear: S.scene.fog ? S.scene.fog.near : 0, fogFar: S.scene.fog ? S.scene.fog.far : 0 };
   S.camera.far = 4000; S.camera.near = 2; S.camera.updateProjectionMatrix();
   if (S.scene.fog) { S.scene.fog.near = 500; S.scene.fog.far = 2600; }
@@ -99,6 +102,7 @@ export function closeLiveMap() {
   if (S.scene.fog) { S.scene.fog.near = saved.fogNear; S.scene.fog.far = saved.fogFar; }
   document.body.classList.remove("live-map");
   root.style.display = "none";
+  if (S.onClose) S.onClose();
   document.querySelectorAll("#bottom-nav .nav-btn").forEach(b => b.classList.toggle("active", b.dataset.nav === "home"));
 }
 
@@ -115,7 +119,7 @@ export function liveMapFrame(dt) {
   if (!names) return;
   const w = innerWidth, h = innerHeight;
   for (const L of labels) {
-    const x = L.follow ? S.player.pos.x : L.x, z = L.follow ? S.player.pos.z : L.z;
+    const mp = L.follow ? me() : null, x = mp ? mp.x : L.x, z = mp ? mp.z : L.z;
     _v.set(x, L.y, z).project(c);
     const ok = _v.z < 1 && Math.abs(_v.x) < 1.15 && Math.abs(_v.y) < 1.1;
     if (!ok) { L.el.style.transform = "translate(-9999px,-9999px)"; continue; }
