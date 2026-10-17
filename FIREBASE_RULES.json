@@ -38,7 +38,10 @@
     },
     "chat": {
       ".read": "auth != null",
-      ".write": "auth != null"
+      "$id": {
+        ".write": "auth != null && (!data.exists() && newData.child('uid').val() === auth.uid || (data.exists() && !newData.exists() && root.child('admins').child(auth.uid).exists()))",
+        ".validate": "newData.hasChildren(['uid','name','text','ts']) && newData.child('text').isString() && newData.child('text').val().length > 0 && newData.child('text').val().length <= 200 && newData.child('name').val().length <= 30 && newData.child('ts').val() <= now + 60000"
+      }
     },
     "dms": {
       "$chatId": {
