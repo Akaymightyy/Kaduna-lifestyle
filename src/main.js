@@ -2779,7 +2779,7 @@ initAuth((user) => {
   initSocial(user.uid, () => {});
   // FEATURE: init the vehicles system (subscribes to owned vehicles from Firebase)
   initVehicles(scene, user.uid, () => {});
-  // FEATURE: init billboard/ad system (10 billboards along main roads)
+  // FEATURE: init billboard/ad system (10 billboards in every district + 10 on the main roads)
   initBillboards(scene);
   // ---- Init Messages app ----
   const myName = user.displayName || user.email?.split("@")[0] || "Player";

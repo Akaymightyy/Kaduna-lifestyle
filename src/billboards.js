@@ -11,9 +11,10 @@
 import * as THREE from "three";
 import { db } from "./firebase.js";
 import { ref, get, set, update, onValue } from "firebase/database";
+import { AREAS } from "./areas.js";
 
 // ---- Billboard positions (along main road + avenues + cross streets) ----
-export const BILLBOARD_POSITIONS = [
+const _MAIN_POSITIONS = [
   { id: "bb1", x: -40, z: 14, rot: 0, name: "AB Road West" },
   { id: "bb2", x: 40, z: -14, rot: Math.PI, name: "AB Road East" },
   { id: "bb3", x: -100, z: 14, rot: 0, name: "Buhari Way" },
@@ -26,6 +27,25 @@ export const BILLBOARD_POSITIONS = [
   { id: "bb10", x: -160, z: 14, rot: 0, name: "City Edge West" },
 ];
 
+// 10 billboards in EVERY district, along the district's own road (5 each side, facing the road)
+function _districtBillboards() {
+  const out = [];
+  for (const a of AREAS) {
+    for (let i = 0; i < 10; i++) {
+      const north = i % 2 === 0;
+      out.push({
+        id: a.id + "_bb" + (i + 1),
+        x: Math.round(a.x - 45 + i * 10),
+        z: a.z + (north ? -5.4 : 5.4),
+        rot: north ? 0 : Math.PI,
+        name: a.name + " Billboard " + (i + 1),
+      });
+    }
+  }
+  return out;
+}
+export const BILLBOARD_POSITIONS = _MAIN_POSITIONS.concat(_districtBillboards());
+
 const AD_PRICE = 50000;  // ₦50,000 per 7 days
 const AD_DURATION_MS = 7 * 24 * 60 * 60 * 1000;  // 7 days in ms
 
@@ -33,6 +53,23 @@ const AD_DURATION_MS = 7 * 24 * 60 * 60 * 1000;  // 7 days in ms
 let _scene = null;
 let _billboards = [];  // [{ def, group, screenMesh, screenTexture, screenCanvas, screenCtx, adData }]
 let _subscriptions = {};
+
+let _sharedScreenGeo = null, _sharedDefaultMat = null;
+function _defaultMat() {
+  if (_sharedDefaultMat) return _sharedDefaultMat;
+  const c = document.createElement("canvas"); c.width = 512; c.height = 320;
+  _drawDefaultAd(c.getContext("2d"), { name: "Kaduna" });
+  _sharedDefaultMat = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), side: THREE.DoubleSide });
+  return _sharedDefaultMat;
+}
+// own canvas texture, only for boards that show a real ad
+function _ownScreen(bb) {
+  if (bb.screenCtx) return;
+  const c = document.createElement("canvas"); c.width = 512; c.height = 320;
+  bb.screenCanvas = c; bb.screenCtx = c.getContext("2d");
+  bb.screenTexture = new THREE.CanvasTexture(c);
+  bb.screenMesh.material = new THREE.MeshBasicMaterial({ map: bb.screenTexture, side: THREE.DoubleSide });
+}
 
 // ---- Build a single billboard mesh (pole + screen) ----
 function _buildBillboard(def) {
@@ -55,14 +92,9 @@ function _buildBillboard(def) {
   frame.castShadow = false;
   group.add(frame);
 
-  // Screen (canvas texture — shows "YOUR AD HERE" or the ad image)
-  const canvas = document.createElement("canvas");
-  canvas.width = 512; canvas.height = 320;
-  const ctx = canvas.getContext("2d");
-  const texture = new THREE.CanvasTexture(canvas);
-  const screenMat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
-  const screenGeo = new THREE.PlaneGeometry(4.2, 2.5);
-  const screenMesh = new THREE.Mesh(screenGeo, screenMat);
+  // Screen: shares one "YOUR AD HERE" texture until an ad is bought (keeps 150+ boards cheap)
+  const screenGeo = _sharedScreenGeo || (_sharedScreenGeo = new THREE.PlaneGeometry(4.2, 2.5));
+  const screenMesh = new THREE.Mesh(screenGeo, _defaultMat());
   screenMesh.position.set(0, 5.5, 0.08);
   screenMesh.userData = { isBillboard: true, billboardId: def.id };
   group.add(screenMesh);
@@ -71,7 +103,7 @@ function _buildBillboard(def) {
   group.position.set(def.x, 0, def.z);
   group.rotation.y = def.rot;
 
-  return { group, screenMesh, screenTexture: texture, screenCanvas: canvas, screenCtx: ctx };
+  return { group, screenMesh, screenTexture: null, screenCanvas: null, screenCtx: null };
 }
 
 // ---- Draw the default "YOUR AD HERE" screen ----
@@ -110,7 +142,7 @@ function _drawDefaultAd(ctx, def) {
 }
 
 // ---- Draw an active ad (with image if available) ----
-function _drawActiveAd(ctx, def, adData) {
+function _drawActiveAd(ctx, def, adData, done) {
   if (adData.imageUrl) {
     // Load the image + draw it on the canvas
     const img = new Image();
@@ -126,8 +158,9 @@ function _drawActiveAd(ctx, def, adData) {
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText("📢 " + (adData.ownerName || "Sponsored") + " · " + def.name, 256, 300);
+      done && done();
     };
-    img.onerror = () => _drawDefaultAd(ctx, def);  // fallback if image fails
+    img.onerror = () => { _drawDefaultAd(ctx, def); done && done(); };  // fallback if image fails
     img.src = adData.imageUrl;
   } else {
     // Text-only ad
@@ -161,28 +194,25 @@ function _drawActiveAd(ctx, def, adData) {
 // ---- Init: build billboard meshes + subscribe to Firebase ----
 export function initBillboards(scene) {
   _scene = scene;
+  const byId = {};
   for (const def of BILLBOARD_POSITIONS) {
     const bb = _buildBillboard(def);
-    _drawDefaultAd(bb.screenCtx, def);
-    bb.screenTexture.needsUpdate = true;
-    bb.def = def;
-    bb.adData = null;
+    bb.def = def; bb.adData = null;
     _scene.add(bb.group);
     _billboards.push(bb);
-
-    // Subscribe to Firebase for this billboard's ad data
-    const unsub = onValue(ref(db, "billboards/" + def.id), (snap) => {
-      const data = snap.val();
-      bb.adData = data;
-      if (data && data.expiresAt > Date.now()) {
-        _drawActiveAd(bb.screenCtx, def, data);
-      } else {
-        _drawDefaultAd(bb.screenCtx, def);
-      }
-      bb.screenTexture.needsUpdate = true;
-    });
-    _subscriptions[def.id] = unsub;
+    byId[def.id] = bb;
   }
+  // ONE listener for every billboard
+  _subscriptions.all = onValue(ref(db, "billboards"), (snap) => {
+    const all = snap.val() || {};
+    for (const id in byId) {
+      const bb = byId[id], data = all[id] || null;
+      bb.adData = data;
+      const live = data && data.expiresAt > Date.now();
+      if (live) { _ownScreen(bb); _drawActiveAd(bb.screenCtx, bb.def, data, () => { bb.screenTexture.needsUpdate = true; }); bb.screenTexture.needsUpdate = true; }
+      else if (bb.screenCtx) { bb.screenMesh.material = _defaultMat(); }
+    }
+  }, () => {});
   console.log("[billboards] Built " + _billboards.length + " billboards");
 }
 
