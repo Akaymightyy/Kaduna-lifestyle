@@ -31,7 +31,9 @@ import {
   saveHouseFurniture,
   returnToStorage as houseReturnToStorage,
   migrateFurnitureIfNeeded,
+  loadHouse,
 } from "../houses.js";
+import { homeLayout } from "./home_layout.js";
 
 // Tier -> room dimensions + wall color + floor color + description
 const TIER_CONFIG = {
@@ -47,7 +49,13 @@ export async function build(scene, ctx) {
   // ---- Determine the player's current home tier ----
   // game.state.homeTier is set by the origin selection (attajiri=2, talaka=1)
   // and can be upgraded via the Real Estate app.
-  const tier = (ctx.game?.state?.homeTier) || 1;
+  // The size comes from THAT house's record (you can own many houses of different sizes).
+  let tier = (ctx.game?.state?.homeTier) || 1;
+  try {
+    const _k = ctx.visitingHouse ? ctx.visitingHouse : (window.__homeDoorHouse || null);
+    const _aid = _k && (_k.areaId), _pno = _k && (_k.plotNo);
+    if (_aid && _pno != null) { const rec = await loadHouse(_aid, _pno); if (rec && rec.tier) tier = rec.tier; }
+  } catch (e) { /* keep fallback tier */ }
   const cfg = TIER_CONFIG[tier] || TIER_CONFIG[1];
   const W = cfg.w, D = cfg.d;
   const HW = W / 2, HD = D / 2;
@@ -57,34 +65,13 @@ export async function build(scene, ctx) {
   group.visible = false;
 
   // ---- Build the room based on tier ----
-  // FEATURE: tier 2+ gets multiple rooms with internal walls + different floor colors
-  // (matching the reference screenshot: light gray living area, tan bedroom, gray patio).
-  // Tier 1 stays a single room.
-  if (tier === 1) {
-    group.add(floor(W, D, cfg.floorCol, 1));
-  } else {
-    // Front living area (55% of depth) — light gray floor
-    const frontFloor = floor(W, D * 0.55, 0xf3f4f6, 1);
-    frontFloor.position.z = D * 0.225; // offset to front
-    group.add(frontFloor);
-    // Back bedroom area (45% of depth) — warm tan/brown floor
-    const backFloor = floor(W, D * 0.45, cfg.floorCol, 2);
-    backFloor.position.z = -D * 0.275; // offset to back
-    group.add(backFloor);
-    // For tier 3+: add a side room (kitchen) with different floor
-    if (tier >= 3) {
-      const sideW = Math.min(4, W * 0.25);
-      const sideFloor = floor(sideW, D * 0.45, 0xc8c8c8, 1);
-      sideFloor.position.set(W / 2 - sideW / 2, 0, -D * 0.275);
-      group.add(sideFloor);
-    }
-    // For tier 4+: add a patio outside the front (gray concrete)
-    if (tier >= 4) {
-      const patioFloor = floor(W * 0.8, 3, 0x9ca3af, 9);
-      patioFloor.position.z = HD + 1.5;
-      group.add(patioFloor);
-    }
+  // Rooms come from the layout for this tier (tier 1 = one room, bigger budget = more rooms).
+  const layout = homeLayout(tier, W, D);
+  for (const f of layout.floors) {
+    const fl = floor(f.w, f.d, f.color == null ? cfg.floorCol : f.color, f.kind === "bath" ? 1 : (tier <= 2 ? 1 : 2));
+    fl.position.set(f.x, 0, f.z); group.add(fl);
   }
+  if (layout.patio) { const pf = floor(layout.patio.w, layout.patio.d, 0x9ca3af, 9); pf.position.set(layout.patio.x, 0, layout.patio.z); group.add(pf); }
 
   const wallMat = cfg.wallCol;
   const windowMat = 0x4a6177;
@@ -109,21 +96,14 @@ export async function build(scene, ctx) {
       // Tier 1: small vent window high on the back wall
       box(1.2, 0.6, 0.05, 0, 3.4, -HD + 0.05, windowMat),
     ]),
-    // FEATURE: internal wall separating living area (front) from bedroom (back) — tier 2+
-    // Creates two distinct rooms with a doorway between them (matching reference screenshot).
-    ...(tier >= 2 ? (() => {
-      const idw = Math.min(1.5, W * 0.15); // internal door gap width
-      const ids = (W - idw) / 2;
-      return [
-        box(ids, 3, 0.2, -(idw/2 + ids/2), 1.5, 0, wallMat, 3),
-        box(ids, 3, 0.2,  (idw/2 + ids/2), 1.5, 0, wallMat, 3),
-      ];
-    })() : []),
-    // FEATURE: side room wall (kitchen separator) — tier 3+
-    ...(tier >= 3 ? (() => {
-      const sideW = Math.min(4, W * 0.25);
-      return [box(0.2, 3, D * 0.45, W/2 - sideW/2, 1.5, -D * 0.275, wallMat, 3)];
-    })() : []),
+    // partition walls (waist-high so the camera can still see into every room) + a darker cap strip
+    ...layout.walls.flatMap((w) => {
+      const horiz = Math.abs(w.z1 - w.z0) < 0.001, len = horiz ? Math.abs(w.x1 - w.x0) : Math.abs(w.z1 - w.z0);
+      const cx = (w.x0 + w.x1) / 2, cz = (w.z0 + w.z1) / 2;
+      return horiz
+        ? [box(len, 1.5, 0.18, cx, 0.75, cz, wallMat, 3), box(len, 0.08, 0.24, cx, 1.54, cz, 0x6b5a45)]
+        : [box(0.18, 1.5, len, cx, 0.75, cz, wallMat, 3), box(0.24, 0.08, len, cx, 1.54, cz, 0x6b5a45)];
+    }),
   ]));
 
   // ---- Stylised dressing: trims, windows, curtains, pictures, props (never blocks the room) ----
@@ -135,11 +115,7 @@ export async function build(scene, ctx) {
       { x: 0, y: 3.5, z: 0, color: 0xffe8c0, intensity: 0.5, distance: 8 },
     ] }));
   } else {
-    group.add(interiorLights({ ambient: 0.85, points: [
-      { x: 0, y: 3.8, z: 0, color: 0xfff0e0, intensity: 0.7, distance: Math.max(14, W) },
-      { x: -W * 0.3, y: 3.8, z: -D * 0.2, color: 0xfff0e0, intensity: 0.4, distance: 8 },
-      { x:  W * 0.3, y: 3.8, z:  D * 0.2, color: 0xfff0e0, intensity: 0.4, distance: 8 },
-    ] }));
+    group.add(interiorLights({ ambient: 0.85, points: layout.lights.map((l, i) => ({ x: l.x, y: 3.6, z: l.z, color: 0xfff0e0, intensity: i === 0 ? 0.7 : 0.45, distance: Math.max(10, Math.min(18, W * 0.6)) })) }));
   }
 
   // ---- Load furniture ----
@@ -177,7 +153,8 @@ export async function build(scene, ctx) {
   } else {
     // Owner: load from own house record (with migration from old per-player path)
     const uid = getMyUid();
-    const houseKey = await resolvePlayerHouseKey(uid);
+    const _door = window.__homeDoorHouse;                                 // the house whose door you walked through
+    const houseKey = (_door && _door.areaId && _door.plotNo != null) ? { areaId: _door.areaId, plotNo: _door.plotNo, uid } : await resolvePlayerHouseKey(uid);
     if (houseKey) {
       _houseAreaId = houseKey.areaId;
       _housePlotNo = houseKey.plotNo;
@@ -257,6 +234,7 @@ export async function build(scene, ctx) {
     { minX: -HW, maxX: HW, minZ: -HD - 0.2, maxZ: -HD + 0.2 },  // back wall
     { minX: -HW, maxX: -doorSide - doorWidth/2, minZ: HD - 0.2, maxZ: HD + 0.2 }, // front-left
     { minX:  doorSide + doorWidth/2, maxX: HW, minZ: HD - 0.2, maxZ: HD + 0.2 },  // front-right
+    ...layout.colliders,
   ];
 
   scene.add(group);
