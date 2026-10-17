@@ -57,6 +57,12 @@ export function initPlaceManager({ scene, worldGroup, ctx }) {
   _state.promptEl = document.getElementById("place-prompt");
 }
 
+// Live map while you are inside a house: show the city again (and hide the room) so the map is not a brown void.
+export function peekWorld(on) {
+  if (!_state.active) return;
+  if (_state.worldGroup) _state.worldGroup.visible = !!on;
+  if (_state.placeHandle && _state.placeHandle.group) _state.placeHandle.group.visible = !on;
+}
 export function getActivePlace() {
   return _state.active ? { id: _state.active, handle: _state.placeHandle } : null;
 }
