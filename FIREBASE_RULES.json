@@ -73,25 +73,25 @@
           ".write": "auth != null && (!data.exists() || data.child('ownerUid').val() === auth.uid)",
           "furniture": {
             ".read": "auth != null",
-            ".write": "data.parent.child('ownerUid').val() === auth.uid"
+            ".write": "data.parent().child('ownerUid').val() === auth.uid"
           },
           "locked": {
-            ".write": "data.parent.child('ownerUid').val() === auth.uid"
+            ".write": "data.parent().child('ownerUid').val() === auth.uid"
           },
           "forSale": {
-            ".write": "data.parent.child('ownerUid').val() === auth.uid"
+            ".write": "data.parent().child('ownerUid').val() === auth.uid"
           },
           "forRent": {
-            ".write": "data.parent.child('ownerUid').val() === auth.uid"
+            ".write": "data.parent().child('ownerUid').val() === auth.uid"
           },
           "price": {
-            ".write": "data.parent.child('ownerUid').val() === auth.uid"
+            ".write": "data.parent().child('ownerUid').val() === auth.uid"
           },
           "tier": {
-            ".write": "data.parent.child('ownerUid').val() === auth.uid"
+            ".write": "data.parent().child('ownerUid').val() === auth.uid"
           },
           "colors": {
-            ".write": "data.parent.child('ownerUid').val() === auth.uid"
+            ".write": "data.parent().child('ownerUid').val() === auth.uid"
           }
         }
       }
@@ -165,6 +165,13 @@
       ".read": "auth != null",
       "$uid": {
         ".write": "auth.uid === $uid"
+      }
+    },
+    "billboards": {
+      ".read": "auth != null",
+      "$id": {
+        ".write": "auth != null && newData.child('ownerId').val() === auth.uid && (!data.exists() || data.child('expiresAt').val() < now || data.child('ownerId').val() === auth.uid)",
+        ".validate": "newData.hasChildren(['ownerId','expiresAt']) && newData.child('expiresAt').val() <= now + 691200000 && (!newData.child('text').exists() || newData.child('text').val().length <= 120) && (!newData.child('imageUrl').exists() || newData.child('imageUrl').val().length <= 400)"
       }
     }
   }
