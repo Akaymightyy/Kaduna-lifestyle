@@ -1033,7 +1033,7 @@ function _showPhoneApp(appId) {
     h += '<div style="font-size:12px;font-weight:600;color:'+(rentInfo.due?'#e11d48':'#4ade80')+';">'+(rentInfo.due?'🔔 RENT DUE!':'✅ Rent paid')+'</div>';
     h += '<div style="font-size:11px;color:#9b9ba4;margin-top:2px;">'+rentInfo.tier.name+' — ₦'+rentInfo.amount.toLocaleString()+'/week';
     if (rentInfo.due) h += ' · <b style="color:#e11d48;">Pay now!</b>';
-    else h += ' · Next due in '+rentInfo.nextDueMins+' min';
+    else h += ' · Next due in '+rentInfo.nextDueText;
     h += '</div>';
     if (rentInfo.due) h += '<button onclick="window._payRent()" style="width:100%;margin-top:6px;background:#f2b134;color:#000;border:none;border-radius:8px;padding:8px;cursor:pointer;font-size:12px;font-weight:600;">Pay Rent ₦'+rentInfo.amount.toLocaleString()+'</button>';
     h += '</div>';

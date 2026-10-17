@@ -45,7 +45,7 @@ export const HOUSE_TIERS = [
 // ---- RENT SYSTEM ----
 // Rent is due every Saturday (game time = every 7 real minutes * 24 = every 168 minutes = every 2.8 hours)
 // For testing: rent is due every 10 real minutes
-const RENT_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes real time = 1 week game time
+const RENT_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // real time: rent is due once every 7 real days (game clock = real clock)
 
 export function getRentInfo(state) {
   const lastPaid = state.lastRentPaid || 0;
@@ -59,6 +59,7 @@ export function getRentInfo(state) {
     amount: tier.rent,
     nextDueMs,
     nextDueMins: Math.ceil(nextDueMs / 60000),
+    nextDueText: nextDueMs >= 86400000 ? Math.floor(nextDueMs / 86400000) + " day(s) " + Math.floor((nextDueMs % 86400000) / 3600000) + " hr" : nextDueMs >= 3600000 ? Math.floor(nextDueMs / 3600000) + " hr " + Math.floor((nextDueMs % 3600000) / 60000) + " min" : Math.ceil(nextDueMs / 60000) + " min",
     tier: tier,
     lastPaid,
   };
@@ -99,9 +100,12 @@ export async function payRent(uid, state) {
   return { ok: true, msg: "✅ Rent paid: ₦" + info.amount.toLocaleString() + " for " + info.tier.name };
 }
 
+let _lastKnockAt = 0;
 export async function checkRentDue(state, toast) {
   const info = getRentInfo(state);
   if (info.due) {
+    if (Date.now() - _lastKnockAt < 2 * 60 * 60 * 1000) return true;   // landlord knocks once, then again after 2 hours (not every minute)
+    _lastKnockAt = Date.now();
     // Landlord knock
     toast?.("🔔 Landlord knock! Rent due: ₦" + info.amount.toLocaleString() + " for " + info.tier.name + ". Pay now or lose mood!");
     return true;
