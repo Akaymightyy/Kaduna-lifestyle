@@ -2364,13 +2364,14 @@ function _onFunActivityTap() {
   if (uid && act.cost > 0) update(ref(db, "economy/" + uid), { balance: game.state.money });
   toast(act.icon + " " + act.label + "! " + act.need + " +" + act.amount + (act.cost > 0 ? " (−₦" + act.cost.toLocaleString() + ")" : " (free)"));
 }
-// FEATURE: Emotes — character wave/dance/sit
-window._emote = (type) => {
-  if (!rig) { toast("Character not loaded yet"); return; }
-  if (type === "wave") { toast("👋 " + (getMyName() || "You") + " waved!"); if (rig.animate) rig.animate(0.1, 0, false); }
-  else if (type === "dance") { toast("💃 " + (getMyName() || "You") + " is dancing!"); if (rig.animate) rig.animate(0.2, 3, true); }
-  else if (type === "sit") { toast("🪑 " + (getMyName() || "You") + " sat down."); if (rig.animate) rig.animate(0, 0, false); }
-  // Also send a position update so other players see the emote
+// FEATURE: Emotes — REAL character animations via bone manipulation
+window._emote = (type, duration = 3) => {
+  if (!rig || !rig.animate || !rig.animate.emote) { toast("Character not loaded yet"); return; }
+  rig.animate.emote(type, duration);
+  const labels = { wave: "waved", dance: "is dancing", sit: "sat down", clap: "is clapping", jump: "jumped", squat: "squatted", point: "is pointing", laugh: "is laughing", pray: "is praying" };
+  const icons = { wave: "👋", dance: "💃", sit: "🪑", clap: "👏", jump: "🦘", squat: "🏋️", point: "👆", laugh: "😂", pray: "🙏" };
+  toast(icons[type] + " " + (getMyName() || "You") + " " + (labels[type] || type) + "!");
+  // Send position update so other players see the emote state
   sendPosition(player.pos.x, player.pos.z, player.heading);
 };
 // ---- Money Hunt HUD update (called by moneyhunt.js after a successful claim) ----
@@ -2796,23 +2797,46 @@ initAuth((user) => {
   _armBeforeUnload(user.uid);
   _armBalancePusher(user.uid);
   _ensureVehicleControls();
-  // FEATURE: add emote buttons (wave, dance, sit) — floating buttons above the bottom bar
-  if (!document.getElementById("emote-bar")) {
-    const bar = document.createElement("div");
-    bar.id = "emote-bar";
-    bar.style.cssText = "position:fixed;left:12px;bottom:calc(130px + env(safe-area-inset-bottom));z-index:28;display:flex;gap:6px;pointer-events:none;";
-    const makeEmoteBtn = (emoji, label, type) => {
+  // FEATURE: emote FAB — expandable button on the RIGHT side (not covering joystick)
+  if (!document.getElementById("emote-fab")) {
+    const fab = document.createElement("div");
+    fab.id = "emote-fab";
+    fab.style.cssText = "position:fixed;right:14px;bottom:calc(170px + env(safe-area-inset-bottom));z-index:28;";
+    // Main toggle button (SVG icon)
+    const toggle = document.createElement("button");
+    toggle.style.cssText = "width:44px;height:44px;border-radius:50%;background:rgba(15,77,58,.92);color:#fff;border:1px solid rgba(255,255,255,.2);cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;padding:0;";
+    toggle.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2"/><path d="M5 8h14M9 8v6M15 8v6M9 14l-2 6M15 14l2 6"/></svg>';
+    toggle.title = "Emotes";
+    // Expandable panel
+    const panel = document.createElement("div");
+    panel.style.cssText = "position:absolute;right:0;bottom:50px;display:none;flex-direction:column;gap:5px;pointer-events:auto;";
+    const emotes = [
+      { svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 11V6a2 2 0 0 1 4 0v5"/><path d="M7 11v6"/><path d="M11 11V4a2 2 0 0 1 4 0v7"/><path d="M15 11v5"/><path d="M3 11h18"/><path d="M3 11a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v0a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>', label: "Wave", type: "wave", dur: 3 },
+      { svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3v6"/><path d="M15 3v6"/><path d="M5 9h14l-1 11a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2z"/><path d="M9 14l2 2 4-4"/></svg>', label: "Dance", type: "dance", dur: 4 },
+      { svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="14" width="16" height="2"/><path d="M6 16v3a1 1 0 0 0 1 1h1M18 16v3a1 1 0 0 0-1 1h-1"/></svg>', label: "Sit", type: "sit", dur: 5 },
+      { svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 8l4-4 4 4M8 16l4 4 4-4M4 12h16"/></svg>', label: "Clap", type: "clap", dur: 3 },
+      { svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v10M7 8l5-4 5 4M5 14v6h14v-6"/></svg>', label: "Jump", type: "jump", dur: 2 },
+      { svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 4v10a3 3 0 0 0 6 0V4M6 4h12"/></svg>', label: "Squat", type: "squat", dur: 4 },
+      { svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v8M8 6l4-4 4 4M5 14a7 7 0 0 0 14 0v8"/></svg>', label: "Point", type: "point", dur: 3 },
+      { svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg>', label: "Laugh", type: "laugh", dur: 3 },
+    ];
+    for (const e of emotes) {
       const b = document.createElement("button");
-      b.innerHTML = emoji;
-      b.style.cssText = "width:40px;height:40px;border-radius:50%;background:rgba(15,77,58,.92);color:#fff;border:1px solid rgba(255,255,255,.2);font-size:18px;cursor:pointer;pointer-events:auto;box-shadow:0 2px 8px rgba(0,0,0,.3);user-select:none;-webkit-user-select:none;touch-action:none;";
-      b.title = label;
-      b.addEventListener("click", () => window._emote(type));
-      return b;
-    };
-    bar.appendChild(makeEmoteBtn("👋", "Wave", "wave"));
-    bar.appendChild(makeEmoteBtn("💃", "Dance", "dance"));
-    bar.appendChild(makeEmoteBtn("🪑", "Sit", "sit"));
-    document.body.appendChild(bar);
+      b.style.cssText = "width:38px;height:38px;border-radius:50%;background:rgba(15,77,58,.92);color:#fff;border:1px solid rgba(255,255,255,.2);cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;padding:0;";
+      b.title = e.label;
+      b.innerHTML = e.svg;
+      b.addEventListener("click", () => {
+        window._emote(e.type, e.dur);
+        panel.style.display = "none";
+      });
+      panel.appendChild(b);
+    }
+    toggle.addEventListener("click", () => {
+      panel.style.display = panel.style.display === "none" ? "flex" : "none";
+    });
+    fab.appendChild(panel);
+    fab.appendChild(toggle);
+    document.body.appendChild(fab);
   }
   // FEATURE: per-plot world doors + knock/invite flow (step 2c).
   // initPlotDoors subscribes to nearby areas' house records and renders door

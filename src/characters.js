@@ -198,11 +198,46 @@ function applyAccessories(model, look) {
     bone.add(mesh);
   };
   const bs = look.bottomStyle;
-  if (bs === "skirt" || bs === "gown") {            // skirt to the knee, gown almost to the floor (attached to the hips)
-    const long = bs === "gown", hem = long ? 0.82 : 0.5, r1 = long ? 0.38 : 0.31;
-    const pts = [[0.17, 0.12], [0.185, 0.02], [0.23, -0.22], [r1 * 0.85, -hem * 0.7], [r1, -hem]].map(([x, y]) => new THREE.Vector2(x, y));
-    const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(long ? look.top : look.bottom), roughness: 0.85, side: THREE.DoubleSide });
-    attach("Hips", new THREE.Mesh(new THREE.LatheGeometry(pts, 24), mat), 0.0, 0);
+  // FEATURE: VISIBLE garment shapes per outfit style — no more "all look like t-shirts"
+  // Kaftan/Agbada/Babanriga → add a WIDE flowing robe mesh over the torso (like a real kaftan)
+  const ts = look.topStyle;
+  if (ts === "kaftan") {
+    // Wide robe: a cone/lathe shape from shoulders to mid-thigh, wider than the body
+    const robePts = [
+      [0.13, 0.55], [0.16, 0.40], [0.20, 0.25], [0.24, 0.10], [0.26, -0.05],
+      [0.27, -0.18], [0.25, -0.32], [0.20, -0.42], [0.12, -0.48],
+    ].map(([x, y]) => new THREE.Vector2(x, y));
+    const robeMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(look.top), roughness: 0.88, side: THREE.DoubleSide });
+    attach("Spine", new THREE.Mesh(new THREE.LatheGeometry(robePts, 20), robeMat), 0.0, 0);
+    // Also add a subtle "collar" — a small ring at the neck
+    const collarGeo = new THREE.TorusGeometry(0.07, 0.015, 8, 16);
+    attach("Head", new THREE.Mesh(collarGeo, robeMat), -0.05, 0);
+  }
+  // Gown → already has a long skirt; make it WIDER so it's clearly a gown, not a thin tube
+  if (bs === "gown") {
+    const gownPts = [
+      [0.14, 0.05], [0.17, -0.05], [0.22, -0.15], [0.28, -0.30],
+      [0.34, -0.50], [0.38, -0.70], [0.40, -0.82],
+    ].map(([x, y]) => new THREE.Vector2(x, y));
+    const gownMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(look.top), roughness: 0.85, side: THREE.DoubleSide });
+    attach("Hips", new THREE.Mesh(new THREE.LatheGeometry(gownPts, 24), gownMat), 0.0, 0);
+  }
+  // Skirt → make it wider too so it's clearly a skirt, not skinny
+  if (bs === "skirt") {
+    const skirtPts = [
+      [0.15, 0.05], [0.18, -0.05], [0.22, -0.15], [0.27, -0.30], [0.30, -0.50],
+    ].map(([x, y]) => new THREE.Vector2(x, y));
+    const skirtMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(look.bottom), roughness: 0.85, side: THREE.DoubleSide });
+    attach("Hips", new THREE.Mesh(new THREE.LatheGeometry(skirtPts, 20), skirtMat), 0.0, 0);
+  }
+  // Shorts → raise the bottom cutoff so legs show more (bare skin below the shorts)
+  // (handled in _applyLook via bottomStyle, but also add a short tube mesh)
+  if (bs === "shorts") {
+    const shortsPts = [
+      [0.15, 0.0], [0.17, -0.05], [0.18, -0.12], [0.16, -0.18],
+    ].map(([x, y]) => new THREE.Vector2(x, y));
+    const shortsMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(look.bottom), roughness: 0.9, side: THREE.DoubleSide });
+    attach("Hips", new THREE.Mesh(new THREE.LatheGeometry(shortsPts, 16), shortsMat), 0.0, 0);
   }
   if (look.gender === "female" && w.head !== "kufi") {  // long hair
     const hm = new THREE.MeshStandardMaterial({ color: new THREE.Color(look.hair || "#111111"), roughness: 0.9 });
@@ -270,16 +305,72 @@ function makeRig(group, model, baseY, pose = "stand") {
   function animate(dt, speed = 0) {
     phase += dt * (6 + speed * 1.6);
     const sw = Math.sin(phase), amp = Math.min(1, speed / 3.2);
+    // FEATURE: emote override — if an emote is active, play it instead of normal anim
+    const now = performance.now() / 1000;
+    if (_emoteType && now < _emoteEnd) {
+      const ephase = phase * 2;
+      const esw = Math.sin(ephase);
+      model.position.y = baseY;
+      if (_emoteType === "wave") {
+        // Right arm raised + waving back and forth
+        turn("LeftUpLeg", 0); turn("RightUpLeg", 0); turn("LeftLeg", 0); turn("RightLeg", 0);
+        arms(0.05, -1.8 + esw * 0.3, 0.18, 0.18 + esw * 0.3);
+      } else if (_emoteType === "dance") {
+        // Bouncing + arm swinging + hip sway
+        model.position.y = baseY + Math.abs(esw) * 0.12;
+        turn("LeftUpLeg", esw * 0.2); turn("RightUpLeg", -esw * 0.2);
+        turn("LeftLeg", Math.max(0, -esw) * 0.3); turn("RightLeg", Math.max(0, esw) * 0.3);
+        arms(-1.2 + esw * 0.5, -1.2 - esw * 0.5, 0.9, 0.9);
+      } else if (_emoteType === "sit") {
+        model.position.y = baseY - 0.45;
+        turn("LeftUpLeg", SIT_HIP); turn("RightUpLeg", SIT_HIP);
+        turn("LeftLeg", -SIT_HIP * 0.95); turn("RightLeg", -SIT_HIP * 0.95);
+        arms(0.1, 0.1, 0.9, 0.9, -0.2);
+      } else if (_emoteType === "clap") {
+        // Hands together in front, clapping rhythm
+        turn("LeftUpLeg", 0); turn("RightUpLeg", 0); turn("LeftLeg", 0); turn("RightLeg", 0);
+        arms(0.3, 0.3, 1.3, 1.3, -0.4 + esw * 0.15);
+      } else if (_emoteType === "jump") {
+        // Quick jump: crouch then spring up
+        const jt = ((now - _emoteStart) % 0.8) / 0.8;
+        model.position.y = baseY + (jt < 0.3 ? -0.15 : jt < 0.5 ? 0.3 * Math.sin((jt - 0.3) / 0.2 * Math.PI) : 0);
+        turn("LeftUpLeg", jt < 0.3 ? 0.4 : -0.2); turn("RightUpLeg", jt < 0.3 ? 0.4 : -0.2);
+        turn("LeftLeg", jt < 0.3 ? -0.5 : 0.3); turn("RightLeg", jt < 0.3 ? -0.5 : 0.3);
+        arms(jt < 0.3 ? 0.8 : -1.2, jt < 0.3 ? 0.8 : -1.2, 0.5, 0.5);
+      } else if (_emoteType === "squat") {
+        // Deep squat
+        model.position.y = baseY - 0.35;
+        turn("LeftUpLeg", 0.8); turn("RightUpLeg", 0.8);
+        turn("LeftLeg", -1.2); turn("RightLeg", -1.2);
+        arms(0.5, 0.5, 0.6, 0.6);
+      } else if (_emoteType === "point") {
+        // Right arm extended forward (pointing)
+        turn("LeftUpLeg", 0); turn("RightUpLeg", 0); turn("LeftLeg", 0); turn("RightLeg", 0);
+        arms(0.1, -1.5, 0.18, 0.18);
+      } else if (_emoteType === "laugh") {
+        // Bouncing + head back + arms on belly
+        model.position.y = baseY + Math.abs(esw) * 0.06;
+        turn("LeftUpLeg", 0); turn("RightUpLeg", 0); turn("LeftLeg", 0); turn("RightLeg", 0);
+        arms(0.8, 0.8, 1.2, 1.2, -0.3);
+      } else if (_emoteType === "pray") {
+        turn("LeftUpLeg", 0); turn("RightUpLeg", 0); turn("LeftLeg", 0); turn("RightLeg", 0);
+        arms(0.12, 0.12, 1.45, 1.45, -0.55);
+      }
+      return;
+    } else if (_emoteType) {
+      // Emote ended — reset
+      _emoteType = null;
+    }
     if (speed > 0.15) {
       model.position.y = baseY + Math.abs(sw) * 0.04 * amp;
       turn("LeftUpLeg", sw * 0.6 * amp); turn("RightUpLeg", -sw * 0.6 * amp);
       turn("LeftLeg", Math.max(0, -sw) * 0.8 * amp); turn("RightLeg", Math.max(0, sw) * 0.8 * amp);
       arms(-sw * 0.55 * amp, sw * 0.55 * amp, 0.3 + Math.max(0, -sw) * 0.5 * amp, 0.3 + Math.max(0, sw) * 0.5 * amp);
-    } else if (pose === "pray") {          // standing, hands folded in front of the chest
+    } else if (pose === "pray") {
       model.position.y = baseY;
       turn("LeftUpLeg", 0); turn("RightUpLeg", 0); turn("LeftLeg", 0); turn("RightLeg", 0);
       arms(0.12, 0.12, 1.45, 1.45, -0.55);
-    } else if (pose === "sit") {           // sitting on the floor / a bench
+    } else if (pose === "sit") {
       model.position.y = baseY - 0.45;
       turn("LeftUpLeg", SIT_HIP); turn("RightUpLeg", SIT_HIP); turn("LeftLeg", -SIT_HIP * 0.95); turn("RightLeg", -SIT_HIP * 0.95);
       arms(0.1, 0.1, 0.9, 0.9, -0.2);
@@ -289,6 +380,14 @@ function makeRig(group, model, baseY, pose = "stand") {
       arms(0.02, 0.02, 0.18, 0.18);
     }
   }
+  // FEATURE: emote system — trigger temporary pose/animation overrides
+  let _emoteType = null, _emoteEnd = 0, _emoteStart = 0;
+  animate.emote = (type, duration = 3) => {
+    _emoteType = type;
+    _emoteStart = performance.now() / 1000;
+    _emoteEnd = _emoteStart + duration;
+  };
+  animate.isEmoting = () => _emoteType !== null && performance.now() / 1000 < _emoteEnd;
   animate(0, 0);
   return animate;
 }
@@ -344,7 +443,11 @@ function _applyLook(model, look) {
   const kaftan = look.topStyle === "kaftan";
   if (look.bottomStyle === "skirt") bottom.copy(skin);      // bare legs under a skirt
   if (look.bottomStyle === "gown") bottom.copy(top);        // long gown covers the legs
-  const hipFrac = kaftan ? 0.32 : 0.5;
+  // FEATURE: kaftan cutoff MUCH lower (0.15 vs 0.32) so the top color covers from
+  // shoulders to mid-shin — now you can SEE the difference between kaftan and casual.
+  // Casual stays at 0.5 (waist) — t-shirt length.
+  // Shorts get an even higher cutoff (0.25) so more leg shows.
+  const hipFrac = kaftan ? 0.15 : look.bottomStyle === "shorts" ? 0.25 : 0.5;
   const cols = [top, bottom, null, hair, shoes];
   model.traverse((o) => {
     if (!o.isMesh || o.name !== "__paint") return;
