@@ -50,6 +50,7 @@ import { initAreaWorld, tickAreaWorld, setAreaLampsNight, disposeAreaWorld, getR
 // Way is filtered out (already rendered by world.js) to avoid double-render.
 import { fetchKadunaData, buildRealMap } from "./realmap.js";
 import { VEHICLE_CATALOG, getVehicle, initVehicles, buyVehicle, getOwned, ownsVehicle, isRiding, getRideSpeed, getRideId, spawnRideVehicle, despawnRideVehicle, tickRideVehicle } from "./vehicles.js";
+import { initBillboards, getBillboards, getBillboardPositions, getBillboardAdInfo, buyBillboardAd } from "./billboards.js";
 import { initMessages, searchUsers, openDM, sendMessage, sendHouseInvite, openChat, closeChat, getChatList, sendMoney, createGroup, leaveGroup, blockUser, reportUser, getChatMeta, cleanupMessages, getPresence, listenToPresence, getProfile } from "./messages.js";
 import { initEvents, tickNepa, isNepaCut, getNepaStatus, hasPowerBackup, getModifiedDrain, tickMoodlets, addMoodlet, getActiveMoodlets, getConsequences, getWalkSpeedMultiplier, MOODLET_DEFS } from "./events.js";
 import { SKILLS, CAREERS, SHIFT_TONES, initCareers, getSkills, getCareer, getCareerDef, canJoinCareer, canPromote, joinCareer, promote, doShift, trainSkill } from "./careers.js";
@@ -337,11 +338,15 @@ function _handleWorldTap(clientX, clientY) {
   for (const slot of rentSigns) {
     if (slot.sprite && slot.sprite.visible) targets.push(slot.sprite);
   }
+  // Billboard screen meshes
+  for (const bb of getBillboards()) {
+    if (bb.screenMesh && bb.group.visible) targets.push(bb.screenMesh);
+  }
   if (!targets.length) return;
   const hits = _tapRaycaster.intersectObjects(targets, true);
   if (!hits.length) return;
   let obj = hits[0].object;
-  while (obj && !obj.userData?.isRemotePlayer && !obj.userData?.isAreaName && !obj.userData?.isForRent) obj = obj.parent;
+  while (obj && !obj.userData?.isRemotePlayer && !obj.userData?.isAreaName && !obj.userData?.isForRent && !obj.userData?.isBillboard) obj = obj.parent;
   if (!obj) return;
   const ud = obj.userData;
   if (ud.isRemotePlayer) {
@@ -389,6 +394,27 @@ function _handleWorldTap(clientX, clientY) {
         updateHUD();
       } else { toast("❌ " + (r.reason || "Could not claim — try another plot")); }
     }).catch((e) => { toast("Claim failed — try again"); console.warn(e); });
+  } else if (ud.isBillboard) {
+    // FEATURE: Tap on a billboard → show ad buy prompt
+    const info = getBillboardAdInfo(ud.billboardId);
+    if (!info) { toast("Unknown billboard"); return; }
+    const uid = getMyUid();
+    if (!uid) { toast("Sign in first"); return; }
+    if (info.isAvailable) {
+      // Billboard is available — show buy prompt
+      const imageUrl = prompt("Enter image URL for your ad (leave blank for text-only):\n(Cloudinary URLs supported)");
+      const text = imageUrl ? "" : (prompt("Enter your ad text:") || "Your message here");
+      if (game.state.money < info.price) { toast("Need ₦" + info.price.toLocaleString()); return; }
+      if (!confirm("Place ad on " + info.name + " for ₦" + info.price.toLocaleString() + "?\nRuns for 7 days.")) return;
+      buyBillboardAd(ud.billboardId, uid, getMyName() || "Player", imageUrl, text, game.state, toast).then((ok) => {
+        if (ok) { updateHUD(); const u = getMyUid(); if (u) update(ref(db, "economy/" + u), { balance: game.state.money }); }
+      });
+    } else {
+      // Billboard has an active ad — show info
+      const ad = info.adData;
+      const daysLeft = Math.ceil((ad.expiresAt - Date.now()) / (24 * 60 * 60 * 1000));
+      toast("📢 " + info.name + " — Ad by " + (ad.ownerName || "Unknown") + " · " + daysLeft + " days left");
+    }
   }
 }
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 400);
@@ -2718,6 +2744,8 @@ initAuth((user) => {
   initSocial(user.uid, () => {});
   // FEATURE: init the vehicles system (subscribes to owned vehicles from Firebase)
   initVehicles(scene, user.uid, () => {});
+  // FEATURE: init billboard/ad system (10 billboards along main roads)
+  initBillboards(scene);
   // ---- Init Messages app ----
   const myName = user.displayName || user.email?.split("@")[0] || "Player";
   initMessages(user.uid, myName, toast, () => { _updateUnreadBadge(); if (_showingApp === "messages" && !window._openChatId) window._msgRefreshList?.(); });
