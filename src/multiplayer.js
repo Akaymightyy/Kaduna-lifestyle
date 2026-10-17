@@ -63,7 +63,7 @@ export function initMultiplayer(scene, onCount, onChat) {
     onValue(ref(db, "live"), (s) => apply(s.val()), () => { if (_unsubPlayers == null) subscribePlayers(); });
     // keep "online" fresh so a quiet player is still listed
     setInterval(() => { if (_uid && _liveOk) update(ref(db, "live/" + _uid), { ts: Date.now(), online: true }).catch(() => {}); }, 60000);
-    onValue(ref(db,"chat"),(s)=>{ const m=s.val()||{}; const a=Object.values(m).sort((x,y)=>(x.ts||0)-(y.ts||0)); if(a.length&&_onChat) _onChat(a[a.length-1],a.length); });
+    // (world chat is handled by worldchat.js)
   });
 }
 
@@ -90,7 +90,7 @@ export function setMyLook(look) {
 
 export function sendChat(text) {
   if(!_uid||!text.trim()) return;
-  push(ref(db,"chat"),{uid:_uid,name:_name,text:text.trim().slice(0,200),ts:Date.now()});
+  push(ref(db,"chat"),{uid:_uid,name:String(_name||"Player").slice(0,30),text:text.trim().slice(0,200),ts:Date.now()});
 }
 
 // BUGFIX: updateAvatars() runs on every Firebase update (~5/s) but building a character is async, so the same player was

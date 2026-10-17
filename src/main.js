@@ -50,6 +50,7 @@ import { initAreaWorld, tickAreaWorld, setAreaLampsNight, disposeAreaWorld, getR
 // Way is filtered out (already rendered by world.js) to avoid double-render.
 import { fetchKadunaData, buildRealMap } from "./realmap.js";
 import { VEHICLE_CATALOG, getVehicle, initVehicles, buyVehicle, getOwned, ownsVehicle, isRiding, getRideSpeed, getRideId, spawnRideVehicle, despawnRideVehicle, tickRideVehicle } from "./vehicles.js";
+import { initWorldChat, toggleWorldChat, closeWorldChat, setChatBlocked, setChatOnline } from "./worldchat.js";
 import { initBillboards, getBillboards, getBillboardPositions, getBillboardAdInfo, buyBillboardAd } from "./billboards.js";
 import { initMessages, searchUsers, openDM, sendMessage, sendHouseInvite, openChat, closeChat, getChatList, sendMoney, createGroup, leaveGroup, blockUser, reportUser, getChatMeta, cleanupMessages, getPresence, listenToPresence, getProfile } from "./messages.js";
 import { initEvents, tickNepa, isNepaCut, getNepaStatus, hasPowerBackup, getModifiedDrain, tickMoodlets, addMoodlet, getActiveMoodlets, getConsequences, getWalkSpeedMultiplier, MOODLET_DEFS } from "./events.js";
@@ -2696,7 +2697,8 @@ document.querySelectorAll("#bottom-nav .nav-btn").forEach(btn=>{
     document.querySelectorAll("#bottom-nav .nav-btn").forEach(b=>b.classList.remove("active"));
     btn.classList.add("active");
     const n=btn.dataset.nav;
-    if(n==="phone")openPhone();
+    if(n==="chat"){closePhone();$("profile-sheet")?.classList.remove("show");toggleWorldChat();btn.classList.remove("active");document.querySelector('#bottom-nav .nav-btn[data-nav="home"]')?.classList.add("active");}
+    else if(n==="phone")openPhone();
     else if(n==="map"){closePhone();$("profile-sheet")?.classList.remove("show");const _ap=getActivePlace();if(_ap){const _d=getPlace(_ap.id);_mapMe=_d?{x:_d.entranceX,z:_d.entranceZ}:null;if(_mapMe)peekWorld(true);}else _mapMe=null;openLiveMap();}
     else if(n==="home"){
       closePhone();$("profile-sheet")?.classList.remove("show");
@@ -2798,7 +2800,9 @@ initAuth((user) => {
     }
   });
   setMyLook(game.state.look);
+  initWorldChat(user.uid, user.displayName || user.email?.split("@")[0] || "Player");
   initMultiplayer(scene, (count) => {
+    setChatOnline(count);
     const el=$("online-count"); if(el) el.textContent=count+" here";
     const hudEl=$("online-count-hud"); if(hudEl) hudEl.textContent=count;
   },
@@ -2910,7 +2914,7 @@ initAuth((user) => {
     listenForKnocks(user.uid, (knocks) => _onIncomingKnocks(knocks));
   } catch (e) { console.warn("[plots] init failed", e); }
   // ---- Sync look across devices: the account's saved outfit in Firebase WINS over this device's local copy ----
-  onValue(ref(db, "blocks/" + user.uid), (snap) => setBlockedUids(Object.keys(snap.val() || {})), () => {});
+  onValue(ref(db, "blocks/" + user.uid), (snap) => { setBlockedUids(Object.keys(snap.val() || {})); setChatBlocked(Object.keys(snap.val() || {})); }, () => {});
   let _lookFirst = true;
   onValue(ref(db, "players/" + user.uid + "/look"), (snap) => {
     const fb = snap.val();
