@@ -7,13 +7,13 @@ import * as THREE from "three";
 import { WIDE_AVENUES_X, WIDE_CROSS_Z, MAP_HALF_X, MAP_HALF_Z } from "./config.js";
 import { AREAS } from "./areas.js";
 import { LAKE, AIRPORT } from "./scenery.js";
-import { carShape, busShape, personBody, personHead, hash2, paint, flatten, B, done } from "./town.js";
+import { carShape, busShape, personParts, hash2, paint, flatten, B, done } from "./town.js";
 
 let _scene = null, _on = false, _t = 0, _last = 0;
-let carMesh = null, busMesh = null, bodyMesh = null, headMesh = null, boats = [], plane = null;
+let carMesh = null, busMesh = null, pm = null, boats = [], plane = null;
 const cars = [], buses = [], people = [];
 const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(1, 1, 1);
-const _up = new THREE.Vector3(0, 1, 0), _col = new THREE.Color();
+const _up = new THREE.Vector3(0, 1, 0), _col = new THREE.Color(), _mb = new THREE.Matrix4(), _m2 = new THREE.Matrix4(), _m3 = new THREE.Matrix4(), _Z = new THREE.Matrix4().makeScale(0, 0, 0), _s2 = new THREE.Vector3();
 const RB = [];                                       // roundabout centres
 for (const ax of WIDE_AVENUES_X) for (const cz of [-195, 195]) RB.push([ax, cz]);
 
@@ -49,17 +49,38 @@ export function initLife(scene) {
   buses.forEach((c, i) => busMesh.setColorAt(i, _col.set(0xf2b134)));
   scene.add(carMesh, busMesh);
 
-  // people: 6 per district walking along the pavements of the district road
-  const skins = [0x3b2418, 0x5a3a26, 0x7a4e32, 0x2a1810, 0x9a6a46];
+  // people: 6 per district — 4 walkers on the pavements + 2 neighbours standing to chat.
+  // Every walker has swinging legs and arms, a different height, and one of 3 outfits (shirt & trousers, kaftan, gown & hijab).
+  const PP = personParts(), N = AREAS.length * 6;
+  const SKINS = [0x3b2418, 0x5a3a26, 0x7a4e32, 0x2a1810, 0x9a6a46, 0x6b4429];
+  const SHIRTS = [0xe8e2d0, 0x2f6fb5, 0xc0392b, 0x2e7d4f, 0xf2b134, 0x6b4a8a, 0x1f1f24, 0xd98e2b, 0x3aa6a0];
+  const TROUS = [0x1f2a36, 0x2a2a2e, 0x4a3b2a, 0x3b4f72, 0x5a5a5e];
+  const ROBES = [0xf4f1ea, 0xe8dcc0, 0x3b4a8a, 0x6a4a2a, 0x2e5d4a, 0x8a8f96];
+  const GOWNS = [0xd98e2b, 0xa23b72, 0x1a8a7a, 0xe06a5a, 0x6b4a8a, 0xc0392b, 0x3b7ac0];
+  const pick = (arr, a, b) => arr[Math.floor(hash2(a, b) * arr.length) % arr.length];
   let pi = 0;
-  for (const a of AREAS) for (let k = 0; k < 6; k++) {
-    const side = k % 2 ? 1 : -1;
-    people.push({ ax: a.x, az: a.z + side * (3.6 + hash2(a.id, "pz" + k) * 0.6), span: 40 + hash2(a.id, "ps" + k) * 22, ph: hash2(a.id, "pp" + k) * 100, sp: 1.1 + hash2(a.id, "pv" + k) * 0.7, skin: skins[(pi++) % skins.length] });
+  for (const a of AREAS) {
+    const cx = a.x + (hash2(a.id, "chat") - 0.5) * 70;
+    for (let k = 0; k < 6; k++, pi++) {
+      const side = k % 2 ? 1 : -1, id = a.id + k, r = hash2(id, "type");
+      const type = r < 0.5 ? 0 : r < 0.72 ? 1 : 2, kid = type === 0 && hash2(id, "kid") < 0.14;
+      const p = { type, sc: kid ? 0.62 : 0.93 + hash2(id, "h") * 0.14, skin: pick(SKINS, id, "s"), az: a.z + side * (3.6 + hash2(a.id, "pz" + k) * 0.6), ax: a.x,
+        span: 40 + hash2(a.id, "ps" + k) * 22, ph: hash2(a.id, "pp" + k) * 100, sp: (kid ? 1.8 : 1.1) + hash2(a.id, "pv" + k) * 0.7, chat: k >= 4 };
+      p.top = type === 0 ? pick(SHIRTS, id, "t") : type === 1 ? pick(ROBES, id, "r") : pick(GOWNS, id, "g"); p.bot = pick(TROUS, id, "b");
+      if (p.chat) { p.az = a.z + (k === 4 ? -1 : 1) * 3.9; p.cx = cx + (k === 4 ? -0.6 : 0.6); p.face = k === 4 ? Math.PI / 2 : -Math.PI / 2; }
+      people.push(p);
+    }
   }
-  bodyMesh = new THREE.InstancedMesh(personBody(), mat, people.length); headMesh = new THREE.InstancedMesh(personHead(), mat, people.length);
-  bodyMesh.frustumCulled = headMesh.frustumCulled = false;
-  people.forEach((p, i) => { bodyMesh.setColorAt(i, _col.setHSL(hash2("pc", i), 0.6, 0.5)); headMesh.setColorAt(i, _col.set(p.skin)); });
-  scene.add(bodyMesh, headMesh);
+  const mk = (geo) => { const m = new THREE.InstancedMesh(geo, mat, N); m.frustumCulled = false; scene.add(m); return m; };
+  pm = { torso: mk(PP.torso), kaftan: mk(PP.kaftan), gown: mk(PP.gown), legL: mk(PP.leg), legR: mk(PP.leg), armL: mk(PP.arm), armR: mk(PP.arm), hair: mk(PP.headHair), cap: mk(PP.headCap), bare: mk(PP.headBare) };
+  people.forEach((p, i) => {
+    const sleeve = _col.set(p.top);
+    pm.torso.setColorAt(i, _col.set(p.top)); pm.kaftan.setColorAt(i, _col.set(p.top)); pm.gown.setColorAt(i, _col.set(p.top));
+    pm.legL.setColorAt(i, _col.set(p.bot)); pm.legR.setColorAt(i, _col.set(p.bot));
+    pm.armL.setColorAt(i, _col.set(p.top)); pm.armR.setColorAt(i, _col.set(p.top));
+    for (const h of [pm.hair, pm.cap, pm.bare]) h.setColorAt(i, _col.set(p.skin));
+  });
+  for (const k in pm) if (pm[k].instanceColor) pm[k].instanceColor.needsUpdate = true;
 
   // boats on the lake
   for (let i = 0; i < 3; i++) {
@@ -83,7 +104,7 @@ export function initLife(scene) {
 export function tickLife(px, pz, show = true) {
   if (!_on) return;
   const now = performance.now() / 1000, dt = Math.min(0.1, _last ? now - _last : 0.016); _last = now; _t += dt;
-  for (const m of [carMesh, busMesh, bodyMesh, headMesh]) m.visible = show;
+  carMesh.visible = busMesh.visible = show; for (const k in pm) pm[k].visible = show;
   for (const b of boats) b.m.visible = show;
   plane.visible = show;
   if (!show) return;
@@ -100,15 +121,21 @@ export function tickLife(px, pz, show = true) {
 
   // people (only the ones near the player are drawn)
   people.forEach((p, i) => {
-    const ph = (_t * p.sp + p.ph) / p.span, f = ph % 2, u = f < 1 ? f : 2 - f;      // ping-pong along the road
-    const x = p.ax - p.span + u * p.span * 2, facing = f < 1 ? Math.PI / 2 : -Math.PI / 2;
-    const dx = x - px, dz = p.az - pz;
-    if (dx * dx + dz * dz > 320 * 320) { _m.makeScale(0, 0, 0); bodyMesh.setMatrixAt(i, _m); headMesh.setMatrixAt(i, _m); return; }
-    const bob = Math.abs(Math.sin(_t * p.sp * 5 + p.ph)) * 0.05;
-    _p.set(x, bob, p.az); _q.setFromAxisAngle(_up, facing); _m.compose(_p, _q, _s);
-    bodyMesh.setMatrixAt(i, _m); headMesh.setMatrixAt(i, _m);
+    let x, z = p.az, yaw, moving = true;
+    if (p.chat) { x = p.cx; yaw = p.face; moving = false; }
+    else { const ph = (_t * p.sp + p.ph) / p.span, f = ph % 2, u = f < 1 ? f : 2 - f; x = p.ax - p.span + u * p.span * 2; yaw = f < 1 ? Math.PI / 2 : -Math.PI / 2; }
+    const dx = x - px, dz = z - pz;
+    if (dx * dx + dz * dz > 300 * 300) { for (const k in pm) pm[k].setMatrixAt(i, _Z); return; }
+    const w = _t * p.sp * (p.sc < 0.7 ? 7 : 5.2) + p.ph, sw = moving ? Math.sin(w) * 0.62 : 0, bob = moving ? Math.abs(Math.sin(w)) * 0.035 * p.sc : 0;
+    const g = moving ? 0 : Math.sin(_t * 1.7 + p.ph) * 0.3;                                   // chatting: little arm gestures + head-nod sway
+    _p.set(x, bob, z); _q.setFromAxisAngle(_up, yaw + (moving ? 0 : Math.sin(_t * 0.8 + p.ph) * 0.12)); _s2.setScalar(p.sc); _mb.compose(_p, _q, _s2);
+    const part = (mesh, px_, py_, ang) => { _m2.makeTranslation(px_, py_, 0); if (ang) _m2.multiply(_m3.makeRotationX(ang)); mesh.setMatrixAt(i, _m.multiplyMatrices(_mb, _m2)); };
+    pm.torso.setMatrixAt(i, p.type === 0 ? _mb : _Z); pm.kaftan.setMatrixAt(i, p.type === 1 ? _mb : _Z); pm.gown.setMatrixAt(i, p.type === 2 ? _mb : _Z);
+    pm.hair.setMatrixAt(i, p.type === 0 ? _mb : _Z); pm.cap.setMatrixAt(i, p.type === 1 ? _mb : _Z); pm.bare.setMatrixAt(i, p.type === 2 ? _mb : _Z);
+    if (p.type === 0) { part(pm.legL, -0.11, 0.9, sw); part(pm.legR, 0.11, 0.9, -sw); } else { pm.legL.setMatrixAt(i, _Z); pm.legR.setMatrixAt(i, _Z); }
+    part(pm.armL, -0.28, 1.5, moving ? -sw * 0.8 : -0.5 + g); part(pm.armR, 0.28, 1.5, moving ? sw * 0.8 : -0.9 - g);
   });
-  bodyMesh.instanceMatrix.needsUpdate = true; headMesh.instanceMatrix.needsUpdate = true;
+  for (const k in pm) pm[k].instanceMatrix.needsUpdate = true;
 
   // boats drift in slow ovals
   boats.forEach((b) => {

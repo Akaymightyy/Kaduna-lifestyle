@@ -66,6 +66,12 @@ export function getArea(areaId) {
   return AREAS.find(a => a.id === areaId);
 }
 
+// House size follows the budget of the area: cheap = one room, middle = 3-bed, rich = mansion (Attajiri origin gets one step more).
+export function houseTierFor(area, origin) {
+  const base = area.tier === "rich" ? 5 : area.tier === "middle" ? 3 : 1;
+  return origin === "attajiri" ? Math.min(6, base + 1) : base;
+}
+
 // ---- Claim a plot (Firebase transaction) ----
 // Returns { ok, area, plotNo } or { ok: false, reason }
 export async function claimPlot(areaId, uid, name, origin) {
@@ -86,12 +92,7 @@ export async function claimPlot(areaId, uid, name, origin) {
         //   talaka + rich area     → tier 2 (1-Bedroom Flat) — rare, but possible if they save
         //   talaka + middle area   → tier 1 (Room)
         //   talaka + cheap area    → tier 1 (Room)
-        let tier;
-        if (origin === "attajiri") {
-          tier = area.tier === "rich" ? 4 : area.tier === "middle" ? 3 : 2;
-        } else {
-          tier = area.tier === "rich" ? 2 : 1;
-        }
+        const tier = houseTierFor(area, origin);
         return {
           ownerUid: uid,
           ownerName: name,
@@ -115,12 +116,7 @@ export async function claimPlot(areaId, uid, name, origin) {
     if (claimed) {
       // Save the player's home area + plot
       // Determine the tier (same logic as above)
-      let tier;
-      if (origin === "attajiri") {
-        tier = area.tier === "rich" ? 4 : area.tier === "middle" ? 3 : 2;
-      } else {
-        tier = area.tier === "rich" ? 2 : 1;
-      }
+      const tier = houseTierFor(area, origin);
       await update(ref(db, "players/" + uid), { homeArea: areaId, homePlot: plotNo, homeTier: tier });
       return { ok: true, area, plotNo, tier };
     }

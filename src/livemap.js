@@ -73,7 +73,9 @@ function makeLabels() {
   };
   for (const a of S.AREAS) add("🏘️ " + a.name, a.x, a.z, "area", a.id, 8);
   for (const p of S.listPlaces()) add((p.minimapIcon || "📍") + " " + p.name, p.entranceX, p.entranceZ, "place", p.id, 8);
-  const h = S.getHomePos && S.getHomePos(); if (h) add("🏠 My Home", h.x, h.z, "home", null, 6);
+  const hs = (S.getHomes && S.getHomes()) || [];
+  if (hs.length) for (const h of hs) add("🏠 " + (hs.length > 1 ? h.name + " #" + h.p : "My Home"), h.x, h.z, "home", null, 6);
+  else { const h = S.getHomePos && S.getHomePos(); if (h) add("🏠 My Home", h.x, h.z, "home", null, 6); }
   for (const e of (S.extraLabels || [])) add(e.name, e.x, e.z, "area", null, 10);
   add("📍 You", 0, 0, "me", null, 4); labels[labels.length - 1].follow = true;
 }

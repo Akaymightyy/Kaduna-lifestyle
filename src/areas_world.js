@@ -14,7 +14,8 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { AREAS, getArea, getPlotPosition } from "./areas.js";
 import { getAreaHouses } from "./plots.js";
-import { WIDE_CROSS_Z } from "./config.js";
+import { WIDE_CROSS_Z, WIDE_AVENUES_X } from "./config.js";
+import { funKinds, funGeometry, FUN_INFO } from "./fun.js";
 import { houseShapes, wallRing, treeShape, carShape, kioskShape, landmark, landmarkKind, hash2, isVacantPlot, plotArchetype, paint, flatten } from "./town.js";
 
 // ---- Tunables ----
@@ -177,10 +178,48 @@ function _drawRentSign(canvas, ctx, isForSale, area) {
 function _quad(L, w, d, x, y, z, color) {
   const g = new THREE.PlaneGeometry(w, d); g.rotateX(-Math.PI / 2); g.translate(x, y, z); L.push(paint(flatten(g), color));
 }
-function _buildStatic(area) {
-  const L = [];
+// Where the landmark and the fun places of a district go (shared by the 3D build and the map labels).
+const _layouts = new Map();
+export function districtLayout(area) {
+  if (_layouts.has(area.id)) return _layouts.get(area.id);
   let zmin = 1e9, zmax = -1e9;
   for (let p = 0; p < area.plots; p++) { const pos = getPlotPosition(area, p); zmin = Math.min(zmin, pos.z); zmax = Math.max(zmax, pos.z); }
+  const clearZ = (z, d) => WIDE_CROSS_Z.every((c) => Math.abs(z - c) > d / 2 + 7) && Math.abs(z) > d / 2 + 66;
+  const kind = landmarkKind(area), depth = kind === "school" ? 8 : kind === "market" ? 3 : kind === "church" ? 18 : 14;
+  const spots = [zmin - 4.5 - depth / 2, zmax + 4.5 + depth / 2];
+  if (hash2(area.id, "side") < 0.5) spots.reverse();
+  let lz = null;
+  for (const z of spots) if (clearZ(z, depth)) { lz = z; break; }
+  // fun places. Best spots first: the four corners where the district road ends (right where you walk), then the
+  // north / south edges beside the landmark.
+  const mid = (zmin + zmax) / 2, fun = [], used = new Set(), slots = [];
+  for (const [dx, side] of [[54, -1], [54, 1], [-56, -1], [-56, 1]]) slots.push({ corner: true, dx, side });
+  for (const side of [1, -1]) {
+    const lmHere = lz != null && Math.sign(lz - mid) === side;
+    for (const dx of (lmHere ? [-36, 24, 40] : [-34, -8, 20, 42])) slots.push({ side, dx });
+  }
+  for (const fk of funKinds(area)) {
+    const info = FUN_INFO[fk];
+    for (let i = 0; i < slots.length; i++) {
+      if (used.has(i)) continue;
+      const sl = slots[i], x = area.x + sl.dx;
+      const z = sl.corner ? area.z + sl.side * (6 + info.d / 2) : (sl.side < 0 ? zmin - 4.5 : zmax + 4.5) + sl.side * (info.d / 2 + 1);
+      if (!sl.corner && !clearZ(z, info.d)) continue;
+      if (!WIDE_AVENUES_X.every((ax) => Math.abs(x - ax) > info.w / 2 + 9)) continue;
+      if (fun.some((o) => Math.abs(o.x - x) < (o.w + info.w) / 2 + 1 && Math.abs(o.z - z) < (o.d + info.d) / 2 + 1)) continue;
+      used.add(i); fun.push({ kind: fk, x, z, rot: sl.side > 0 ? Math.PI : 0, name: info.name, icon: info.icon, w: info.w, d: info.d, solid: info.solid }); break;
+    }
+  }
+  const out = { zmin, zmax, kind, depth, lz, fun };
+  _layouts.set(area.id, out); return out;
+}
+export function districtFunLabels() {                              // for the live map
+  const out = [];
+  for (const a of AREAS) for (const f of districtLayout(a).fun) out.push({ name: f.icon + " " + f.name, x: f.x, z: f.z });
+  return out;
+}
+function _buildStatic(area) {
+  const L = [], lay = districtLayout(area), { zmin, zmax, kind, depth, lz } = lay;
   const padCol = area.tier === "rich" ? 0x8fbf7a : area.tier === "middle" ? 0xa9bf86 : 0xbfae85;
   _quad(L, 92, zmax - zmin + 14, area.x - 4, 0.008, (zmin + zmax) / 2, padCol);
   const roadW = 124;
@@ -188,22 +227,17 @@ function _buildStatic(area) {
   _quad(L, roadW, 1.5, area.x, 0.012, area.z + 3.75, 0xd2bf9c);
   _quad(L, roadW, 1.5, area.x, 0.012, area.z - 3.75, 0xd2bf9c);
   for (let x = -roadW / 2 + 4; x < roadW / 2 - 3; x += 8) _quad(L, 3.5, 0.16, area.x + x, 0.02, area.z, 0xe9d36a);
-  // landmark: pick the north or south edge, whichever clears the cross streets
-  const kind = landmarkKind(area), depth = kind === "school" ? 8 : kind === "market" ? 3 : kind === "church" ? 18 : 14;
-  const spots = [zmin - 4.5 - depth / 2, zmax + 4.5 + depth / 2];
-  if (hash2(area.id, "side") < 0.5) spots.reverse();
-  let lz = null;
-  for (const z of spots) {
-    const clear = WIDE_CROSS_Z.every((c) => Math.abs(z - c) > depth / 2 + 7) && Math.abs(z) > depth / 2 + 66;
-    if (clear) { lz = z; break; }
-  }
-  let box = null;
+  const boxes = [];
   if (lz != null) {
     const g = landmark(kind); g.translate(area.x - 6, 0.02, lz); L.push(g);
-    if (kind !== "market") box = { minX: area.x - 6 - 6, maxX: area.x - 6 + 6, minZ: lz - depth / 2, maxZ: lz + depth / 2 };
+    if (kind !== "market") boxes.push({ minX: area.x - 6 - 6, maxX: area.x - 6 + 6, minZ: lz - depth / 2, maxZ: lz + depth / 2 });
+  }
+  for (const f of lay.fun) {                                       // fun places
+    const g = funGeometry(f.kind).clone(); g.rotateY(f.rot); g.translate(f.x, 0.02, f.z); L.push(g);
+    if (f.solid) boxes.push({ minX: f.x - f.w / 2 + 1, maxX: f.x + f.w / 2 - 1, minZ: f.z - f.d / 2 + 1, maxZ: f.z + f.d / 2 - 1 });
   }
   const geo = mergeGeometries(L, false);
-  return { geo, box };
+  return { geo, boxes };
 }
 
 function _buildArea(area) {
@@ -261,7 +295,7 @@ function _buildArea(area) {
     houseColliders.push(c); if (_worldColliders) _worldColliders.push(c);
   }
   let lmCollider = null;
-  if (st.box) { lmCollider = { ...st.box, _areaId: area.id }; if (_worldColliders) _worldColliders.push(lmCollider); }
+  for (const bx of st.boxes) { const c = { ...bx, _areaId: area.id }; lmCollider = c; if (_worldColliders) _worldColliders.push(c); }
 
   _areasBuilt.set(area.id, { houses, wallMesh, treeMesh, carMesh, kioskMesh, lampMesh, lampMat, staticMesh, capacity, lampCount, houseColliders, lmCollider });
 }

@@ -43,9 +43,8 @@ import {
   getNearestFriendPlot,
   disposePlotDoors,
   getAreaNameSprites,
-  getAllHouses,
 } from "./plots.js";
-import { initAreaWorld, tickAreaWorld, setAreaLampsNight, disposeAreaWorld, getRentSigns } from "./areas_world.js";
+import { initAreaWorld, tickAreaWorld, setAreaLampsNight, disposeAreaWorld, getRentSigns, districtFunLabels } from "./areas_world.js";
 // FEATURE 3c: load real Kaduna road + river + building data from kaduna.json
 // (a static OSM-derived file shipped in public/data/). The main Ahmadu Bello
 // Way is filtered out (already rendered by world.js) to avoid double-render.
@@ -738,45 +737,22 @@ function _showPhoneApp(appId) {
       { id: "okada", name: "Okada", price: 500, time: 2, icon: "🏍️" },
       { id: "taxi", name: "Taxi", price: 1500, time: 2, icon: "🚕" },
     ];
-    // FEATURE: build a combined destination list — places + areas + owned houses
+    // Compact inline dropdown (flows with the page, not a big pop-up): Places / Areas / My Houses
     let h = '<div style="font-size:14px;margin-bottom:8px;font-weight:700;color:var(--green);">🛺 Book a Ride</div>';
-    h += '<div style="font-size:11px;color:#666;margin-bottom:8px;">Pick where you want to go:</div>';
-    // Destination dropdown — places first, then areas, then owned houses
-    let options = '';
-    // 1. All registered places
-    options += '<optgroup label="📍 Places">';
-    for (const d of dests) {
-      options += '<option value="'+d.id+'"'+(d.open===false?' disabled':'')+'>'+(d.icon||'📍')+' '+d.name+(d.open===false?' (closed)':'')+'</option>';
+    h += '<div style="font-size:11px;color:#666;margin-bottom:6px;">Pick where you want to go:</div>';
+    const groups = [];
+    groups.push({ t: "📍 Places", items: dests.map(d => ({ id: d.id, label: (d.icon || "📍") + " " + d.name, off: d.open === false })) });
+    groups.push({ t: "🏘️ Areas", items: AREAS.map(a => ({ id: "area:" + a.id, label: "📍 " + a.name })) });
+    const homes = _myHomesList();
+    if (homes.length) groups.push({ t: "🏠 My Houses", items: homes.map(hm => ({ id: "house:" + hm.a + ":" + hm.p, label: "🏠 " + hm.name + " · Plot #" + hm.p })) });
+    window._rdGroups = groups;
+    if (!window._rideDest || !groups.some(g => g.items.some(i => i.id === window._rideDest && !i.off))) {
+      const first = groups[0].items.find(i => !i.off) || groups[0].items[0]; window._rideDest = first ? first.id : "";
     }
-    options += '</optgroup>';
-    // 2. All 14 areas (districts) — tap to travel to the area center
-    options += '<optgroup label="🏘️ Areas">';
-    for (const a of AREAS) {
-      options += '<option value="area:'+a.id+'">📍 '+a.name+' (₦'+a.rentPrice+'/wk)</option>';
-    }
-    options += '</optgroup>';
-    // 3. Owned houses — from the houses cache
-    const allHouses = getAllHouses();
-    const myUid = getMyUid();
-    if (myUid) {
-      const ownedHouseOpts = [];
-      for (const [areaId, houses] of Object.entries(allHouses || {})) {
-        if (!houses) continue;
-        const area = getArea(areaId);
-        if (!area) continue;
-        for (const [plotNoStr, houseRec] of Object.entries(houses)) {
-          if (houseRec && houseRec.ownerUid === myUid) {
-            ownedHouseOpts.push('<option value="house:'+areaId+':'+plotNoStr+'">🏠 '+area.name+' · Plot #'+plotNoStr+'</option>');
-          }
-        }
-      }
-      if (ownedHouseOpts.length) {
-        options += '<optgroup label="🏠 My Houses">';
-        options += ownedHouseOpts.join('');
-        options += '</optgroup>';
-      }
-    }
-    h += '<select id="ride-dest-select" style="width:100%;padding:8px;border:1.5px solid var(--green);border-radius:8px;font-family:inherit;font-size:13px;margin-bottom:12px;">'+options+'</select>';
+    const cur = groups.flatMap(g => g.items).find(i => i.id === window._rideDest);
+    h += '<div id="rd-box" style="border:1.5px solid var(--green);border-radius:10px;margin-bottom:10px;background:#17181b;color:#f2f2f4;overflow:hidden;">' +
+      '<div id="rd-cur" onclick="window._rdToggle()" style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;font-size:12px;font-weight:600;cursor:pointer;"><span id="rd-label">' + (cur ? cur.label : "Choose…") + '</span><span id="rd-arrow" style="font-size:10px;color:var(--green);">▼</span></div>' +
+      '<div id="rd-list" style="display:none;max-height:150px;overflow-y:auto;border-top:1px solid #2c2e33;-webkit-overflow-scrolling:touch;"></div></div>';
     h += '<div style="font-size:11px;color:#666;margin-bottom:8px;">Choose how to get there:</div>';
     h += rideOpts.map(r => '<div style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid #eee;border-radius:8px;margin-bottom:6px;"><span style="font-size:24px;">'+r.icon+'</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;">'+r.name+'</div><div style="font-size:11px;color:#666;">'+r.time+'s ride · '+(r.price===0?'Free':'₦'+r.price)+'</div></div><button onclick="window.bookRide(\''+r.id+'\')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:600;">Go</button></div>').join("");
     h += backBtn;
@@ -891,7 +867,7 @@ function _showPhoneApp(appId) {
       svg += '</g>';
     }
     // My home
-    if (window._myHomePos) svg += '<text x="'+toMapX(window._myHomePos.x)+'" y="'+(toMapZ(window._myHomePos.z)+3)+'" text-anchor="middle" font-size="9">🏠</text>';
+    for (const hm of (window._myHomes && window._myHomes.length ? window._myHomes : (window._myHomePos ? [window._myHomePos] : []))) svg += '<text x="'+toMapX(hm.x)+'" y="'+(toMapZ(hm.z)+3)+'" text-anchor="middle" font-size="9">🏠</text>';
     // Player position (pulsing red dot)
     const pmx = toMapX(px), pmz = toMapZ(pz);
     svg += '<circle cx="'+pmx+'" cy="'+pmz+'" r="6" fill="#ff6a3d" opacity="0.3"><animate attributeName="r" values="6;9;6" dur="1.5s" repeatCount="indefinite"/></circle>';
@@ -2280,10 +2256,33 @@ window.resetGame=()=>{
   localStorage.removeItem("kaduna-state"); localStorage.removeItem("kaduna-pos");
   location.reload();
 };
+// ---- small inline dropdown for the Ride app ----
+window._rdToggle=()=>{
+  const list=document.getElementById("rd-list"), arrow=document.getElementById("rd-arrow"); if(!list) return;
+  const open=list.style.display==="none";
+  if(open){
+    let h="";
+    for(const g of (window._rdGroups||[])){
+      h+='<div style="font:700 10px Poppins,sans-serif;color:#9b9ba4;padding:5px 10px 2px;background:#22242a;position:sticky;top:0;">'+g.t+'</div>';
+      for(const it of g.items){
+        const sel=it.id===window._rideDest;
+        h+='<div '+(it.off?'':'onclick="window._rdPick(\''+it.id+'\')"')+' style="padding:6px 10px;font-size:12px;'+(it.off?'color:#666;':'cursor:pointer;color:#f2f2f4;')+(sel?'background:#1f3a2c;font-weight:700;':'')+'">'+it.label+(it.off?' (closed)':'')+'</div>';
+      }
+    }
+    list.innerHTML=h;
+  }
+  list.style.display=open?"block":"none"; if(arrow) arrow.textContent=open?"▲":"▼";
+};
+window._rdPick=(id)=>{
+  window._rideDest=id;
+  const it=(window._rdGroups||[]).flatMap(g=>g.items).find(i=>i.id===id);
+  const l=document.getElementById("rd-label"); if(l&&it) l.textContent=it.label;
+  const list=document.getElementById("rd-list"); if(list) list.style.display="none";
+  const arrow=document.getElementById("rd-arrow"); if(arrow) arrow.textContent="▼";
+};
 window.bookRide=(rideId)=>{
-  const destSel=document.getElementById("ride-dest-select");
-  if(!destSel){toast("No destination selected");return;}
-  const destId=destSel.value;
+  const destId=window._rideDest||"";
+  if(!destId){toast("Pick a destination first");return;}
   const fareMap={walk:0,keke:300,bus:200,okada:500,taxi:1500};
   const fare=fareMap[rideId] ?? 0;
   if(game.state.money<fare){toast("Not enough money");return;}
@@ -2653,46 +2652,58 @@ initAuth((user) => {
 // Called on login + whenever homeArea/homePlot changes. Without this, the
 // "Press here 🟢 to enter" prompt shows at the wrong location and the Home
 // button teleports to the wrong place.
+function _tierFor(areaId, fallback) { const a = getArea(areaId); return fallback || (a ? (a.tier === "rich" ? 5 : a.tier === "middle" ? 3 : 1) : 1); }
+// Every house this player owns (you can own many). Saved per account; first login also scans for old ones.
+function _myHomesList() {
+  const out = [], seen = new Set();
+  const add = (a, p) => { const k = a + "/" + p; if (seen.has(k)) return; const area = getArea(a); if (!area) return; seen.add(k); const pos = getPlotPosition(area, p); out.push({ a, p, name: area.name, x: pos.x, z: pos.z }); };
+  for (const h of (game.state.myHouses || [])) add(h.a, h.p);
+  if (game.state.homeArea && game.state.homePlot != null) add(game.state.homeArea, game.state.homePlot);
+  window._myHomes = out;
+  return out;
+}
+let _homesScanFor = null;
+async function _scanMyHouses() {
+  const uid = getMyUid(); if (!uid || _homesScanFor === uid || game.state.housesScanned === uid) return;
+  _homesScanFor = uid;
+  try {
+    const { ref, get } = await import("firebase/database");
+    const found = [];
+    for (const a of AREAS) { const v = (await get(ref(db, "houses/" + a.id))).val(); if (!v) continue; for (const [p, rec] of Object.entries(v)) if (rec && rec.ownerUid === uid) found.push({ a: a.id, p: parseInt(p, 10) }); }
+    game.state.myHouses = found.concat((game.state.myHouses || []).filter(h => !found.some(f => f.a === h.a && f.p === h.p)));
+    game.state.housesScanned = uid; game.save?.();
+    _syncHomeEntrance();
+  } catch (e) { _homesScanFor = null; }
+}
 function _syncHomeEntrance() {
   if (!game.state.homeArea || game.state.homePlot == null) return;
   const area = getArea(game.state.homeArea);
   if (!area) return;
+  game.state.myHouses = game.state.myHouses || [];
+  if (!game.state.myHouses.some(h => h.a === game.state.homeArea && h.p === game.state.homePlot)) { game.state.myHouses.push({ a: game.state.homeArea, p: game.state.homePlot }); game.save?.(); }
   const pos = getPlotPosition(area, game.state.homePlot);
   updateHomeEntrance(pos.x, pos.z + 4, Math.PI);
+  window.__homeDoorHouse = { areaId: game.state.homeArea, plotNo: game.state.homePlot };
   _updateHomeMinimapMarker(pos.x, pos.z);
+  _myHomesList();
+  _scanMyHouses();
 }
 
-// FEATURE: check if the player is near ANY house they own (not just the most
-// recently bought one). If so, update the "My Home" entrance to that house's
-// position so the "Press here to enter" prompt fires at the correct door.
-// This fixes the "I have two houses but can only enter the second one" bug.
+// If you own several houses, the "My Home" door follows whichever one you walk up to (checked a few times a second).
+let _homeChk = 0;
 function _checkOwnedHouseProximity() {
-  const uid = getMyUid();
-  if (!uid) return;
+  if ((_homeChk++ % 8) !== 0) return;
+  const homes = window._myHomes; if (!homes || homes.length < 2) return;
   const px = player.pos.x, pz = player.pos.z;
-  // Check all nearby areas' houses for ones owned by this player
-  for (const [areaId, houses] of Object.entries(_allHouses || {})) {
-    if (!houses) continue;
-    const area = getArea(areaId);
-    if (!area) continue;
-    for (const [plotNoStr, houseRec] of Object.entries(houses)) {
-      if (!houseRec || houseRec.ownerUid !== uid) continue;
-      const plotNo = parseInt(plotNoStr, 10);
-      const pos = getPlotPosition(area, plotNo);
-      const dx = pos.x - px, dz = (pos.z + 4) - pz;
-      const d2 = dx * dx + dz * dz;
-      // If within 6m of this house's entrance, update the "My Home" entrance
-      if (d2 < 36) {
-        updateHomeEntrance(pos.x, pos.z + 4, Math.PI);
-        _updateHomeMinimapMarker(pos.x, pos.z);
-        return; // found the closest one — done
-      }
+  for (const h of homes) {
+    const dx = h.x - px, dz = (h.z + 4) - pz;
+    if (dx * dx + dz * dz < 64) {
+      const cur = window.__homeDoorHouse;
+      if (!cur || cur.areaId !== h.a || cur.plotNo !== h.p) { updateHomeEntrance(h.x, h.z + 4, Math.PI); window.__homeDoorHouse = { areaId: h.a, plotNo: h.p }; _updateHomeMinimapMarker(h.x, h.z); }
+      return;
     }
   }
 }
-// Cache of all area houses (populated by plots.js's subscriptions)
-let _allHouses = null;
-export function _setAllHousesCache(data) { _allHouses = data; }
 
 // ---- FEATURE (step 2c): per-plot knock/enter prompt ----
 // Fires when the player walks within KNOCK_RANGE of a friend's plot door.
@@ -2894,7 +2905,7 @@ function governor(raw) {
   console.log("[quality] fps", fps.toFixed(0), "-> level", _gLevel);
 }
 
-initLiveMap({ scene, camera, player, AREAS, listPlaces, getHomePos: () => window._myHomePos, limits: { x: 560, z: 400 }, extraLabels: SCENERY_LABELS,
+initLiveMap({ scene, camera, player, AREAS, listPlaces, getHomePos: () => window._myHomePos, getHomes: () => window._myHomes || [], limits: { x: 560, z: 400 }, extraLabels: SCENERY_LABELS.concat(districtFunLabels()),
   travelPlace: (id) => { closeLiveMap(); window.travelToPlace(id); },
   travelArea: (id) => { closeLiveMap(); window.travelToArea(id); },
   tickWorld: (x, z, r) => { tickAreaWorld(x, z, r); tickPlotDoors(x, z); tickLife(x, z, true); } });
@@ -3110,7 +3121,7 @@ function _frame() {
   // Only tick when NOT inside a place (otherwise we waste cycles on doors the player can't see)
   if (!active) tickPlotDoors(player.pos.x, player.pos.z);
   // FEATURE: check if the player is near ANY house they own → update "My Home" entrance
-  if (!active) { _allHouses = getAllHouses(); _checkOwnedHouseProximity(); }
+  if (!active) _checkOwnedHouseProximity();
   // FEATURE 3b: area world tick — chunk-streamed area roads + houses + lamp posts
   tickLife(player.pos.x, player.pos.z, !active);
   if (!active) tickAreaWorld(player.pos.x, player.pos.z);

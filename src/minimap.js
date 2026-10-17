@@ -88,23 +88,12 @@ export function createMinimap(canvas, shapes) {
     ctx.fillStyle = "#f2b134";
     for (const c of cars) { if (Math.abs(c.x - px) < range * 1.5 && Math.abs(c.z - pz) < range * 1.5) ctx.fillRect(X(c.x) - 2.5 * S / 2, Z(c.z) - 1, 5 * S / 2 * 1.6, 2 * S / 1.4); }
     // ---- Draw "My Home" marker if the player has a home ----
-    if (window._myHomePos) {
-      const hx = X(window._myHomePos.x), hz = Z(window._myHomePos.z);
-      // Only draw if within a reasonable range of the minimap view
-      if (Math.abs(window._myHomePos.x - px) < range * 2 && Math.abs(window._myHomePos.z - pz) < range * 2) {
-        ctx.fillStyle = "#2e7d4f";
-        ctx.strokeStyle = "#fff";
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(hx, hz, 5 * S, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        // House emoji label
-        ctx.fillStyle = "#fff";
-        ctx.font = "bold 10px Arial";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText("🏠", hx, hz);
+    for (const hm of (window._myHomes && window._myHomes.length ? window._myHomes : (window._myHomePos ? [window._myHomePos] : []))) {
+      const hx = X(hm.x), hz = Z(hm.z);
+      if (Math.abs(hm.x - px) < range * 2 && Math.abs(hm.z - pz) < range * 2) {
+        ctx.fillStyle = "#2e7d4f"; ctx.strokeStyle = "#fff"; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(hx, hz, 5 * S, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = "#fff"; ctx.font = "bold 10px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("🏠", hx, hz);
       }
     }
     ctx.translate(X(px), Z(pz)); ctx.rotate(Math.PI - heading); ctx.scale(S / sc, S / sc);

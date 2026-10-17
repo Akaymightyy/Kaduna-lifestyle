@@ -102,29 +102,27 @@ export function kioskShape() {
 }
 
 // ---------- people ----------
-export function personBody() {
-  // FEATURE: improved proportions + shoes + belt for a more human look (was basic boxes = robotic)
-  const L = [];
-  B(L, 0.42, 0.55, 0.24, 0, 1.28, 0, 1);       // torso (tinted shirt)
-  B(L, 0.38, 0.12, 0.22, 0, 0.98, 0, 0.15);    // belt/waist (dark)
-  B(L, 0.15, 0.82, 0.17, -0.11, 0.41, 0, 0.22); // left leg (dark trousers)
-  B(L, 0.15, 0.82, 0.17, 0.11, 0.41, 0, 0.22);  // right leg (dark trousers)
-  B(L, 0.10, 0.50, 0.12, -0.28, 1.25, 0, 0.85); // left arm (skin tone)
-  B(L, 0.10, 0.50, 0.12, 0.28, 1.25, 0, 0.85);   // right arm (skin tone)
-  B(L, 0.17, 0.08, 0.26, -0.11, 0.04, 0.03, 0.08); // left shoe (dark)
-  B(L, 0.17, 0.08, 0.26, 0.11, 0.04, 0.03, 0.08);  // right shoe (dark)
-  return done(L);
+// A walker is several instanced parts so legs and arms can swing (no more sliding robots).
+// Colours are multipliers: every part is tinted by its own per-instance colour (shirt / trousers / skin / robe).
+const ball = (r, x, y, z, v, sy = 1, ws = 12, hs = 9) => { const g = new THREE.SphereGeometry(r, ws, hs); g.scale(1, sy, 1); g.translate(x, y, z); return paint(flatten(g), v); };
+export function personParts() {
+  const torso = []; B(torso, 0.44, 0.62, 0.25, 0, 1.2, 0, 1); B(torso, 0.4, 0.1, 0.23, 0, 0.93, 0, 0.18); B(torso, 0.1, 0.1, 0.1, 0, 1.54, 0, 0.9);
+  const kaftan = []; B(kaftan, 0.46, 0.7, 0.27, 0, 1.18, 0, 1); B(kaftan, 0.5, 0.98, 0.31, 0, 0.62, 0, 0.92); B(kaftan, 0.54, 0.14, 0.34, 0, 0.22, 0, 0.8);
+  B(kaftan, 0.06, 0.5, 0.02, 0, 1.2, 0.14, 0.65); B(kaftan, 0.15, 0.08, 0.26, -0.1, 0.05, 0.05, 0.1); B(kaftan, 0.15, 0.08, 0.26, 0.1, 0.05, 0.05, 0.1);
+  const gown = []; B(gown, 0.42, 0.66, 0.25, 0, 1.2, 0, 1); gown.push(paint(flatten((() => { const g = new THREE.CylinderGeometry(0.2, 0.36, 0.95, 10); g.translate(0, 0.52, 0); return g; })()), 0.95));
+  gown.push(ball(0.215, 0, 1.73, -0.02, 0.9, 1.05)); gown.push(ball(0.2, 0, 1.62, 0.0, 0.8, 0.9));              // hijab: head cover + shoulder drape
+  B(gown, 0.15, 0.08, 0.26, -0.1, 0.05, 0.05, 0.1); B(gown, 0.15, 0.08, 0.26, 0.1, 0.05, 0.05, 0.1);
+  const leg = []; B(leg, 0.15, 0.88, 0.17, 0, -0.44, 0, 1); B(leg, 0.17, 0.08, 0.27, 0, -0.86, 0.04, 0.12);
+  const arm = []; B(arm, 0.1, 0.56, 0.12, 0, -0.27, 0, 1); B(arm, 0.09, 0.08, 0.1, 0, -0.58, 0, 0.8);
+  const head = (cover) => { const L = [ball(0.17, 0, 1.73, 0, 1, 1.08)];
+    L.push(paint(flatten(new THREE.BoxGeometry(0.05, 0.06, 0.04).translate(0, 1.7, 0.17)), 0.55));               // nose
+    if (cover === "hair") L.push(ball(0.185, 0, 1.76, -0.02, 0.1, 0.9, 12, 6));
+    if (cover === "cap") { const g = new THREE.CylinderGeometry(0.17, 0.19, 0.1, 12); g.translate(0, 1.88, 0); L.push(paint(flatten(g), 0.9)); }
+    return done(L); };
+  return { torso: done(torso), kaftan: done(kaftan), gown: done(gown), leg: done(leg), arm: done(arm), headHair: head("hair"), headCap: head("cap"), headBare: head("none") };
 }
-export function personHead() {
-  // FEATURE: head + hair cap for a more human look (was a bare sphere = robotic)
-  const g = new THREE.SphereGeometry(0.17, 12, 10);
-  g.translate(0, 1.72, 0);
-  // Hair: half-sphere on top, dark, slightly wider than the head
-  const hair = new THREE.SphereGeometry(0.19, 10, 5, 0, Math.PI * 2, 0, Math.PI * 0.55);
-  hair.translate(0, 1.72, 0);
-  hair.scale(1, 0.7, 1);
-  return done([paint(flatten(g), 1), paint(flatten(hair), 0.10)]); // head=skin(1), hair=dark(0.10)
-}
+export function personBody() { return personParts().torso; }          // kept for older imports
+export function personHead() { return personParts().headHair; }
 
 // ---------- landmark per district (merged, true colours) ----------
 export function landmark(kind) {
