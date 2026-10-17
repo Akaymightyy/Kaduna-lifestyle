@@ -23,7 +23,7 @@ import { peekWorld, initPlaceManager, tickEntrancePrompt, updateActive, bindInte
 import { listPlaces, getPlace, updateHomeEntrance } from "./places/registry.js";
 import { initMissions, getActiveMission, getAllChapters, getDailyMissions, getWeeklyMissions, checkStep, createMissionState, claimDailyReward, claimWeeklyReward, setCelebrateCallback } from "./missions.js";
 import { FURNITURE_CATALOG, CATEGORIES, getItem, calcComfort } from "./furniture.js";
-import { ORIGINS, HOUSE_TIERS, getRentInfo, payRent, checkRentDue, applyOrigin, getOriginUI } from "./origins.js";
+import { ORIGINS, HOUSE_TIERS, upgradeCost, getRentInfo, payRent, checkRentDue, applyOrigin, getOriginUI } from "./origins.js";
 import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
 import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
 import { celebrate } from "./celebrate.js";
@@ -382,6 +382,7 @@ function _handleWorldTap(clientX, clientY) {
         game.state.money -= price;
         game.state.homeArea = ud.areaId;
         game.state.homePlot = r.plotNo;
+        _registerHouse(ud.areaId, r.plotNo, isForSale, r.tier);
         if (r.tier) game.state.homeTier = r.tier;
         game.save?.();
         _syncHomeEntrance();
@@ -1058,12 +1059,32 @@ function _showPhoneApp(appId) {
     } else {
       h += '<div style="background:#3a1a1a;border:1px solid #e11d48;border-radius:10px;padding:10px;margin-bottom:12px;font-size:12px;color:#e11d48;text-align:center;">You haven\'t picked an area yet. <button onclick="window._showAreaPicker()" style="margin-top:6px;background:#f2b134;color:#000;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:11px;font-weight:600;">Pick an area now</button></div>';
     }
+    // ---- My Houses (own / rent / upgrade) ----
+    const _mh = game.state.myHouses || [];
+    if (_mh.length) {
+      h += '<div style="font-size:12px;font-weight:600;margin:6px 0;color:#f2b134;">🔑 My Houses</div>';
+      for (const e of _mh) {
+        const ar = getArea(e.a); if (!ar) continue;
+        const t = HOUSE_TIERS.find(x => x.tier === (e.t || 1)) || HOUSE_TIERS[0];
+        const nx = HOUSE_TIERS.find(x => x.tier === t.tier + 1), uc = upgradeCost(t.tier);
+        const isHome = game.state.homeArea === e.a && game.state.homePlot === e.p;
+        const bs = 'border:none;border-radius:6px;padding:6px 9px;cursor:pointer;font-size:11px;font-weight:600;margin:4px 4px 0 0;';
+        h += '<div style="background:#17181b;border-radius:10px;padding:10px;margin-bottom:6px;'+(isHome?'border:2px solid #4ade80;':'')+'">';
+        h += '<div style="font-size:12px;font-weight:700;color:#f2f2f4;">'+t.emoji+' '+t.name+(isHome?' ✅':'')+'</div>';
+        h += '<div style="font-size:10px;color:#9b9ba4;">'+ar.name+' · Plot #'+e.p+' · '+(e.own?'<b style="color:#4ade80;">Owned</b>':'Renting ₦'+t.rent.toLocaleString()+'/wk')+'</div>';
+        if (!isHome) h += '<button onclick="window._makeHome(\''+e.a+'\','+e.p+')" style="'+bs+'background:#f2b134;color:#000;">Make home</button>';
+        if (!e.own) h += '<button onclick="window._buyOutHouse(\''+e.a+'\','+e.p+')" style="'+bs+'background:#3b82f6;color:#fff;">Buy ₦'+t.buyPrice.toLocaleString()+'</button>';
+        else if (nx && uc != null) h += '<button onclick="window._upgradeHouse(\''+e.a+'\','+e.p+')" style="'+bs+'background:#4ade80;color:#000;">Upgrade → '+nx.emoji+' '+nx.name+' ₦'+uc.toLocaleString()+'</button>';
+        else h += '<span style="font-size:10px;color:#4ade80;">Top house 👑</span>';
+        h += '</div>';
+      }
+    }
     // Rent status
     h += '<div style="background:'+(rentInfo.due?'#3a1a1a':'#1a2a1a')+';border-radius:10px;padding:10px;margin-bottom:10px;border:1px solid '+(rentInfo.due?'#e11d48':'#2e7d4f')+';">';
-    h += '<div style="font-size:12px;font-weight:600;color:'+(rentInfo.due?'#e11d48':'#4ade80')+';">'+(rentInfo.due?'🔔 RENT DUE!':'✅ Rent paid')+'</div>';
-    h += '<div style="font-size:11px;color:#9b9ba4;margin-top:2px;">'+rentInfo.tier.name+' — ₦'+rentInfo.amount.toLocaleString()+'/week';
+    h += '<div style="font-size:12px;font-weight:600;color:'+(rentInfo.due?'#e11d48':'#4ade80')+';">'+(rentInfo.owned?'🔑 You own this home':rentInfo.due?'🔔 RENT DUE!':'✅ Rent paid')+'</div>';
+    h += '<div style="font-size:11px;color:#9b9ba4;margin-top:2px;">'+rentInfo.tier.name+(rentInfo.owned?' — no rent':' — ₦'+rentInfo.amount.toLocaleString()+'/week');
     if (rentInfo.due) h += ' · <b style="color:#e11d48;">Pay now!</b>';
-    else h += ' · Next due in '+rentInfo.nextDueText;
+    else if (!rentInfo.owned) h += ' · Next due in '+rentInfo.nextDueText;
     h += '</div>';
     if (rentInfo.due) h += '<button onclick="window._payRent()" style="width:100%;margin-top:6px;background:#f2b134;color:#000;border:none;border-radius:8px;padding:8px;cursor:pointer;font-size:12px;font-weight:600;">Pay Rent ₦'+rentInfo.amount.toLocaleString()+'</button>';
     h += '</div>';
@@ -1535,10 +1556,12 @@ function _showPhoneApp(appId) {
     return;
   }
   if(appId==="invest"){
+    _settleInvestments();
     let h = '<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">📈 Invest</div>';
     h += '<div style="font-size:11px;color:#666;margin-bottom:8px;">Balance: ₦'+game.state.money.toLocaleString()+'</div>';
+    { const pend = game.state.investments || []; if (pend.length) { h += '<div style="background:#1a2a1a;border:1px solid #2e7d4f;border-radius:8px;padding:8px;margin-bottom:8px;font-size:11px;color:#4ade80;">⏳ Waiting: ' + pend.map(p => "₦" + p.amt.toLocaleString() + " (" + Math.max(1, Math.ceil((p.dueAt - Date.now()) / 3600000)) + " hr)").join(" · ") + '</div>'; } }
     const options = [
-      { id: "treasury", name: "Treasury Bills", emoji: "🏦", min: 5000, rate: 1.10, days: 1, desc: "Safe. 10% return in 1 game-day." },
+      { id: "treasury", name: "Treasury Bills", emoji: "🏦", min: 5000, rate: 1.10, days: 1, desc: "Safe. 10% return in 1 day." },
       { id: "keke-fund", name: "Keke Fleet", emoji: "🛺", min: 20000, rate: 1.25, days: 2, desc: "Buy a keke, hire a driver. 25% return." },
       { id: "realestate", name: "Land Flip", emoji: "🏠", min: 100000, rate: 1.50, days: 3, desc: "Buy land, sell for profit. 50% return." },
       { id: "crypto", name: "Crypto Trade", emoji: "₿", min: 50000, rate: 2.00, days: 1, desc: "High risk! 2x or lose 50%." },
@@ -2189,6 +2212,7 @@ window._pickArea = async (areaId) => {
   const r = await claimPlot(areaId, uid, name, game.state.origin);
   if (r.ok) {
     game.state.homeArea = areaId; game.state.homePlot = r.plotNo;
+    _registerHouse(areaId, r.plotNo, false, r.tier);
     if (r.tier) game.state.homeTier = r.tier;
     game.save?.();
     _syncHomeEntrance();
@@ -2222,6 +2246,7 @@ window._moveToArea = async (areaId) => {
   if (!r.ok) { toast("❌ " + r.reason); return; }
   game.state.money -= area.buyPrice;
   game.state.homeArea = areaId; game.state.homePlot = r.plotNo;
+  _registerHouse(areaId, r.plotNo, true, r.tier);
   if (r.tier) game.state.homeTier = r.tier;
   game.state.lastRentPaid = Date.now(); game.save?.();
   _syncHomeEntrance();
@@ -2303,29 +2328,34 @@ window._deleteScreenshot = (idx) => {
     showPhoneApp("gallery");
   } catch (e) {}
 };
-// FEATURE: Invest — put money into an investment, get return after game-days
+// FEATURE: Invest — money is locked until it matures in REAL time (1 game-day = 1 real day, same as the clock).
+// Pending investments are saved with the account, so closing the game or refreshing never loses them.
+const DAY_MS = 24 * 60 * 60 * 1000;
+function _settleInvestments() {
+  const list = game.state.investments || []; if (!list.length) return;
+  const now = Date.now(), keep = []; let changed = false;
+  for (const iv of list) {
+    if (iv.dueAt > now) { keep.push(iv); continue; }
+    changed = true; game.state.money += iv.ret;
+    const profit = iv.ret - iv.amt;
+    toast(profit >= 0 ? "📈 Investment matured! +₦" + profit.toLocaleString() + " profit" : "📉 Investment lost ₦" + (-profit).toLocaleString());
+  }
+  if (!changed) return;
+  game.state.investments = keep; game.save?.(); updateHUD();
+  const uid = getMyUid(); if (uid) update(ref(db, "economy/" + uid), { balance: game.state.money });
+}
 window._invest = (id, min, rate, days) => {
   if (game.state.money < min) { toast("Need ₦" + min.toLocaleString()); return; }
   const isCrypto = id === "crypto";
-  if (isCrypto && !confirm("⚠️ HIGH RISK! You could lose 50% of your investment. Continue?")) return;
-  if (!isCrypto && !confirm("Invest ₦" + min.toLocaleString() + " in this option? You'll get your return in " + days + " game-day(s).")) return;
+  if (isCrypto && !confirm("⚠️ HIGH RISK! 60% chance you lose half of your money. Continue?")) return;
+  if (!isCrypto && !confirm("Invest ₦" + min.toLocaleString() + "? Your money comes back with profit after " + days + " real day(s).")) return;
   game.state.money -= min;
-  // Determine return (crypto has 50% chance of losing)
-  const win = isCrypto ? Math.random() > 0.4 : true;
-  const returnAmt = win ? Math.floor(min * rate) : Math.floor(min * 0.5);
-  const profit = returnAmt - min;
-  // Schedule the return (simulated — pay immediately for simplicity in this build)
-  setTimeout(() => {
-    game.state.money += returnAmt;
-    game.save?.(); updateHUD();
-    const uid = getMyUid();
-    if (uid) update(ref(db, "economy/" + uid), { balance: game.state.money });
-    if (win) toast("📈 Investment paid off! +₦" + profit.toLocaleString() + " profit!");
-    else toast("📉 Investment lost. -₦" + (min - returnAmt).toLocaleString());
-    showPhoneApp("invest");
-  }, days * 60000); // 1 game-day = 1 real minute (TIME_SCALE=1)
-  toast("💰 Invested ₦" + min.toLocaleString() + ". Check back in " + days + " min.");
+  const win = isCrypto ? Math.random() > 0.6 : true;
+  const ret = win ? Math.floor(min * rate) : Math.floor(min * 0.5);
+  game.state.investments = (game.state.investments || []).concat([{ id, amt: min, ret, dueAt: Date.now() + days * DAY_MS }]);
   game.save?.(); updateHUD();
+  const uid = getMyUid(); if (uid) update(ref(db, "economy/" + uid), { balance: game.state.money });
+  toast("💰 Invested ₦" + min.toLocaleString() + ". Ready in " + days + " day(s).");
   showPhoneApp("invest");
 };
 // FEATURE: Activity interactions at fun places
@@ -2381,6 +2411,10 @@ function _onFunActivityTap() {
   if (!_nearestFunPlace) return;
   const act = FUN_ACTIVITIES[_nearestFunPlace.kind];
   if (!act) return;
+  window._funCool = window._funCool || {};
+  const _left = (window._funCool[_nearestFunPlace.kind] || 0) - Date.now();
+  if (_left > 0) { toast("⏳ Wait " + Math.ceil(_left / 1000) + "s before doing this again"); return; }
+  window._funCool[_nearestFunPlace.kind] = Date.now() + 60000;
   if (act.cost > 0 && game.state.money < act.cost) { toast("Need ₦" + act.cost.toLocaleString()); return; }
   if (act.cost > 0) game.state.money -= act.cost;
   if (act.energyCost > 0) game.state.needs.energy = Math.max(0, (game.state.needs.energy || 0) - act.energyCost);
@@ -2467,6 +2501,7 @@ function _tickRent(dt) {
   if (_rentCheckT > 60) {
     _rentCheckT = 0;
     checkRentDue(game.state, toast);
+    _settleInvestments();
   }
 }
 // ---- Place furniture from storage into home ----
@@ -2947,6 +2982,56 @@ initAuth((user) => {
 // Called on login + whenever homeArea/homePlot changes. Without this, the
 // "Press here 🟢 to enter" prompt shows at the wrong location and the Home
 // button teleports to the wrong place.
+// ---- many houses: own / rent / upgrade ----
+function _houseEntry(a, p) { return (game.state.myHouses || []).find(h => h.a === a && h.p === p); }
+function _registerHouse(areaId, plotNo, own, tier) {
+  game.state.myHouses = game.state.myHouses || [];
+  let e = _houseEntry(areaId, plotNo);
+  if (!e) { e = { a: areaId, p: plotNo }; game.state.myHouses.push(e); }
+  e.own = !!own; if (tier) e.t = tier;
+  game.state.homeOwned = !!own;
+  game.save?.();
+  const uid = getMyUid();
+  if (uid) update(ref(db, "houses/" + areaId + "/" + plotNo), { tenure: own ? "own" : "rent" }).catch(() => {});
+}
+async function _refreshHouseTier(areaId, plotNo) {
+  try { const rec = await loadHouse(areaId, plotNo); const e = _houseEntry(areaId, plotNo); if (rec && e) { if (rec.tier) e.t = rec.tier; if (rec.tenure) e.own = rec.tenure === "own"; game.save?.(); } return rec; } catch (e) { return null; }
+}
+window._makeHome = async (a, p) => {
+  const area = getArea(a); if (!area) return;
+  const rec = await _refreshHouseTier(a, p); const e = _houseEntry(a, p);
+  game.state.homeArea = a; game.state.homePlot = p; game.state.homeTier = (rec && rec.tier) || (e && e.t) || 1; game.state.homeOwned = !!(e && e.own);
+  if (!game.state.homeOwned) game.state.lastRentPaid = Date.now();
+  game.save?.(); _syncHomeEntrance();
+  const uid = getMyUid(); if (uid) update(ref(db, "players/" + uid), { homeArea: a, homePlot: p, homeTier: game.state.homeTier, lastRentPaid: game.state.lastRentPaid || 0 });
+  toast("🏠 " + area.name + " #" + p + " is now your home"); showPhoneApp("realestate");
+};
+window._upgradeHouse = async (a, p) => {
+  const uid = getMyUid(); if (!uid) { toast("Sign in first"); return; }
+  const rec = await _refreshHouseTier(a, p); const e = _houseEntry(a, p);
+  if (!rec || rec.ownerUid !== uid) { toast("This house is not yours"); return; }
+  if (!(e && e.own)) { toast("Buy the house first — you can only upgrade a house you own"); return; }
+  const cur = rec.tier || 1, cost = upgradeCost(cur), next = HOUSE_TIERS.find(t => t.tier === cur + 1);
+  if (!next || cost == null) { toast("Already the biggest house"); return; }
+  if (game.state.money < cost) { toast("Need ₦" + cost.toLocaleString() + " to upgrade"); return; }
+  if (!confirm("Upgrade to " + next.name + " for ₦" + cost.toLocaleString() + "?\n(your old house is traded in at 60% of its price)")) return;
+  game.state.money -= cost; e.t = cur + 1;
+  if (game.state.homeArea === a && game.state.homePlot === p) game.state.homeTier = cur + 1;
+  game.save?.(); updateHUD();
+  try { await update(ref(db, "houses/" + a + "/" + p), { tier: cur + 1 }); await update(ref(db, "economy/" + uid), { balance: game.state.money }); if (game.state.homeArea === a && game.state.homePlot === p) await update(ref(db, "players/" + uid), { homeTier: cur + 1 }); } catch (err) { console.warn(err); }
+  celebrate(next.emoji + " " + next.name, "Upgraded! Look at your house outside."); showPhoneApp("realestate");
+};
+window._buyOutHouse = async (a, p) => {
+  const uid = getMyUid(); if (!uid) return;
+  const rec = await _refreshHouseTier(a, p); const e = _houseEntry(a, p); if (!rec || !e) return;
+  const t = HOUSE_TIERS.find(x => x.tier === (rec.tier || 1)) || HOUSE_TIERS[0];
+  if (game.state.money < t.buyPrice) { toast("Need ₦" + t.buyPrice.toLocaleString() + " to buy this house"); return; }
+  if (!confirm("Buy this " + t.name + " for ₦" + t.buyPrice.toLocaleString() + "? No more rent after that.")) return;
+  game.state.money -= t.buyPrice; e.own = true; if (game.state.homeArea === a && game.state.homePlot === p) game.state.homeOwned = true;
+  game.save?.(); updateHUD();
+  try { await update(ref(db, "houses/" + a + "/" + p), { tenure: "own" }); await update(ref(db, "economy/" + uid), { balance: game.state.money }); } catch (err) { console.warn(err); }
+  celebrate("🔑 " + t.name, "You own it now — no more rent!"); showPhoneApp("realestate");
+};
 function _tierFor(areaId, fallback) { const a = getArea(areaId); return fallback || (a ? (a.tier === "rich" ? 5 : a.tier === "middle" ? 3 : 1) : 1); }
 // Every house this player owns (you can own many). Saved per account; first login also scans for old ones.
 function _myHomesList() {
@@ -2964,7 +3049,7 @@ async function _scanMyHouses() {
   try {
     const { ref, get } = await import("firebase/database");
     const found = [];
-    for (const a of AREAS) { const v = (await get(ref(db, "houses/" + a.id))).val(); if (!v) continue; for (const [p, rec] of Object.entries(v)) if (rec && rec.ownerUid === uid) found.push({ a: a.id, p: parseInt(p, 10) }); }
+    for (const a of AREAS) { const v = (await get(ref(db, "houses/" + a.id))).val(); if (!v) continue; for (const [p, rec] of Object.entries(v)) if (rec && rec.ownerUid === uid) found.push({ a: a.id, p: parseInt(p, 10), t: rec.tier || 1, own: rec.tenure === "own" }); }
     game.state.myHouses = found.concat((game.state.myHouses || []).filter(h => !found.some(f => f.a === h.a && f.p === h.p)));
     game.state.housesScanned = uid; game.save?.();
     _syncHomeEntrance();
@@ -2975,7 +3060,8 @@ function _syncHomeEntrance() {
   const area = getArea(game.state.homeArea);
   if (!area) return;
   game.state.myHouses = game.state.myHouses || [];
-  if (!game.state.myHouses.some(h => h.a === game.state.homeArea && h.p === game.state.homePlot)) { game.state.myHouses.push({ a: game.state.homeArea, p: game.state.homePlot }); game.save?.(); }
+  if (!game.state.myHouses.some(h => h.a === game.state.homeArea && h.p === game.state.homePlot)) { game.state.myHouses.push({ a: game.state.homeArea, p: game.state.homePlot, own: false }); game.save?.(); }
+  game.state.homeOwned = !!(_houseEntry(game.state.homeArea, game.state.homePlot) || {}).own;
   const pos = getPlotPosition(area, game.state.homePlot);
   updateHomeEntrance(pos.x, pos.z + 4, Math.PI);
   window.__homeDoorHouse = { areaId: game.state.homeArea, plotNo: game.state.homePlot };

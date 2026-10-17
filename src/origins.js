@@ -34,13 +34,19 @@ export const ORIGINS = [
 
 // ---- HOUSING TIERS ----
 export const HOUSE_TIERS = [
-  { tier: 1, id: "room", name: "Face-Me-I-Face-You Room", rent: 500, buyPrice: 0, guestCap: 2, emoji: "🚪", desc: "Shared compound, one room, no privacy" },
-  { tier: 2, id: "flat", name: "1-Bedroom Flat", rent: 2000, buyPrice: 50000, guestCap: 4, emoji: "🏠", desc: "Small flat with kitchen + bathroom" },
-  { tier: 3, id: "bungalow", name: "3-Bedroom Bungalow", rent: 5000, buyPrice: 200000, guestCap: 8, emoji: "🏡", desc: "Bungalow with compound + parking" },
-  { tier: 4, id: "duplex", name: "Duplex", rent: 12000, buyPrice: 500000, guestCap: 12, emoji: "🏢", desc: "2-storey duplex with car park + garden" },
-  { tier: 5, id: "mansion", name: "Mansion", rent: 30000, buyPrice: 2000000, guestCap: 20, emoji: "🏰", desc: "Luxury mansion with everything" },
-  { tier: 6, id: "estate", name: "Private Estate", rent: 75000, buyPrice: 10000000, guestCap: 50, emoji: "🏟️", desc: "Your own private estate — ultimate flex" },
+  { tier: 1, id: "room", name: "Face-Me-I-Face-You Room", rent: 500, buyPrice: 25000, guestCap: 2, emoji: "🚪", desc: "One room in a shared compound" },
+  { tier: 2, id: "flat", name: "1-Bedroom Flat", rent: 1200, buyPrice: 70000, guestCap: 4, emoji: "🏠", desc: "Small flat with bedroom, kitchen + bathroom" },
+  { tier: 3, id: "bungalow", name: "3-Bedroom Bungalow", rent: 2500, buyPrice: 150000, guestCap: 8, emoji: "🏡", desc: "Bungalow with 3 bedrooms, compound + parking" },
+  { tier: 4, id: "duplex", name: "Duplex", rent: 3500, buyPrice: 300000, guestCap: 12, emoji: "🏢", desc: "2-storey duplex with master suite + car park" },
+  { tier: 5, id: "mansion", name: "Mansion", rent: 15000, buyPrice: 1000000, guestCap: 20, emoji: "🏰", desc: "Luxury mansion — columns, balcony, marble floors" },
+  { tier: 6, id: "estate", name: "Private Estate", rent: 50000, buyPrice: 5000000, guestCap: 50, emoji: "🏟️", desc: "Your own private estate — ultimate flex" },
 ];
+// upgrade price = new house price minus 60% of what the old house is worth (trade-in)
+export function upgradeCost(curTier) {
+  const cur = HOUSE_TIERS.find(t => t.tier === curTier), nxt = HOUSE_TIERS.find(t => t.tier === curTier + 1);
+  if (!cur || !nxt) return null;
+  return nxt.buyPrice - Math.round(cur.buyPrice * 0.6);
+}
 
 // ---- RENT SYSTEM ----
 // Rent is due every Saturday (game time = every 7 real minutes * 24 = every 168 minutes = every 2.8 hours)
@@ -48,6 +54,10 @@ export const HOUSE_TIERS = [
 const RENT_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // real time: rent is due once every 7 real days (game clock = real clock)
 
 export function getRentInfo(state) {
+  if (state.homeOwned) {                                    // you own this house: no rent
+    const t = HOUSE_TIERS.find(t => t.tier === (state.homeTier || 1)) || HOUSE_TIERS[0];
+    return { due: false, owned: true, amount: 0, nextDueMs: 0, nextDueMins: 0, nextDueText: "never — you own it", tier: t, lastPaid: 0 };
+  }
   const lastPaid = state.lastRentPaid || 0;
   const now = Date.now();
   const elapsed = now - lastPaid;

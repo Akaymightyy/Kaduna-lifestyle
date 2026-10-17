@@ -66,9 +66,9 @@ export function getArea(areaId) {
   return AREAS.find(a => a.id === areaId);
 }
 
-// House size follows the budget of the area: cheap = one room, middle = 3-bed, rich = mansion (Attajiri origin gets one step more).
+// House size follows the budget of the area: cheap = one room, middle = flat, rich = duplex (Attajiri origin gets one step more). Mansions + estates come from upgrading.
 export function houseTierFor(area, origin) {
-  const base = area.tier === "rich" ? 5 : area.tier === "middle" ? 3 : 1;
+  const base = area.tier === "rich" ? 4 : area.tier === "middle" ? 2 : 1;
   return origin === "attajiri" ? Math.min(6, base + 1) : base;
 }
 

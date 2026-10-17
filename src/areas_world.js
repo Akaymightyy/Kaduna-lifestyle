@@ -16,7 +16,7 @@ import { AREAS, getArea, getPlotPosition } from "./areas.js";
 import { getAreaHouses } from "./plots.js";
 import { WIDE_CROSS_Z, WIDE_AVENUES_X } from "./config.js";
 import { funKinds, funGeometry, FUN_INFO } from "./fun.js";
-import { houseShapes, wallRing, treeShape, carShape, kioskShape, landmark, landmarkKind, hash2, isVacantPlot, plotArchetype, paint, flatten } from "./town.js";
+import { tierShapes, npcTier, wallRing, treeShape, carShape, kioskShape, landmark, landmarkKind, hash2, isVacantPlot, plotArchetype, paint, flatten } from "./town.js";
 
 // ---- Tunables ----
 const AREA_RENDER_RANGE = 250;   // metres — render area content within this of the player
@@ -41,7 +41,7 @@ function _lampGeometry() {
 }
 function _getShapes() {
   if (_shapes) return _shapes;
-  _shapes = { houses: houseShapes(), wall: wallRing(), tree: treeShape(), car: carShape(), kiosk: kioskShape(), lamp: _lampGeometry(), lm: {} };
+  _shapes = { houses: tierShapes(), wall: wallRing(), tree: treeShape(), car: carShape(), kiosk: kioskShape(), lamp: _lampGeometry(), lm: {} };
   _vcMat = new THREE.MeshLambertMaterial({ vertexColors: true });
   return _shapes;
 }
@@ -320,14 +320,14 @@ function _updateArea(area, playerX, playerZ, distToArea, range) {
   if (!vis) return;
 
   const occupied = getAreaHouses(area.id);
-  const counts = [0, 0, 0]; let wn = 0, tn = 0, ci = 0;
+  const counts = [0, 0, 0, 0, 0, 0]; let wn = 0, tn = 0, ci = 0;
   const r2 = (range - 30) * (range - 30), n2 = WALL_TREE_RANGE * WALL_TREE_RANGE;
   for (let plotNo = 0; plotNo < capacity; plotNo++) {
     const pos = getPlotPosition(area, plotNo);
     const dx = pos.x - playerX, dz = pos.z - playerZ, d2 = dx * dx + dz * dz;
     if (d2 > r2) continue;
     const rec = occupied[plotNo];
-    const a = plotArchetype(area.id, plotNo);
+    const tier = (rec && rec.tier >= 1 && rec.tier <= 6) ? Math.round(rec.tier) : npcTier(area, plotNo), a = tier - 1;
     _v.set(pos.x, 0, pos.z); _q.setFromAxisAngle(_up, pos.rot || 0); _m4.compose(_v, _q, _scl);
     const slot = counts[a]++;
     houses[a].setMatrixAt(slot, _m4);
@@ -335,7 +335,7 @@ function _updateArea(area, playerX, playerZ, distToArea, range) {
     houses[a].setColorAt(slot, wc);
     if (ci < houseColliders.length) {
       const c = houseColliders[ci++];
-      c.minX = pos.x - COLLIDE_HALF; c.maxX = pos.x + COLLIDE_HALF; c.minZ = pos.z - COLLIDE_HALF; c.maxZ = pos.z + COLLIDE_HALF;
+      const ch = tier >= 5 ? 3.3 : COLLIDE_HALF; c.minX = pos.x - ch; c.maxX = pos.x + ch; c.minZ = pos.z - ch; c.maxZ = pos.z + ch;
     }
     if (d2 < n2) {
       wallMesh.setMatrixAt(wn, _m4); wallMesh.setColorAt(wn, _col.copy(wc).offsetHSL(0, -0.1, 0.12)); wn++;
@@ -346,7 +346,7 @@ function _updateArea(area, playerX, playerZ, distToArea, range) {
     }
   }
   for (let i = ci; i < houseColliders.length; i++) { const c = houseColliders[i]; c.minX = Infinity; c.maxX = -Infinity; c.minZ = Infinity; c.maxZ = -Infinity; }
-  for (let a = 0; a < 3; a++) { houses[a].count = counts[a]; houses[a].instanceMatrix.needsUpdate = true; if (houses[a].instanceColor) houses[a].instanceColor.needsUpdate = true; }
+  for (let a = 0; a < 6; a++) { houses[a].count = counts[a]; houses[a].instanceMatrix.needsUpdate = true; if (houses[a].instanceColor) houses[a].instanceColor.needsUpdate = true; }
   wallMesh.count = wn; wallMesh.instanceMatrix.needsUpdate = true; if (wallMesh.instanceColor) wallMesh.instanceColor.needsUpdate = true;
   treeMesh.count = tn; treeMesh.instanceMatrix.needsUpdate = true; if (treeMesh.instanceColor) treeMesh.instanceColor.needsUpdate = true;
 

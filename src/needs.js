@@ -73,6 +73,7 @@ export function createGameState() {
         homeArea: state.homeArea,
         homePlot: state.homePlot,
         myHouses: state.myHouses,
+        investments: state.investments,
         housesScanned: state.housesScanned,
         // FIX: Also persist look.created so character creator logic works correctly
         // (but Firebase is still the source of truth — checked in main.js)
