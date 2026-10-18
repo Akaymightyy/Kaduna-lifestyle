@@ -91,13 +91,19 @@ export async function openDM(otherUid, otherName) {
   return { chatId, otherUid, otherName: (prof && prof.name) || otherName, otherUsername: prof ? prof.username : "" };
 }
 
+function _previewOf(m) {
+  if (!m) return "";
+  return m.type === "money" ? "💸 Sent ₦" + (m.amount || 0).toLocaleString() :
+         m.type === "house_invite" ? "🏠 Sent a house invite" :
+         (m.text || "").slice(0, 50);
+}
 export async function sendMessage(chatId, text, type = "text", amount = 0, extra = null) {
-  if (!_uid || !chatId) return;
+  if (!_uid || !chatId) return false;
   const now = Date.now();
-  if (now - _lastMsgTime < 500) { _toast?.("Too fast — wait small."); return; }
-  _lastMsgTime = now;
+  if (now - _lastMsgTime < 500) { _toast?.("Too fast — wait small."); return false; }
   text = (text || "").trim().slice(0, 500);
-  if (!text && type === "text") return;
+  if (!text && type === "text") return false;
+  _lastMsgTime = now;
   const msgRef = push(ref(db, "chats/" + chatId + "/messages"));
   const msg = { from: _uid, text, ts: now, type };
   if (amount) msg.amount = amount;
@@ -107,37 +113,35 @@ export async function sendMessage(chatId, text, type = "text", amount = 0, extra
   await set(msgRef, msg);
   const metaSnap = await get(ref(db, "chats/" + chatId + "/meta"));
   const meta = metaSnap.val() || {};
-  const members = meta.members || {};
-  const updates = {};
-  const preview = type === "money" ? "💸 Sent ₦" + (amount || 0).toLocaleString() :
-                  type === "house_invite" ? "🏠 Sent a house invite" :
-                  text.slice(0, 50);
-  const isGroup = meta.type === "group";
+  const members = { ...(meta.members || {}) };
+  const isGroup = meta.type === "group" || chatId.startsWith("grp_");
+  // A DM id is the two uids joined: if the meta is missing or has no members, rebuild them from the id.
+  if (!isGroup) {
+    const other = _otherUidFromChatId(chatId);
+    if (other) members[other] = true;
+  }
+  members[_uid] = true;
+  const preview = _previewOf(msg);
   const memberUids = Object.keys(members);
   const profs = {};
   if (!isGroup) { for (const mu of memberUids) profs[mu] = await getProfile(mu); }
-  for (const memberUid of memberUids) {
+  // One small write per person, so the sender's chat list is updated even if the other person's write is refused.
+  const results = await Promise.allSettled(memberUids.map((memberUid) => {
     const isMe = memberUid === _uid;
-    const base = "userChats/" + memberUid + "/" + chatId + "/";
-    updates[base + "lastText"] = (isMe ? "You: " : "") + preview;
-    updates[base + "lastTs"] = now;
-    updates[base + "lastFrom"] = _uid;
-    // Remember WHO this chat is with, so the list can show the name and open the DM without a search.
-    if (isGroup) {
-      updates[base + "type"] = "group";
-      updates[base + "name"] = meta.name || "Group";
-      updates[base + "icon"] = meta.icon || "👥";
-    } else {
+    const f = { lastText: (isMe ? "You: " : "") + preview, lastTs: now, lastFrom: _uid };
+    if (isGroup) { f.type = "group"; f.name = meta.name || "Group"; f.icon = meta.icon || "👥"; }
+    else {
       const otherUid = memberUids.find((u) => u !== memberUid) || null;
       const op = otherUid ? profs[otherUid] : null;
-      updates[base + "type"] = "dm";
-      updates[base + "otherUid"] = otherUid;
-      updates[base + "otherName"] = (op && op.name) || "";
-      updates[base + "otherUsername"] = (op && op.username) || "";
+      f.type = "dm"; f.otherUid = otherUid; f.otherName = (op && op.name) || ""; f.otherUsername = (op && op.username) || "";
     }
-    if (!isMe) updates[base + "unread"] = increment(1);   // was a read of the other user's node (not allowed) -> count never grew
-  }
-  await update(ref(db), updates);
+    if (isMe) f.unread = 0; else f.unread = increment(1);
+    return update(ref(db, "userChats/" + memberUid + "/" + chatId), f);
+  }));
+  results.forEach((r, i) => { if (r.status === "rejected") console.warn("[messages] chat list update failed for", memberUids[i], r.reason); });
+  const mine = results[memberUids.indexOf(_uid)];
+  if (mine && mine.status === "rejected") _toast?.("Sent, but your chat list could not update.");
+  return true;
 }
 
 // FEATURE: send a house invite message in a chat. The recipient sees a
@@ -159,17 +163,42 @@ async function getUnread(uid, chatId) {
   try { const snap = await get(ref(db, "userChats/" + uid + "/" + chatId + "/unread")); return snap.val() || 0; } catch (e) { return 0; }
 }
 
+// Make sure a chat I have messages in is in MY chat list (covers chats whose list entry was never written).
+const _healed = new Set();
+async function _ensureMyEntry(chatId, arr) {
+  if (!_uid || !arr.length || _healed.has(chatId)) return;
+  const have = _userChats[chatId];
+  if (have && have.lastTs) return;
+  _healed.add(chatId);
+  try {
+    const last = arr[arr.length - 1];
+    const f = { lastText: (last.from === _uid ? "You: " : "") + _previewOf(last), lastTs: last.ts || Date.now(), lastFrom: last.from || "", unread: 0 };
+    if (chatId.startsWith("grp_")) {
+      const meta = await getChatMeta(chatId);
+      f.type = "group"; f.name = (meta && meta.name) || "Group"; f.icon = (meta && meta.icon) || "👥";
+    } else {
+      const otherUid = _otherUidFromChatId(chatId);
+      const p = otherUid ? await getProfile(otherUid) : null;
+      f.type = "dm"; f.otherUid = otherUid || null; f.otherName = (p && p.name) || ""; f.otherUsername = (p && p.username) || "";
+    }
+    await update(ref(db, "userChats/" + _uid + "/" + chatId), f);
+  } catch (e) { _healed.delete(chatId); console.warn("[messages] could not add chat to list", e); }
+}
+
 export function openChat(chatId, onMessages) {
-  if (_openChatId === chatId) return;
+  // BUGFIX: this used to return early when the same chat was "already open". After the chat screen was redrawn
+  // (keyboard, closing and reopening the phone) the new, empty message area was never connected -> blank chat.
   closeChat();
   _openChatId = chatId;
   const msgQuery = query(ref(db, "chats/" + chatId + "/messages"), limitToLast(50));
   _unsubOpenChat = onValue(msgQuery, (snap) => {
     const msgs = snap.val() || {};
     const arr = Object.values(msgs).sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    _ensureMyEntry(chatId, arr);
     onMessages?.(arr);
   });
-  if (_uid) { update(ref(db, "userChats/" + _uid + "/" + chatId), { unread: 0 }); }
+  // only mark as read if the chat is already in my list (this used to create an empty "{unread:0}" entry)
+  if (_uid && _userChats[chatId]) { update(ref(db, "userChats/" + _uid + "/" + chatId), { unread: 0 }); }
 }
 
 export function closeChat() { if (_unsubOpenChat) { _unsubOpenChat(); _unsubOpenChat = null; } _openChatId = null; }
@@ -182,7 +211,7 @@ export function getChatList() {
     const title = isGroup ? ((info.icon || "👥") + " " + (info.name || "Group")) : ((prof && !prof.missing && prof.name) || info.otherName || "");
     const username = (prof && prof.username) || info.otherUsername || "";
     return { chatId, ...info, isGroup, otherUid, title, username };
-  }).sort((a, b) => (b.lastTs || 0) - (a.lastTs || 0));
+  }).filter((c) => c.lastTs).sort((a, b) => (b.lastTs || 0) - (a.lastTs || 0));
 }
 
 const MAX_TRANSFER = 10000000, MAX_TRANSFERS_PER_MIN = 10;

@@ -2023,7 +2023,7 @@ function _renderChatScreen(c, chatId, otherName) {
   let h = '<div class="mx mx-chat">';
   h += '<div class="mx-head"><button class="ph-back mx-back" onclick="window._closeChatView()">‹</button>' + _mxAvatar(otherName, window._openChatOtherUid || chatId, 34) + '<div class="mx-title" style="margin-left:6px;">' + nm + '</div></div>';
   h += '<div class="mx-actions"><button onclick="window._chatInvite()">🏠 Invite</button><button onclick="window._chatVisit()">🚪 Visit</button><button class="money" onclick="window._chatSendMoney()">💸 Send money</button></div>';
-  h += '<div id="msg-bubbles" style="min-height:200px;max-height:44vh;overflow-y:auto;margin-bottom:10px;"></div>';
+  h += '<div id="msg-bubbles" class="mx-bubbles"></div>';
   h += '<div class="mx-compose"><input id="msg-input" type="text" autocomplete="off" placeholder="Message..." onkeydown="if(event.key===\'Enter\')window._sendMsg()" /><button class="mx-send" onclick="window._sendMsg()">➤</button></div>';
   h += '</div>';
   c.innerHTML = h;
@@ -2032,24 +2032,25 @@ function _renderChatScreen(c, chatId, otherName) {
     const container = document.getElementById("msg-bubbles");
     if (!container) return;
     container.innerHTML = "";
+    if (!msgs.length) { container.innerHTML = '<div class="mx-empty" style="margin-top:30px;">No messages yet. Say hi 👋</div>'; return; }
     for (const m of msgs) {
       const isMe = m.from === getMyUid();
       const time = new Date(m.ts || 0).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
       if (m.type === "system") {
         const div = document.createElement("div");
-        div.style.cssText = "text-align:center;margin:6px 0;color:#5d6b64;font-size:11px;";
+        div.style.cssText = "text-align:center;margin:6px 0;color:#8e909a;font-size:11px;";
         div.textContent = m.text;
         container.appendChild(div);
       } else if (m.type === "money") {
         const div = document.createElement("div");
-        div.style.cssText = "text-align:center;margin:6px 0;background:#fff6dd;border:1px solid #f2b134;border-radius:12px;padding:6px 12px;color:#7a5200;font-size:12px;font-weight:600;";
+        div.style.cssText = "text-align:center;margin:8px auto;width:fit-content;background:rgba(242,177,52,.12);border:1px solid rgba(242,177,52,.3);border-radius:14px;padding:7px 14px;color:#f2b134;font-size:12px;font-weight:600;";
         div.textContent = "💸 " + (isMe ? "You sent" : "You received") + " ₦" + (m.amount || 0).toLocaleString();
         container.appendChild(div);
       } else if (m.type === "house_invite") {
         // FEATURE: house invite bubble — shows the inviter's name + a Visit button.
         // The button stores the invite payload globally so _visitFromInvite can use it.
         const div = document.createElement("div");
-        div.style.cssText = "text-align:center;margin:6px 0;background:#fff;border:1px solid #f2b134;border-radius:12px;padding:8px 12px;color:#12261e;font-size:12px;";
+        div.style.cssText = "text-align:center;margin:8px auto;width:fit-content;max-width:85%;background:#1b1c20;border:1px solid rgba(242,177,52,.3);border-radius:14px;padding:9px 14px;color:#f2f2f4;font-size:12px;";
         const label = document.createElement("div");
         label.style.cssText = "font-weight:600;margin-bottom:6px;";
         const inviterName = (m.extra && m.extra.ownerName) || (isMe ? "You" : "Friend");
@@ -2092,10 +2093,10 @@ function _renderChatScreen(c, chatId, otherName) {
         const div = document.createElement("div");
         div.style.cssText = "display:flex;justify-content:" + (isMe ? "flex-end" : "flex-start") + ";margin:4px 0;";
         const bubble = document.createElement("div");
-        bubble.style.cssText = "max-width:75%;padding:8px 12px;border-radius:14px;font-size:13px;word-break:break-word;" + (isMe ? "background:#0f4d3a;color:#fff;border-bottom-right-radius:4px;" : "background:#fff;color:#12261e;border:1px solid rgba(15,77,58,.15);border-bottom-left-radius:4px;");
+        bubble.style.cssText = "max-width:78%;padding:9px 13px;border-radius:18px;font-size:14px;line-height:1.35;word-break:break-word;" + (isMe ? "background:#12664b;color:#fff;border-bottom-right-radius:6px;" : "background:#202126;color:#f2f2f4;border-bottom-left-radius:6px;");
         bubble.textContent = m.text; // textContent — never innerHTML (blocks injection)
         const timeSpan = document.createElement("div");
-        timeSpan.style.cssText = "font-size:9px;margin-top:2px;text-align:right;color:" + (isMe ? "rgba(255,255,255,.75)" : "#7a877f") + ";";
+        timeSpan.style.cssText = "font-size:9px;margin-top:2px;text-align:right;color:" + (isMe ? "rgba(255,255,255,.6)" : "#7d808a") + ";";
         timeSpan.textContent = time + (isMe ? " ✓" : "");
         bubble.appendChild(timeSpan);
         div.appendChild(bubble);
@@ -2154,9 +2155,13 @@ window._closeChatView = () => {
 };
 window._sendMsg = async () => {
   const input = document.getElementById("msg-input");
-  if (!input || !input.value.trim()) return;
-  await sendMessage(window._openChatId, input.value);
-  input.value = "";
+  if (!input) return;
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";                                   // clear at once so sending feels instant
+  let ok = false;
+  try { ok = await sendMessage(window._openChatId, text); } catch (e) { console.warn("[messages] send failed", e); }
+  if (!ok) { const box = document.getElementById("msg-input"); if (box && !box.value) box.value = text; }   // not sent: keep what was typed
 };
 window._chatSendMoney = () => {
   const amt = prompt("Send money to " + (window._openChatName || "user") + " — Enter amount ₦:");
