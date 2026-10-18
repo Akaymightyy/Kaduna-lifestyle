@@ -409,6 +409,7 @@ export async function build(scene, ctx) {
       else if (eid === "confirm_place") { if (!_isVisitor) _confirmPlace(ctx); }
       else if (eid === "cancel_place") _cancelPlace();
     },
+    getRooms() { return layout.rooms || []; },
     getComfort() { return calcComfort(_placedFurniture); },
     getPlaced() { return _placedFurniture; },
     isDecorating() { return _decorateMode; },
