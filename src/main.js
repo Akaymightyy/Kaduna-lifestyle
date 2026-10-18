@@ -422,7 +422,7 @@ function _handleWorldTap(clientX, clientY) {
     }
   }
 }
-const camera = new THREE.PerspectiveCamera(60, 1, 0.25, 400);
+const camera = new THREE.PerspectiveCamera(60, 1, 0.6, 400);
 const hemi = new THREE.HemisphereLight(0xdfeeff, 0x8a7a55, 1.0); scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff2d6, 1.8);
 sun.castShadow = Q.shadows;
