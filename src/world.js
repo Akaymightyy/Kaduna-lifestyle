@@ -86,7 +86,7 @@ export function buildWorld(scene) {
   world.add(ground);
 
   // ---- road ----
-  const asphalt = new THREE.MeshLambertMaterial({ color: 0x3a3d43 }); // flat planes: plain Lambert (cheapest)
+  const asphalt = new THREE.MeshLambertMaterial({ color: 0x3a3d43, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }); // flat planes: plain Lambert (cheapest). polygonOffset = no flicker/skipping on far roads
   const road = new THREE.Mesh(new THREE.PlaneGeometry(WORLD_HALF_X * 2 + 200, ROAD_HALF * 2), asphalt);
   road.rotation.x = -Math.PI / 2; road.position.y = 0.01; road.receiveShadow = true;
   world.add(road);
@@ -115,7 +115,7 @@ export function buildWorld(scene) {
       for (let x = -MAP_HALF_X + 16; x < MAP_HALF_X - 16; x += 9) strip(x, cz, 3.4, 0.22, dGeos, Y + 0.012);
     }
     const am = new THREE.Mesh(mergeGeometries(aGeos), asphalt); am.receiveShadow = true; world.add(am);
-    const dm = new THREE.Mesh(mergeGeometries(dGeos), new THREE.MeshBasicMaterial({ color: 0xf2f2ee })); world.add(dm);
+    const dm = new THREE.Mesh(mergeGeometries(dGeos), new THREE.MeshBasicMaterial({ color: 0xf2f2ee, polygonOffset: true, polygonOffsetFactor: -5, polygonOffsetUnits: -5 })); world.add(dm);
     aGeos.forEach((g) => g.dispose()); dGeos.forEach((g) => g.dispose());
   }
 
@@ -135,7 +135,7 @@ export function buildWorld(scene) {
   medGrass.position.y = 0.22; world.add(medGrass);
 
   // lane markings
-  const white = new THREE.MeshBasicMaterial({ color: 0xf2f2ee });
+  const white = new THREE.MeshBasicMaterial({ color: 0xf2f2ee, polygonOffset: true, polygonOffsetFactor: -5, polygonOffsetUnits: -5 });
   const dashCount = Math.floor((WORLD_HALF_X * 2) / 8);
   const dashes = new THREE.InstancedMesh(new THREE.PlaneGeometry(3, 0.22).rotateX(-Math.PI / 2), white, dashCount * 2);
   const m4 = new THREE.Matrix4();

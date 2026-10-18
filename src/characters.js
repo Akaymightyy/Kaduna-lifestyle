@@ -355,12 +355,60 @@ function makeRig(group, model, baseY, pose = "stand") {
       } else if (_emoteType === "pray") {
         turn("LeftUpLeg", 0); turn("RightUpLeg", 0); turn("LeftLeg", 0); turn("RightLeg", 0);
         arms(0.12, 0.12, 1.45, 1.45, -0.55);
+      } else if (_emoteType === "eat") {
+        // sitting, left hand holds the bowl, right hand goes bowl -> mouth
+        const k = 0.5 + 0.5 * Math.sin(ephase * 0.55);
+        model.position.y = baseY - 0.45;
+        turn("LeftUpLeg", SIT_HIP); turn("RightUpLeg", SIT_HIP); turn("LeftLeg", -SIT_HIP * 0.95); turn("RightLeg", -SIT_HIP * 0.95);
+        arms(0.55, 0.45 + k * 0.5, 1.5, 1.2 + k * 1.15, 0.0);
+      } else if (_emoteType === "drink") {
+        const k = 0.5 + 0.5 * Math.sin(ephase * 0.35);
+        turn("LeftUpLeg", 0); turn("RightUpLeg", 0); turn("LeftLeg", 0); turn("RightLeg", 0);
+        arms(0.05, 0.6 + k * 0.4, 0.18, 1.3 + k * 1.1, 0.0);
+      } else if (_emoteType === "toilet") {
+        model.position.y = baseY - 0.45;
+        turn("LeftUpLeg", SIT_HIP); turn("RightUpLeg", SIT_HIP); turn("LeftLeg", -SIT_HIP * 0.95); turn("RightLeg", -SIT_HIP * 0.95);
+        arms(0.45, 0.45, 1.2, 1.2, 0.1);
+      } else if (_emoteType === "sitwatch") {
+        model.position.y = baseY - 0.45;
+        turn("LeftUpLeg", SIT_HIP); turn("RightUpLeg", SIT_HIP); turn("LeftLeg", -SIT_HIP * 0.95); turn("RightLeg", -SIT_HIP * 0.95);
+        arms(0.35, 0.35, 1.1, 1.1, 0.05 + Math.sin(ephase * 0.2) * 0.02);
+      } else if (_emoteType === "shower") {
+        // both hands up scrubbing hair and body
+        turn("LeftUpLeg", 0); turn("RightUpLeg", 0); turn("LeftLeg", 0); turn("RightLeg", 0);
+        arms(2.5 + esw * 0.25, 2.5 - esw * 0.25, 2.9 + esw * 0.2, 2.9 - esw * 0.2, -0.1);
+      } else if (_emoteType === "sleep") {
+        // lying on the back (the bed prop lifts the body)
+        model.rotation.x = -1.45;
+        model.position.y = baseY;
+        turn("LeftUpLeg", 0); turn("RightUpLeg", 0); turn("LeftLeg", 0); turn("RightLeg", 0);
+        arms(0.15, 0.15, 0.25, 0.25, 0.05);
+      } else if (_emoteType === "swim") {
+        // face down, arms circling, legs kicking
+        model.rotation.x = 1.38;
+        model.position.y = baseY + 0.05 * Math.sin(ephase * 0.6);
+        turn("LeftUpLeg", Math.sin(ephase * 1.1) * 0.35); turn("RightUpLeg", -Math.sin(ephase * 1.1) * 0.35);
+        turn("LeftLeg", 0.15); turn("RightLeg", 0.15);
+        arms(2.9 + Math.sin(ephase * 0.55) * 1.4, 2.9 - Math.sin(ephase * 0.55) * 1.4, 2.9 + Math.sin(ephase * 0.55 + 0.8) * 0.8, 2.9 - Math.sin(ephase * 0.55 + 0.8) * 0.8, 0.0);
+      } else if (_emoteType === "kick") {
+        // football: run-up swing of the right leg
+        const k = Math.sin(ephase * 0.7);
+        model.position.y = baseY;
+        turn("LeftUpLeg", 0.05); turn("LeftLeg", 0.05);
+        turn("RightUpLeg", -0.9 * Math.max(0, k) + 0.5 * Math.max(0, -k)); turn("RightLeg", 0.9 * Math.max(0, k));
+        arms(-0.6 * k, 0.6 * k, 0.4, 0.4);
+      } else if (_emoteType === "swing") {
+        // tennis forehand
+        const k = Math.sin(ephase * 0.6);
+        turn("LeftUpLeg", 0); turn("RightUpLeg", 0); turn("LeftLeg", 0); turn("RightLeg", 0);
+        arms(0.2, 1.1 + k * 0.9, 0.3, 0.6 + k * 0.6, 0.0);
       }
       return;
     } else if (_emoteType) {
       // Emote ended — reset
       _emoteType = null;
     }
+    if (model.rotation.x !== 0) model.rotation.x = 0;   // lying / swimming poses tilt the model
     if (speed > 0.15) {
       model.position.y = baseY + Math.abs(sw) * 0.04 * amp;
       turn("LeftUpLeg", sw * 0.6 * amp); turn("RightUpLeg", -sw * 0.6 * amp);
@@ -387,6 +435,7 @@ function makeRig(group, model, baseY, pose = "stand") {
     _emoteStart = performance.now() / 1000;
     _emoteEnd = _emoteStart + duration;
   };
+  animate.stopEmote = () => { _emoteEnd = 0; };
   animate.isEmoting = () => _emoteType !== null && performance.now() / 1000 < _emoteEnd;
   animate(0, 0);
   return animate;

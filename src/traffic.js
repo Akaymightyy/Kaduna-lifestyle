@@ -174,7 +174,7 @@ export function createTraffic(scene) {
     meshes[name] = { body, lights, i: 0, count };
   }
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
-  const white = new THREE.Color(1, 1, 1);
+  const white = new THREE.Color(1, 1, 1), sc = new THREE.Vector3(1, 1, 1);
   const positions = [];
 
   // ---- FIX: Per-car speed modifiers for yielding at crossings ----
@@ -219,7 +219,9 @@ export function createTraffic(scene) {
 
       p.set(xAdjusted, 0.02, c.lane.z);
       q.setFromAxisAngle(up, c.lane.dir > 0 ? 0 : Math.PI);
-      m.compose(p, q, one);
+      const ek = Math.min(1, Math.min(sAdjusted, len - sAdjusted) / 30);   // shrink to nothing at the ends so cars never pop in/out of walls
+      sc.setScalar(Math.max(0.001, ek));
+      m.compose(p, q, sc);
       mm.body.setMatrixAt(mm.i, m); mm.body.setColorAt(mm.i, c.color);
       mm.lights.setMatrixAt(mm.i, m); mm.lights.setColorAt(mm.i, white);
       mm.i++;

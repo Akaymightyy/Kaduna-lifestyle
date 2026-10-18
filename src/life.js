@@ -113,8 +113,10 @@ export function tickLife(px, pz, show = true) {
   const dir = new THREE.Vector3(), nx = new THREE.Vector3();
   const place = (mesh, i, c) => {
     c.s += c.v * dt; lanePos(c.ln, c.s, _p); lanePos(c.ln, c.s + 1.5, nx);
+    const lt = ((c.s % c.ln.len) + c.ln.len) % c.ln.len, ek = Math.max(0.001, Math.min(1, Math.min(lt, c.ln.len - lt) / 30));   // shrink at the lane ends: no popping out of walls
+    _s2.setScalar(ek);
     const yaw = Math.atan2(-(nx.z - _p.z), nx.x - _p.x);
-    _q.setFromAxisAngle(_up, yaw); _m.compose(_p, _q, _s); mesh.setMatrixAt(i, _m);
+    _q.setFromAxisAngle(_up, yaw); _m.compose(_p, _q, _s2); mesh.setMatrixAt(i, _m);
   };
   cars.forEach((c, i) => place(carMesh, i, c)); buses.forEach((c, i) => place(busMesh, i, c));
   carMesh.instanceMatrix.needsUpdate = true; busMesh.instanceMatrix.needsUpdate = true;

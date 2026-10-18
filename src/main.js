@@ -51,6 +51,7 @@ import { initAreaWorld, tickAreaWorld, setAreaLampsNight, disposeAreaWorld, getR
 // Way is filtered out (already rendered by world.js) to avoid double-render.
 import { fetchKadunaData, buildRealMap } from "./realmap.js";
 import { VEHICLE_CATALOG, getVehicle, initVehicles, buyVehicle, getOwned, ownsVehicle, isRiding, getRideSpeed, getRideId, spawnRideVehicle, despawnRideVehicle, tickRideVehicle } from "./vehicles.js";
+import { initActivity, startActivity, tickActivity, isBusy, cancelActivity, eatSpec, toiletSpec, sitSpec, funSpec, placeSpec } from "./activity.js";
 import { initWorldChat, toggleWorldChat, closeWorldChat, setChatBlocked, setChatOnline } from "./worldchat.js";
 import { initBillboards, getBillboards, getBillboardPositions, getBillboardAdInfo, buyBillboardAd } from "./billboards.js";
 import { initMessages, searchUsers, openDM, sendMessage, sendHouseInvite, openChat, closeChat, getChatList, sendMoney, createGroup, leaveGroup, blockUser, reportUser, getChatMeta, cleanupMessages, getPresence, listenToPresence, getProfile } from "./messages.js";
@@ -420,7 +421,7 @@ function _handleWorldTap(clientX, clientY) {
     }
   }
 }
-const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 400);
+const camera = new THREE.PerspectiveCamera(60, 1, 0.25, 400);
 const hemi = new THREE.HemisphereLight(0xdfeeff, 0x8a7a55, 1.0); scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xfff2d6, 1.8);
 sun.castShadow = Q.shadows;
@@ -434,6 +435,7 @@ addEventListener("resize", resize); resize();
 const world = buildWorld(scene);
 addScenery(scene, world);
 initLife(scene);
+initActivity(scene);
 const traffic = createTraffic(scene);
 let mmDraw = createMinimap($("mm"), world.mapShapes);
 // FEATURE 3b: init the chunk-streamed area world (roads + NPC houses + lamp posts).
@@ -679,7 +681,12 @@ function _renderPlaceActions(def) {
   toggle.style.display = "flex";
   bar.style.display = "none";
 }
-window.placeAction = (eventId) => sendUIEvent(eventId, {});
+window.placeAction = (eventId) => {
+  const ap = getActivePlace();
+  const spec = ap && rig ? placeSpec(ap.id, eventId, ap.handle, player, (ok) => { if (ok) sendUIEvent(eventId, {}); }) : null;
+  if (!spec) { sendUIEvent(eventId, {}); return; }
+  closePhone?.(); startActivity(spec, player, rig);
+};
 
 function updateHUD() {
   const s=game.state;
@@ -1657,7 +1664,13 @@ function showPhoneApp(appId){
   c.scrollTop=0;
 }
 window.showApp=showPhoneApp;
-window.buyFood=(id)=>{const r=game.eat(id);toast(r.msg||r.error);updateHUD();if(r.ok)showPhoneApp("food");};
+window.buyFood=(id)=>{
+  const f=FOOD_ITEMS.find(x=>x.id===id); if(!f) return;
+  if(game.state.money<f.price){toast("Not enough money");return;}
+  if(!rig||isBusy()){const r=game.eat(id);toast(r.msg||r.error);updateHUD();return;}
+  closePhone();
+  startActivity(eatSpec(player,(ok)=>{ if(!ok){toast("You stopped eating — money not taken");return;} const r=game.eat(id);toast(r.msg||r.error);updateHUD(); }, 6), player, rig);
+};
 window.doJob=(id)=>{const r=game.work(id);toast(r.msg||r.error);updateHUD();if(r.ok)showPhoneApp("jobs");};
 window.buyMed=(id)=>{
   const meds={panadol:{price:200,energy:10,hygiene:0,all:0},antimalarial:{price:800,energy:0,hygiene:20,all:0},energydrink:{price:350,energy:30,hygiene:0,all:0},vitamins:{price:500,energy:5,hygiene:5,all:5}};
@@ -2446,19 +2459,28 @@ function _onFunActivityTap() {
   window._funCool = window._funCool || {};
   const _left = (window._funCool[_nearestFunPlace.kind] || 0) - Date.now();
   if (_left > 0) { toast("⏳ Wait " + Math.ceil(_left / 1000) + "s before doing this again"); return; }
-  window._funCool[_nearestFunPlace.kind] = Date.now() + 60000;
+  if (isBusy()) return;
   if (act.cost > 0 && game.state.money < act.cost) { toast("Need ₦" + act.cost.toLocaleString()); return; }
-  if (act.cost > 0) game.state.money -= act.cost;
-  if (act.energyCost > 0) game.state.needs.energy = Math.max(0, (game.state.needs.energy || 0) - act.energyCost);
-  game.state.needs[act.need] = Math.min(100, (game.state.needs[act.need] || 0) + act.amount);
-  game.save?.(); updateHUD();
-  const uid = getMyUid();
-  if (uid && act.cost > 0) update(ref(db, "economy/" + uid), { balance: game.state.money });
-  toast(act.icon + " " + act.label + "! " + act.need + " +" + act.amount + (act.cost > 0 ? " (−₦" + act.cost.toLocaleString() + ")" : " (free)"));
+  const place = _nearestFunPlace;
+  const finish = (ok) => {
+    if (!ok) { toast("You stopped — nothing was charged"); return; }
+    window._funCool[place.kind] = Date.now() + 60000;
+    if (act.cost > 0) game.state.money -= act.cost;
+    if (act.energyCost > 0) game.state.needs.energy = Math.max(0, (game.state.needs.energy || 0) - act.energyCost);
+    game.state.needs[act.need] = Math.min(100, (game.state.needs[act.need] || 0) + act.amount);
+    game.save?.(); updateHUD();
+    const uid = getMyUid();
+    if (uid && act.cost > 0) update(ref(db, "economy/" + uid), { balance: game.state.money });
+    toast(act.icon + " " + act.label + "! " + act.need + " +" + act.amount + (act.cost > 0 ? " (−₦" + act.cost.toLocaleString() + ")" : " (free)"));
+  };
+  if (!rig) { finish(true); return; }
+  startActivity(funSpec(place, act, player, finish), player, rig);
 }
 // FEATURE: Emotes — REAL character animations via bone manipulation
 window._emote = (type, duration = 3) => {
   if (!rig || !rig.animate || !rig.animate.emote) { toast("Character not loaded yet"); return; }
+  if (isBusy()) cancelActivity();
+  if (type === "sit") { startActivity(sitSpec(player, null, 25), player, rig); toast("🪑 You sat down on a stool (move to stand up)"); return; }
   rig.animate.emote(type, duration);
   const labels = { wave: "waved", dance: "is dancing", sit: "sat down", clap: "is clapping", jump: "jumped", squat: "squatted", point: "is pointing", laugh: "is laughing", pray: "is praying" };
   const icons = { wave: "👋", dance: "💃", sit: "🪑", clap: "👏", jump: "🦘", squat: "🏋️", point: "👆", laugh: "😂", pray: "🙏" };
@@ -2768,11 +2790,29 @@ function _renderSheet(tab){
     if(s.money>50000)feelings.push({n:"Big Oga",v:15,i:"💰"});
     if(s.money<1000)feelings.push({n:"Broke",v:-10,i:"💸"});
     const mood=feelings.reduce((s,f)=>s+f.v,0);
-    el.innerHTML='<div style="font-size:13px;font-weight:700;margin-bottom:8px;color:var(--green);">Needs</div>'+NEEDS.map(n=>{const v=Math.round(s.needs[n.key]||0);const c=v<20?"#e11d48":v<40?"#f2b134":"#2e7d4f";return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><span style="font-size:14px;">'+n.icon+'</span><div style="flex:1;height:8px;background:#e0ddd5;border-radius:4px;overflow:hidden;"><div style="height:100%;width:'+v+'%;background:'+c+';"></div></div><span style="font-size:11px;color:#666;width:30px;text-align:right;">'+v+'%</span></div>';}).join("")+'<div style="font-size:13px;font-weight:700;margin:14px 0 8px;color:var(--green);">Feelings</div><div style="font-size:11px;color:#666;margin-bottom:8px;">Mood: <b style="color:'+(mood>20?"#2e7d4f":mood>0?"#f2b134":"#e11d48")+';">'+(mood>20?"Happy":mood>0?"Fine":mood>-20?"Stressed":"Suffering")+'</b> ('+mood+')</div>'+feelings.map(f=>'<div class="feeling-card"><span>'+f.i+' '+f.n+'</span><span class="fc-val" style="color:'+(f.v>0?"#2e7d4f":"#e11d48")+';">'+(f.v>0?"+":"")+f.v+'</span></div>').join("")+'<button onclick="window.closeSheet()" style="width:100%;background:rgba(0,0,0,.05);color:#666;border:none;border-radius:10px;padding:12px;cursor:pointer;font-size:13px;font-weight:600;margin-top:10px;">Close</button>';
+    el.innerHTML='<div style="font-size:13px;font-weight:700;margin-bottom:8px;color:var(--green);">Needs</div>'+NEEDS.map(n=>{const v=Math.round(s.needs[n.key]||0);const c=v<20?"#e11d48":v<40?"#f2b134":"#2e7d4f";return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><span style="font-size:14px;">'+n.icon+'</span><div style="flex:1;height:8px;background:#e0ddd5;border-radius:4px;overflow:hidden;"><div style="height:100%;width:'+v+'%;background:'+c+';"></div></div><span style="font-size:11px;color:#666;width:30px;text-align:right;">'+v+'%</span></div>';}).join("")+'<div style="font-size:13px;font-weight:700;margin:14px 0 8px;color:var(--green);">Feelings</div><div style="font-size:11px;color:#666;margin-bottom:8px;">Mood: <b style="color:'+(mood>20?"#2e7d4f":mood>0?"#f2b134":"#e11d48")+';">'+(mood>20?"Happy":mood>0?"Fine":mood>-20?"Stressed":"Suffering")+'</b> ('+mood+')</div>'+feelings.map(f=>'<div class="feeling-card"><span>'+f.i+' '+f.n+'</span><span class="fc-val" style="color:'+(f.v>0?"#2e7d4f":"#e11d48")+';">'+(f.v>0?"+":"")+f.v+'</span></div>').join("")+'<div style="display:flex;gap:6px;margin-top:10px;"><button onclick="window._doNeed(\'toilet\')" style="flex:1;background:#2e86ab;color:#fff;border:none;border-radius:10px;padding:10px 4px;font-size:12px;font-weight:700;cursor:pointer;">🚻 Toilet</button><button onclick="window._doNeed(\'shower\')" style="flex:1;background:#3c8dbc;color:#fff;border:none;border-radius:10px;padding:10px 4px;font-size:12px;font-weight:700;cursor:pointer;">🚿 Shower</button><button onclick="window._doNeed(\'sleep\')" style="flex:1;background:#6b4a8a;color:#fff;border:none;border-radius:10px;padding:10px 4px;font-size:12px;font-weight:700;cursor:pointer;">😴 Sleep</button></div>'+'<button onclick="window.closeSheet()" style="width:100%;background:rgba(0,0,0,.05);color:#666;border:none;border-radius:10px;padding:12px;cursor:pointer;font-size:13px;font-weight:600;margin-top:10px;">Close</button>';
   } else if(tab==="goals"){
     el.innerHTML='<div style="font-size:13px;font-weight:700;margin-bottom:8px;color:var(--green);">Daily Goals</div><div class="feeling-card"><span>🍛 Eat something</span><span style="color:#2e7d4f;">+₦300</span></div><div class="feeling-card"><span>💼 Complete a job</span><span style="color:#2e7d4f;">+₦500</span></div><div class="feeling-card"><span>💬 Send a chat</span><span style="color:#2e7d4f;">+₦200</span></div><div class="feeling-card"><span>🛺 Travel to a place</span><span style="color:#2e7d4f;">+₦400</span></div><div class="feeling-card"><span>👕 Change your clothes</span><span style="color:#2e7d4f;">+₦100</span></div><div style="font-size:13px;font-weight:700;margin:14px 0 8px;color:var(--green);">Weekly Goals</div><div class="feeling-card"><span>🏆 Reach Hustler rank (₦10k)</span><span style="color:#999;">In progress</span></div><div class="feeling-card"><span>🏠 Rent a home</span><span style="color:#999;">Coming soon</span></div><div class="feeling-card"><span>👥 Make 5 friends</span><span style="color:#999;">0/5</span></div><button onclick="window.closeSheet()" style="width:100%;background:rgba(0,0,0,.05);color:#666;border:none;border-radius:10px;padding:12px;cursor:pointer;font-size:13px;font-weight:600;margin-top:10px;">Close</button>';
   }
 }
+window._doNeed = (kind) => {
+  window.closeSheet?.(); closePhone?.();
+  if (!rig) return;
+  if (isBusy()) { toast("Finish what you dey do first"); return; }
+  const ap = getActivePlace();
+  if (ap && ap.id === "home") { window.placeAction(kind); return; }
+  if (kind === "toilet") {
+    const fee = ap ? 0 : 50;
+    if (game.state.money < fee) { toast("Need ₦" + fee + " for the public toilet"); return; }
+    const spec = toiletSpec(player, (ok) => {
+      if (!ok) return;
+      game.state.money -= fee; game.state.needs.bladder = Math.min(100, (game.state.needs.bladder || 0) + 60);
+      game.save?.(); updateHUD(); toast("🚽 Bladder relieved" + (fee ? " (−₦" + fee + ")" : ""));
+    }, 5);
+    startActivity(spec, player, rig); return;
+  }
+  toast(kind === "shower" ? "🚿 Go home to take a shower (or use a place's shower)" : "😴 Go home to sleep in your bed (or rest at the hostel/hospital)");
+};
 window.openPhone=openPhone;
 // ---- Mission tracker + claim functions ----
 window._claimDaily=(id)=>claimDailyReward(id);
@@ -3393,6 +3433,8 @@ function _frame() {
   } else {
     // NORMAL WALKING (existing camera-relative control scheme)
     const it = ctl.intent();
+    const _actOn = tickActivity(dt, it.mag);        // eating / swimming / sleeping... owns the character while it runs
+    if (!_actOn) {
     const maxSpd = (ctl.jog ? 4.8 : 2.1) * (game.state.needs?.energy < 20 ? 0.5 : 1.0);
     const target = it.mag * maxSpd;
     player.speed += (target - player.speed) * (1 - Math.exp(-dt * 9));
@@ -3402,13 +3444,14 @@ function _frame() {
       player.heading += d * (1 - Math.exp(-dt * 12));
       player.pos.x += it.x * player.speed * dt; player.pos.z += it.z * player.speed * dt;
     }
+    }
   }
   const active = getActivePlace();
   // SAFETY: auto-dismount vehicle when entering a place (can't ride inside a shop)
   if (active && isRiding()) { despawnRideVehicle(); toast("🚶 Dismounted (entered building)"); }
-  if (!active) collide(player.pos, world.colliders);
+  if (!active && !isBusy()) collide(player.pos, world.colliders);
   // If we're inside a place, also collide with the place's local colliders
-  if (active?.handle?.colliders) {
+  if (active?.handle?.colliders && !isBusy()) {
     for (const c of active.handle.colliders) {
       const cx = Math.max(c.minX, Math.min(player.pos.x, c.maxX));
       const cz = Math.max(c.minZ, Math.min(player.pos.z, c.maxZ));
@@ -3439,7 +3482,7 @@ function _frame() {
     }
   }
   if (rig) {
-    rig.group.position.copy(player.pos);
+    rig.group.position.copy(player.pos); rig.group.position.y += player.yOff || 0;
     rig.group.rotation.y = player.heading;
     rig.animate(dt, player.speed);
     // FEATURE: hide the player's character model when riding a vehicle.
@@ -3565,6 +3608,6 @@ Promise.all([loadPlayer(manager, scene, game.state.look), addCity(scene, world, 
   
   frame();
   $("loading").classList.add("done");
-  window.__dbg = { player, ctl, npcs, renderer, scene, game };
+  window.__dbg = { player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig };
   window.__ready = true;
 }).catch((e) => showError("Could not load the game: " + e.message));
