@@ -283,7 +283,7 @@ function applyBuild(model, look) {
 
 const _q = new THREE.Quaternion(), _ax = new THREE.Vector3(1, 0, 0);
 const base = (n) => n.replace(/^mixamorig[:_]?/i, "").replace(/_\d+$/, "");
-const SIT_HIP = -1.45; // thigh swing for sitting (negative = forward)
+const SIT_HIP = 1.45; // thigh swing for sitting (positive = knees forward)
 const WANT = ["LeftArm", "RightArm", "LeftForeArm", "RightForeArm", "LeftUpLeg", "RightUpLeg", "LeftLeg", "RightLeg"];
 
 function makeRig(group, model, baseY, pose = "stand") {
