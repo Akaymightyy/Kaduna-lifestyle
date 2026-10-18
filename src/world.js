@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { ROAD_HALF, WORLD_HALF_X, CROSSINGS, SIDE_STREETS, WIDE_AVENUES_X, WIDE_CROSS_Z, MAP_HALF_X, MAP_HALF_Z, rng } from "./config.js";
 
-import { stylize } from "./art/style.js";
+import { stylize, NIGHT_GLOW } from "./art/style.js";
 const OL = (o) => stylize(new THREE.MeshLambertMaterial(o), { pat: false, ao: true, fake: false });
 const C = (hex) => new THREE.Color(hex);
 
@@ -47,6 +47,44 @@ function withPat(g, code) {
   return g;
 }
 const OLP = (o) => stylize(new THREE.MeshLambertMaterial(o), { pat: true, ao: true, fake: false });
+
+
+// ---- Night window glow ----
+// The merged building mesh tiles ONE small window picture on every wall (see windowTexture). At night we light the glass part
+// of that picture, with a random on/off per window and per building, in warm yellow (a few cool white = TV light).
+// Cost: one uniform + a few maths lines in the shader. No extra meshes, no extra lights, nothing when it is day.
+const WIN_GLOW_DECL = `
+uniform float uNightGlow;
+float wgh(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+`;
+const WIN_GLOW_BODY = `
+#if defined(USE_MAP) && defined(USE_COLOR)
+if (uNightGlow > 0.01) {
+  vec2 wc = floor(vMapUv); vec2 wf = fract(vMapUv);
+  float glass = step(0.27, wf.x) * step(wf.x, 0.73) * step(0.335, wf.y) * step(wf.y, 0.775);
+  glass *= 1.0 - step(0.488, wf.x) * step(wf.x, 0.518);                                    // centre bar
+  glass *= 1.0 - step(0.30, wf.x) * step(wf.x, 0.43) * step(0.34, wf.y) * step(wf.y, 0.41); // AC unit
+  vec2 salt = vColor.rg * 57.0 + vColor.b * 13.0;                                           // each building differs
+  float on = step(0.40, wgh(wc + salt));
+  float cool = step(0.86, wgh(wc.yx + salt + 3.7));
+  vec3 wcol = mix(vec3(1.0, 0.78, 0.38), vec3(0.78, 0.9, 1.0), cool);
+  float flick = 1.0 - 0.06 * step(0.97, wgh(wc + salt + 9.1));
+  outgoingLight = mix(outgoingLight, wcol * 1.05 * flick, glass * on * uNightGlow * 0.95);
+}
+#endif
+`;
+function addWindowGlow(mat) {
+  const prev = mat.onBeforeCompile, prevKey = mat.customProgramCacheKey;
+  mat.onBeforeCompile = (shader, renderer) => {
+    if (prev) prev(shader, renderer);
+    shader.uniforms.uNightGlow = NIGHT_GLOW;
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", "#include <common>\n" + WIN_GLOW_DECL)
+      .replace("#include <opaque_fragment>", WIN_GLOW_BODY + "\n#include <opaque_fragment>");
+  };
+  mat.customProgramCacheKey = () => (prevKey ? prevKey.call(mat) : "") + "|winglow";
+  return mat;
+}
 
 function windowBox(w, h, d, color, code = 0) {
   const g = new THREE.BoxGeometry(w, h, d);
@@ -203,7 +241,7 @@ export function buildWorld(scene) {
     }
   }
   for (const sx of SIDE_STREETS) for (const side of [1, -1]) addBuilding(sx, side * 62, 26, 12, 16, C(0xe8d3b0), side);
-  const bMat = OLP({ map: windowTexture(), vertexColors: true });
+  const bMat = addWindowGlow(OLP({ map: windowTexture(), vertexColors: true }));
   const buildings = new THREE.Mesh(mergeGeometries(geos), bMat);
   buildings.castShadow = false; buildings.receiveShadow = true; // big merged mesh — only receive, don't cast (saves shadow map cost)
   world.add(buildings);

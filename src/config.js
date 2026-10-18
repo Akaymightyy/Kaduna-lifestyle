@@ -29,6 +29,9 @@ export const REAL_MS_PER_GAME_HOUR = TIME_SCALE * 60 * 60 * 1000;  // 1 real hou
 //         pitch-black. Lamp posts glow softly at night.
 //   17.5 = locked to 5:30pm evening always (override for testing only).
 // Override per-session with `?t=22` URL param.
+// Night look. true = the sky, street lights, window glow and car headlights follow the REAL clock (dark after ~6:30 PM).
+// false = the old behaviour: the game always shows daytime. Shop opening hours are NOT affected by this switch.
+export const SHOW_NIGHT = true;
 export const FIXED_HOUR = null;  // FEATURE: natural day/night cycle (was 17.5 evening-lock)
 
 export const LANES = [

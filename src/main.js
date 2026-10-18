@@ -6,7 +6,7 @@ import { createControls, updateCamera } from "./controls.js";
 import { createMinimap } from "./minimap.js";
 import { addCity } from "./city.js";
 import { WIDE_AVENUES_X, WIDE_CROSS_Z, MAP_HALF_X, MAP_HALF_Z } from "./config.js";
-import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAILY_QUESTS, DAILY_REWARDS, TIME_SCALE, REAL_MS_PER_GAME_HOUR, FIXED_HOUR } from "./config.js";
+import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAILY_QUESTS, DAILY_REWARDS, TIME_SCALE, REAL_MS_PER_GAME_HOUR, FIXED_HOUR, SHOW_NIGHT } from "./config.js";
 import { createGameState } from "./needs.js";
 import { auth, db } from "./firebase.js";
 import { initAuth, showAuthModal, wireAuthUI, logout, isAuthed } from "./auth.js";
@@ -32,7 +32,7 @@ import { addScenery, SCENERY_LABELS } from "./scenery.js";
 import { initLife, tickLife } from "./life.js";
 import { initLiveMap, openLiveMap, closeLiveMap, isLiveMapOn, liveMapFrame } from "./livemap.js";
 import { perfFrameStart, perfBeforeRender, perfAfterRender } from "./perf.js";
-import { initGraphics, updateSky, tickGraphics, tickShadows, applyQuality, autoDetectQuality, getQuality, QUALITY_PRESETS } from "./graphics.js";
+import { initGraphics, updateSky, nightAmount, tickGraphics, tickShadows, applyQuality, autoDetectQuality, getQuality, QUALITY_PRESETS } from "./graphics.js";
 import { AREAS, getArea, claimPlot, getMyHouse, canPickArea, getPlotPosition } from "./areas.js";
 import { resolvePlayerHouseKey, loadHouse, setHouseLocked, listenForKnocks, respondToKnock } from "./houses.js";
 import {
@@ -533,7 +533,7 @@ function applyTime() {
   const mins = Date.now() / REAL_MS_PER_GAME_HOUR + 1; // game-hours since epoch (+1 = Nigeria time, WAT)
   let rawHour = mins % 24;
   // FEATURE: clamp to daytime — never show night.
-  const hour = fixedHour ?? (rawHour < 6 || rawHour > 18 ? 12 : rawHour);
+  const hour = fixedHour ?? (!SHOW_NIGHT && (rawHour < 6 || rawHour > 18) ? 12 : rawHour);   // SHOW_NIGHT (config.js): real night look. Shop hours still use _gameHour().
   // ---- Init graphics once (after scene/sun/hemi are ready) ----
   if (!_graphicsInited) {
     _graphicsInited = true;
@@ -545,6 +545,7 @@ function applyTime() {
   }
   // ---- Update sky + sun + clouds based on hour ----
   updateSky(hour);
+  if (traffic.setGlow) traffic.setGlow(nightAmount(hour));   // headlight + tail light glow, smooth at dusk/dawn
   _pShadow.set(0, player.pos.x, player.pos.z, 1.0, 1.0); _pShadow.done();
   const night = hour < 6.5 || hour > 19.5;
   // sun follows the player (shadows) — position set by updateSky, but we offset to follow player

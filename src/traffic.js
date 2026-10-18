@@ -145,6 +145,51 @@ function isPedAtCrossing(carX, laneZ, dir) {
   return null;
 }
 
+
+// ---- Night headlight glow (all cars share one small texture atlas + one extra instanced mesh per car type) ----
+// Left half of the atlas = soft round halo (headlight / tail light). Right half = pool of light on the road ahead of the car.
+function makeGlowAtlas() {
+  const c = document.createElement("canvas"); c.width = 256; c.height = 128;
+  const g = c.getContext("2d"), img = g.createImageData(256, 128), d = img.data;
+  for (let y = 0; y < 128; y++) for (let x = 0; x < 256; x++) {
+    let a = 0;
+    if (x < 128) {                                   // halo
+      const dx = (x - 63.5) / 64, dy = (y - 63.5) / 64, r = Math.sqrt(dx * dx + dy * dy);
+      a = r >= 1 ? 0 : Math.pow(1 - r, 2.2);
+    } else {                                         // road pool: bright at the car, fades out ahead and to the sides
+      const u = (x - 128) / 127, v = y / 127;
+      const side = Math.max(0, 1 - Math.abs(v - 0.5) * 2);
+      a = Math.pow(1 - u, 1.9) * Math.pow(side, 1.7) * Math.min(1, u * 10) * 0.5;
+    }
+    const i = (y * 256 + x) * 4; d[i] = d[i + 1] = d[i + 2] = 255; d[i + 3] = Math.round(Math.max(0, Math.min(1, a)) * 255);
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+function glowPaint(g, rgb) {
+  const n = g.attributes.position.count, col = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) { col[i * 3] = rgb[0]; col[i * 3 + 1] = rgb[1]; col[i * 3 + 2] = rgb[2]; }
+  g.setAttribute("color", new THREE.BufferAttribute(col, 3)); return g;
+}
+function glowUV(g, off) { const uv = g.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, off + uv.getX(i) * 0.5, uv.getY(i)); return g; }
+function glowGeometry(T) {
+  const out = []; let frontX = T.L / 2;
+  for (const lg of T.lights()) {                      // works for every car type: front lights are +x, tail lights are -x
+    lg.computeBoundingBox();
+    const c = lg.boundingBox.getCenter(new THREE.Vector3()), front = c.x > 0;
+    if (front) frontX = Math.max(frontX, lg.boundingBox.max.x);
+    const size = front ? 1.05 : 0.65, rgb = front ? [1.0, 0.9, 0.66] : [1.0, 0.12, 0.06];
+    for (const ry of [0, Math.PI / 2]) {              // two crossed planes so the halo is visible from any side
+      const h = glowUV(new THREE.PlaneGeometry(size, size), 0); h.rotateY(ry); h.translate(c.x + (front ? 0.1 : -0.1), c.y, c.z);
+      out.push(glowPaint(h, rgb));
+    }
+  }
+  const len = 8, wid = Math.max(2.4, T.W * 2.2);      // pool of light on the road
+  const pool = glowUV(new THREE.PlaneGeometry(len, wid), 0.5); pool.rotateX(-Math.PI / 2); pool.translate(frontX + len / 2 - 0.3, 0.035, 0);
+  out.push(glowPaint(pool, [1.0, 0.86, 0.55]));
+  return mergeGeometries(out);
+}
+
 export function createTraffic(scene) {
   const R = rng(777);
   const names = Object.keys(TYPES);
@@ -161,6 +206,8 @@ export function createTraffic(scene) {
       cars.push({ lane, type, offset: i * gap + (R() - 0.5) * gap * 0.35, color: new THREE.Color(pool[Math.floor(R() * pool.length)]) });
     }
   });
+  const glowMat = new THREE.MeshBasicMaterial({ map: makeGlowAtlas(), vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, opacity: 0, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+  let glowOn = false;
   const meshes = {};
   for (const name of names) {
     const T = TYPES[name];
@@ -171,7 +218,10 @@ export function createTraffic(scene) {
     body.frustumCulled = lights.frustumCulled = false;
     body.castShadow = false;
     scene.add(body, lights);
-    meshes[name] = { body, lights, i: 0, count };
+    const glow = new THREE.InstancedMesh(glowGeometry(T), glowMat, count);
+    glow.frustumCulled = false; glow.visible = false; glow.renderOrder = 3;
+    scene.add(glow);
+    meshes[name] = { body, lights, glow, i: 0, count };
   }
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
   const white = new THREE.Color(1, 1, 1), sc = new THREE.Vector3(1, 1, 1);
@@ -224,12 +274,14 @@ export function createTraffic(scene) {
       m.compose(p, q, sc);
       mm.body.setMatrixAt(mm.i, m); mm.body.setColorAt(mm.i, c.color);
       mm.lights.setMatrixAt(mm.i, m); mm.lights.setColorAt(mm.i, white);
+      if (glowOn) mm.glow.setMatrixAt(mm.i, m);
       mm.i++;
       positions.push({ x: xAdjusted, z: c.lane.z, hl: TYPES[c.type].L / 2, hw: TYPES[c.type].W / 2, dir: c.lane.dir, speed: c.lane.speed });
     }
     for (const k in meshes) {
       const mm = meshes[k];
       mm.body.instanceMatrix.needsUpdate = mm.lights.instanceMatrix.needsUpdate = true;
+      if (glowOn) mm.glow.instanceMatrix.needsUpdate = true;
       if (mm.body.instanceColor) mm.body.instanceColor.needsUpdate = true;
       if (mm.lights.instanceColor) mm.lights.instanceColor.needsUpdate = true;
     }
@@ -237,5 +289,11 @@ export function createTraffic(scene) {
   function setNight(night) {
     for (const k in meshes) meshes[k].lights.material.color.setScalar(night ? 1 : 0.7);
   }
-  return { update, setNight, positions, cars, meshes, setVisible(v) { for (const k in meshes) { meshes[k].body.visible = v; meshes[k].lights.visible = v; } } };
+  // v = 0 (day) .. 1 (night). Headlights/tail lights glow and light the road ahead. Costs nothing while it is day.
+  function setGlow(v) {
+    glowMat.opacity = Math.max(0, Math.min(1, v));
+    const on = v > 0.02;
+    if (on !== glowOn) { glowOn = on; for (const k in meshes) meshes[k].glow.visible = on && meshes[k].body.visible; }
+  }
+  return { update, setNight, setGlow, positions, cars, meshes, setVisible(v) { for (const k in meshes) { meshes[k].body.visible = v; meshes[k].lights.visible = v; meshes[k].glow.visible = v && glowOn; } } };
 }

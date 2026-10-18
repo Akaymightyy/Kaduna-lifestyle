@@ -12,7 +12,7 @@
 // - No per-frame cube camera renders (the official example re-renders reflections
 //   every frame; we skip that entirely — it's for reflective water, which we don't have).
 
-import { setArtQuality } from "./art/style.js";
+import { setArtQuality, NIGHT_GLOW } from "./art/style.js";
 import * as THREE from "three";
 // Sky addon is loaded lazily inside initGraphics() so the game doesn't crash
 // if the addon fails to load (e.g. on older browsers or bundler issues).
@@ -171,7 +171,14 @@ function _createClouds() {
 // ---- Update sky + sun based on game hour ----
 // Called from main.js applyTime(). Only re-calculates when the hour changes
 // (not every frame) to save CPU.
+// How dark is it, 0..1, with a smooth dusk (5:40 PM to 7:20 PM) and dawn (5:00 AM to 6:36 AM). Used for window + headlight glow.
+export function nightAmount(hour) {
+  const s = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  return Math.max(s(17.7, 19.3, hour), 1 - s(5.0, 6.6, hour));
+}
+
 export function updateSky(hour) {
+  NIGHT_GLOW.value = nightAmount(hour);     // cheap, every frame: smooth dusk/dawn for the glow
   const h = Math.floor(hour * 10) / 10; // quantize to 0.1h = 6min
   if (h === _lastHour) return;
   _lastHour = h;
