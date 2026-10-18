@@ -193,7 +193,10 @@ let _glbLoader = null;
 async function _getGlbLoader() {
   if (_glbLoader) return _glbLoader;
   const { GLTFLoader } = await import("three/examples/jsm/loaders/GLTFLoader.js");
+  // The vehicle models are meshopt-compressed (~65% smaller download), so the loader needs the decoder.
+  const { MeshoptDecoder } = await import("three/examples/jsm/libs/meshopt_decoder.module.js");
   _glbLoader = new GLTFLoader();
+  _glbLoader.setMeshoptDecoder(MeshoptDecoder);
   return _glbLoader;
 }
 
