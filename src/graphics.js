@@ -30,13 +30,62 @@ let _quality = "medium"; // low | medium | high
 
 // ---- Quality presets ----
 export const QUALITY_PRESETS = {
-  low:    { pixelRatio: 1.0, shadowMap: 0,    antialias: false, fogNear: 35, fogFar: 85,  shadows: false, clouds: false, skyShader: false },
-  medium: { pixelRatio: 1.5, shadowMap: 1024, antialias: false, fogNear: 50, fogFar: 130, shadows: true,  clouds: true,  skyShader: true  },
-  high:   { pixelRatio: 2.0, shadowMap: 2048, antialias: true,  fogNear: 60, fogFar: 160, shadows: true,  clouds: true,  skyShader: true  },
+  low:    { pixelRatio: 1.0, shadowMap: 0,    antialias: false, fogNear: 35, fogFar: 85,  shadows: false, clouds: false, skyShader: false, ibl: false },
+  medium: { pixelRatio: 1.5, shadowMap: 1024, antialias: false, fogNear: 50, fogFar: 130, shadows: true,  clouds: true,  skyShader: true,  ibl: true  },
+  high:   { pixelRatio: 2.0, shadowMap: 2048, antialias: true,  fogNear: 60, fogFar: 160, shadows: true,  clouds: true,  skyShader: true,  ibl: true  },
 };
 
 export function getQuality() { return _quality; }
 export function setQuality(q) { _quality = q; }
+
+
+// ---- Image-based lighting (IBL) ----
+// scene.environment only affects MeshStandardMaterial (vehicles, characters, Kenney houses, metal props).
+// The hand-painted Lambert/shader materials from art/style.js ignore it, so the stylised look is untouched.
+// It is ONE small PMREM texture built once from a gradient dome (no files, no per-frame cost).
+// Kill switch: add ?env=off to the address.
+let _envTex = null;
+let _envIntensity = 0.5;
+function _iblDisabledByUrl() {
+  try { return /[?&]env=off/.test(location.search); } catch (e) { return false; }
+}
+export function buildSkyEnvironment(renderer) {
+  const envScene = new THREE.Scene();
+  // Gradient dome: deep sky blue overhead, pale haze at the horizon, warm earth bounce below.
+  const geo = new THREE.SphereGeometry(50, 32, 16);
+  const pos = geo.attributes.position;
+  const cols = new Float32Array(pos.count * 3);
+  const top = new THREE.Color(0x5fa6e8), haze = new THREE.Color(0xeaf3f9), earth = new THREE.Color(0xa8946a);
+  const c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i) / 50;                       // -1 (down) .. 1 (up)
+    if (y >= 0) c.copy(haze).lerp(top, Math.pow(y, 0.6));
+    else c.copy(haze).lerp(earth, Math.min(1, -y * 2.2));
+    cols[i * 3] = c.r; cols[i * 3 + 1] = c.g; cols[i * 3 + 2] = c.b;
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(cols, 3));
+  const domeMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false });
+  envScene.add(new THREE.Mesh(geo, domeMat));
+  // Bright sun hotspot (values above 1.0 are kept: PMREM renders to a half-float target).
+  // This is what gives car paint and glass a believable highlight.
+  const sunGeo = new THREE.SphereGeometry(7, 16, 8);
+  const sunMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xfff1cc).multiplyScalar(14), fog: false });
+  const sunMesh = new THREE.Mesh(sunGeo, sunMat);
+  sunMesh.position.set(-22, 34, 24);
+  envScene.add(sunMesh);
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const rt = pmrem.fromScene(envScene, 0.02);
+  pmrem.dispose();
+  geo.dispose(); domeMat.dispose(); sunGeo.dispose(); sunMat.dispose();
+  return rt.texture;
+}
+function _ensureEnvironment(on) {
+  if (!_scene || !_renderer) return;
+  if (!on || _iblDisabledByUrl()) { _scene.environment = null; return; }
+  if (!_envTex) { try { _envTex = buildSkyEnvironment(_renderer); } catch (e) { console.warn("IBL failed:", e.message); return; } }
+  _scene.environment = _envTex;
+  _scene.environmentIntensity = _envIntensity;
+}
 
 // ---- Init the sky + clouds ----
 export async function initGraphics({ renderer, scene, sun, hemi, quality }) {
@@ -50,6 +99,7 @@ export async function initGraphics({ renderer, scene, sun, hemi, quality }) {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.0;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  _ensureEnvironment(QUALITY_PRESETS[_quality].ibl);
 
   // ---- Sky shader (only if quality allows) — lazy-load the addon ----
   if (QUALITY_PRESETS[_quality].skyShader) {
@@ -187,6 +237,11 @@ export function updateSky(hour) {
     }
   }
 
+  // ---- Environment (IBL) strength follows the daylight ----
+  // Kept modest: the hemisphere light already lights everything, IBL only adds believable sheen + soft bounce.
+  _envIntensity = elevation < 0.05 ? 0.12 : elevation < 0.25 ? 0.32 : 0.36 + Math.min(0.14, elevation * 0.2);
+  if (_scene && _scene.environment) _scene.environmentIntensity = _envIntensity;
+
   // ---- Hemisphere light ----
   if (_hemi) {
     const isNight = elevation < 0.05;
@@ -260,6 +315,7 @@ export function applyQuality(q, { renderer, sun, scene }) {
   if (_sky) _sky.visible = !!preset.skyShader;
   if (_clouds) _clouds.visible = !!preset.clouds;
   if (_sunSphere) _sunSphere.visible = q === "high";
+  if (_scene) _ensureEnvironment(preset.ibl);
   renderer.setPixelRatio(Math.min(preset.pixelRatio, devicePixelRatio));
   renderer.shadowMap.enabled = preset.shadows;
   if (preset.shadows && sun) {
