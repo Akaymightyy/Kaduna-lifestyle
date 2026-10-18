@@ -137,43 +137,44 @@
   #phone-content .ph-ic { width:56px; height:56px; border-radius:16px; display:flex; align-items:center; justify-content:center; font-size:28px; box-shadow:0 4px 12px rgba(0,0,0,.4); }
   #phone-content .ph-app:active .ph-ic { transform:scale(.93); }
 
-  /* ===== Messages app — Kaduna palette (cream / green / gold) ===== */
-  #phone-card.msg-kd { background:var(--cream); border-color:rgba(15,77,58,.3); }
-  #phone-card.msg-kd #phone-statusbar { color:var(--ink); }
-  #phone-card.msg-kd #phone-close { background:rgba(15,77,58,.14); color:var(--green); }
-  #phone-card.msg-kd #phone-home-bar { background:rgba(15,77,58,.35); }
-  #phone-content.msg-kd { background:var(--cream); color:var(--ink); padding:4px 14px 22px; }
-  #phone-content.msg-kd .mx-head { display:flex; align-items:center; gap:4px; margin:0 0 10px; }
-  #phone-content.msg-kd .mx-back { font-size:30px; line-height:1; padding:0 8px 4px 0; color:var(--green); display:block; }
-  #phone-content.msg-kd .mx-title { flex:1; font-size:20px; font-weight:800; color:var(--green); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  #phone-content.msg-kd .mx-seg { display:flex; background:rgba(15,77,58,.1); border-radius:14px; padding:3px; margin-bottom:10px; }
-  #phone-content.msg-kd .mx-seg button { flex:1; border:none; background:transparent; padding:8px; border-radius:11px; font:700 13px Poppins,sans-serif; color:#5d6b64; cursor:pointer; }
-  #phone-content.msg-kd .mx-seg button.on { background:var(--green); color:var(--cream); }
-  #phone-content.msg-kd .mx-new { display:flex; align-items:center; gap:6px; background:#fff; border:2px solid rgba(15,77,58,.18); border-radius:14px; padding:2px 6px 2px 10px; margin-bottom:8px; }
-  #phone-content.msg-kd .mx-new input, #phone-content.msg-kd .mx-filter, #phone-content.msg-kd .mx-compose input { color:var(--ink) !important; font-size:13px; outline:none; }
-  #phone-content.msg-kd .mx-new input { flex:1; min-width:0; padding:9px 4px; background:transparent !important; border:none !important; border-radius:0 !important; }
-  #phone-content.msg-kd .mx-grp { background:var(--gold); color:var(--ink); border:none; border-radius:10px; padding:7px 10px; font:800 11px Poppins,sans-serif; cursor:pointer; white-space:nowrap; }
-  #phone-content.msg-kd .mx-pills { display:flex; gap:8px; margin:8px 0; }
-  #phone-content.msg-kd .mx-pills button { border:none; background:rgba(15,77,58,.1); color:var(--green); border-radius:999px; padding:6px 14px; font:700 12px Poppins,sans-serif; cursor:pointer; }
-  #phone-content.msg-kd .mx-pills button.on { background:var(--green); color:var(--cream); }
-  #phone-content.msg-kd .mx-filter { display:block; width:100%; box-sizing:border-box; background:#fff !important; border:2px solid rgba(15,77,58,.18) !important; border-radius:14px !important; padding:10px 12px; margin-bottom:6px; }
-  #phone-content.msg-kd .mx-row { display:flex; align-items:center; gap:12px; padding:10px 4px; cursor:pointer; border:none !important; border-bottom:1px solid rgba(15,77,58,.08) !important; }
-  #phone-content.msg-kd .mx-row:active { background:rgba(15,77,58,.07); }
+  /* ===== Messages app — dark mode, soft look (same layout as the Lagos Life reference) =====
+     Note: inside the phone, --cream is dark and --ink is near-white, so colours are written out here on purpose. */
+  #phone-content.msg-kd { background:#0b0b0c; color:#f2f2f4; padding:6px 16px 16px; display:flex; flex-direction:column; }
+  #phone-content.msg-kd .mx { display:flex; flex-direction:column; flex:1 0 auto; min-height:0; }
+  #phone-content.msg-kd .mx-chat { flex:1 1 0; }
+  #phone-content.msg-kd .mx-head { display:flex; align-items:center; gap:6px; margin:0 0 14px; flex:none; }
+  #phone-content.msg-kd .mx-back { font-size:30px; line-height:1; padding:0 10px 4px 0; color:#a3a5ae; display:block; }
+  #phone-content.msg-kd .mx-title { flex:1; font-size:22px; font-weight:700; color:#f2f2f4; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #phone-content.msg-kd .mx-seg { display:flex; background:#16171a; border-radius:14px; padding:3px; margin-bottom:12px; flex:none; }
+  #phone-content.msg-kd .mx-seg button { flex:1; border:none; background:transparent; padding:9px; border-radius:11px; font:600 13px Poppins,sans-serif; color:#8e909a; cursor:pointer; }
+  #phone-content.msg-kd .mx-seg button.on { background:#26282d; color:#f2f2f4; box-shadow:0 1px 3px rgba(0,0,0,.45); }
+  #phone-content.msg-kd .mx-new { display:flex; align-items:center; gap:6px; background:#16171a; border-radius:14px; padding:2px 6px 2px 12px; margin-bottom:10px; flex:none; }
+  #phone-content.msg-kd .mx-new input { flex:1; min-width:0; padding:11px 4px; background:transparent !important; border:none !important; border-radius:0 !important; color:#f2f2f4 !important; font-size:14px; outline:none; }
+  #phone-content.msg-kd .mx-grp { background:rgba(242,177,52,.14); color:#f2b134; border:none; border-radius:10px; padding:7px 11px; font:700 11px Poppins,sans-serif; cursor:pointer; white-space:nowrap; }
+  #phone-content.msg-kd .mx-pills { display:flex; gap:8px; margin:4px 0 10px; flex:none; }
+  #phone-content.msg-kd .mx-pills button { border:none; background:#16171a; color:#8e909a; border-radius:999px; padding:7px 16px; font:600 12px Poppins,sans-serif; cursor:pointer; }
+  #phone-content.msg-kd .mx-pills button.on { background:rgba(96,165,250,.16); color:#8ec1fb; }
+  #phone-content.msg-kd .mx-filter { display:block; width:100%; box-sizing:border-box; background:#16171a !important; border:none !important; border-radius:14px !important; padding:12px 14px; margin-bottom:8px; color:#f2f2f4 !important; font-size:14px; outline:none; flex:none; }
+  #phone-content.msg-kd input::placeholder { color:#6b6e78 !important; opacity:1; }
+  #phone-content.msg-kd .mx-row { display:flex; align-items:center; gap:12px; padding:11px 6px; cursor:pointer; border:none !important; border-radius:14px; }
+  #phone-content.msg-kd .mx-row:active { background:#16171a; }
   #phone-content.msg-kd .mx-mid { flex:1; min-width:0; }
-  #phone-content.msg-kd .mx-name { font-weight:700; font-size:14px; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  #phone-content.msg-kd .mx-prev { font-size:12.5px; color:#5d6b64; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:2px; }
-  #phone-content.msg-kd .mx-prev.unread { color:var(--ink); font-weight:700; }
-  #phone-content.msg-kd .mx-right { display:flex; flex-direction:column; align-items:flex-end; gap:5px; flex:none; }
-  #phone-content.msg-kd .mx-time { font-size:11px; color:#7a877f; }
-  #phone-content.msg-kd .mx-badge { background:var(--gold); color:var(--ink); border-radius:999px; min-width:18px; height:18px; display:inline-flex; align-items:center; justify-content:center; font-size:10px; font-weight:800; padding:0 5px; }
-  #phone-content.msg-kd .mx-empty { text-align:center; color:#5d6b64; font-size:13px; padding:28px 12px; display:flex; flex-direction:column; align-items:center; gap:8px; }
-  #phone-content.msg-kd .mx-link { background:none; border:none; color:var(--green); text-decoration:underline; font:700 13px Poppins,sans-serif; cursor:pointer; }
-  #phone-content.msg-kd .mx-actions { display:flex; gap:6px; margin:4px 0 10px; }
-  #phone-content.msg-kd .mx-actions button { flex:1; background:#fff; border:2px solid rgba(15,77,58,.18); border-radius:12px; padding:8px 4px; font:700 11px Poppins,sans-serif; color:var(--green); cursor:pointer; }
-  #phone-content.msg-kd .mx-actions button.money { background:var(--gold); border-color:var(--gold); color:var(--ink); }
-  #phone-content.msg-kd .mx-compose { display:flex; gap:8px; align-items:center; }
-  #phone-content.msg-kd .mx-compose input { flex:1; min-width:0; background:#fff !important; border:2px solid rgba(15,77,58,.18) !important; padding:11px 14px; border-radius:999px !important; }
-  #phone-content.msg-kd .mx-send { width:42px; height:42px; border-radius:50%; border:none; background:var(--green); color:var(--cream); font-size:16px; cursor:pointer; flex:none; box-shadow:0 3px 0 rgba(0,0,0,.25); }
+  #phone-content.msg-kd .mx-name { font-weight:600; font-size:14.5px; color:#f2f2f4; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #phone-content.msg-kd .mx-prev { font-size:12.5px; color:#8e909a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:2px; }
+  #phone-content.msg-kd .mx-prev.unread { color:#e4e5ea; font-weight:600; }
+  #phone-content.msg-kd .mx-right { display:flex; flex-direction:column; align-items:flex-end; gap:6px; flex:none; }
+  #phone-content.msg-kd .mx-time { font-size:11px; color:#6b6e78; }
+  #phone-content.msg-kd .mx-badge { background:#ef4444; color:#fff; border-radius:999px; min-width:18px; height:18px; display:inline-flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; padding:0 5px; }
+  #phone-content.msg-kd .mx-empty { text-align:center; color:#6b6e78; font-size:13px; padding:28px 12px; display:flex; flex-direction:column; align-items:center; gap:8px; }
+  #phone-content.msg-kd .mx-link { background:none; border:none; color:#8ec1fb; font:600 13px Poppins,sans-serif; cursor:pointer; }
+  #phone-content.msg-kd .mx-actions { display:flex; gap:8px; margin:0 0 10px; flex:none; }
+  #phone-content.msg-kd .mx-actions button { flex:1; background:#16171a; border:none; border-radius:12px; padding:9px 4px; font:600 12px Poppins,sans-serif; color:#cfd1d8; cursor:pointer; }
+  #phone-content.msg-kd .mx-actions button.money { background:rgba(242,177,52,.14); color:#f2b134; }
+  /* chat: the message area takes all the free height, so the type box always sits at the bottom */
+  #phone-content.msg-kd .mx-bubbles { flex:1 1 0; min-height:0; overflow-y:auto; padding:4px 2px 8px; -webkit-overflow-scrolling:touch; }
+  #phone-content.msg-kd .mx-compose { display:flex; gap:8px; align-items:center; flex:none; padding-top:8px; }
+  #phone-content.msg-kd .mx-compose input { flex:1; min-width:0; background:#16171a !important; border:none !important; border-radius:999px !important; padding:13px 18px; color:#f2f2f4 !important; font-size:15px; outline:none; }
+  #phone-content.msg-kd .mx-send { width:44px; height:44px; border-radius:50%; border:none; background:#12c986; color:#04140d; font-size:17px; cursor:pointer; flex:none; }
 
   /* ===== Welcome back (Continue / New life) — Kaduna palette ===== */
   #welcome-modal { position:fixed; inset:0; z-index:46; display:none; flex-direction:column; justify-content:space-between; align-items:center; background:linear-gradient(180deg,rgba(15,77,58,.97) 0%,rgba(15,77,58,.74) 36%,rgba(15,77,58,0) 66%); font-family:'Poppins',sans-serif; padding:calc(env(safe-area-inset-top,0px) + 34px) 0 calc(env(safe-area-inset-bottom,0px) + 18px); }
