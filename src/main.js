@@ -18,6 +18,7 @@ import { initAdmin, showAdminDashboard, hideAdminDashboard, isAdmin, adminTab } 
 import { checkDailyReward, getDailyStatus, claimQuestReward } from "./daily.js";
 import { ref, get, onValue, update, set } from "firebase/database";
 import { openCreator } from "./creator.js";
+import { mountPreview, setPreviewLook } from "./charpreview.js";
 import { outfitsFor, BUILDS, SHOP, SLOT_KEYS } from "./outfits.js";
 import { peekWorld, initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, getActivePlace, enterPlace, enterPlaceAsVisitor, exitPlace, sendUIEvent } from "./places/manager.js";
 import { listPlaces, getPlace, updateHomeEntrance } from "./places/registry.js";
@@ -984,17 +985,19 @@ function _showPhoneApp(appId) {
   if(appId==="boutique"){
     const L=game.state.look, g=L.gender==="female"?"f":"m", owned=L.owned||[];
     const items=SHOP.filter(it=>it.for==="any"||it.for===g);
-    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">👕 Kaduna Boutique</div>'+
+    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">👕 Kaduna Boutique</div>'+_cpSlotHtml('Tap 👁 Try to see it on you')+
       '<button onclick="window.showApp(\'myoutfits\')" style="width:100%;background:var(--gold,#f2b134);color:#1a1a1a;border:none;border-radius:10px;padding:10px;margin-bottom:10px;font-weight:700;font-size:13px;cursor:pointer;">👜 My Outfits ('+owned.length+')</button>'+
       items.map(it=>'<div style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid #eee;border-radius:8px;margin-bottom:6px;"><span style="font-size:24px;">'+it.emoji+'</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;">'+it.name+'</div><div style="font-size:11px;color:#666;">'+it.desc+'</div></div>'+
-        (owned.includes(it.id)?'<span style="font-size:11px;font-weight:700;color:var(--green);">✓ Owned</span>':'<button onclick="window.buyClothing(\''+it.id+'\')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;">₦'+it.price+'</button>')+'</div>').join("")+backBtn;
+        '<button onclick="window._tryItem(\''+it.id+'\')" style="background:#2a2c33;color:#f2f2f4;border:none;border-radius:8px;padding:6px 9px;cursor:pointer;font-size:12px;font-weight:600;margin-right:4px;">👁 Try</button>'+(owned.includes(it.id)?'<span style="font-size:11px;font-weight:700;color:var(--green);">✓ Owned</span>':'<button onclick="window.buyClothing(\''+it.id+'\')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600;">₦'+it.price+'</button>')+'</div>').join("")+backBtn;
+    _cpMount(L);
     return;
   }
   if(appId==="myoutfits"){
     const L=game.state.look, owned=(L.owned||[]).map(id=>SHOP.find(x=>x.id===id)).filter(Boolean), worn=L.worn||{};
-    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">👜 My Outfits</div>'+
+    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">👜 My Outfits</div>'+_cpSlotHtml()+
       (owned.length?owned.map(it=>{const on=worn[it.slot]===it.id;return '<div style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid '+(on?'var(--green)':'#eee')+';border-radius:8px;margin-bottom:6px;"><span style="font-size:24px;">'+it.emoji+'</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;">'+it.name+'</div><div style="font-size:11px;color:#666;">'+(on?'Wearing now':'In your wardrobe')+'</div></div><button onclick="window._'+(on?'removeItem':'wearItem')+'(\''+it.id+'\')" style="background:'+(on?'#e11d48':'var(--green)')+';color:#fff;border:none;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:12px;font-weight:700;">'+(on?'Remove':'Wear')+'</button></div>';}).join(""):'<div style="color:#888;font-size:12px;padding:10px 0;">You have not bought any outfit yet. Visit the Boutique.</div>')+
       '<button onclick="window.showApp(\'boutique\')" style="width:100%;margin-top:8px;background:var(--green);color:#fff;border:none;border-radius:10px;padding:11px;font-weight:700;font-size:13px;cursor:pointer;">🛍 Go to Boutique</button>'+backBtn;
+    _cpMount(L);
     return;
   }
   if(appId==="wardrobe"){
@@ -1008,8 +1011,8 @@ function _showPhoneApp(appId) {
     const styleCard = (label, val, key) => '<div onclick="window._setLook(\''+key+'\',\''+val+'\')" style="padding:6px 12px;background:'+(look[key]===val?'var(--green)':'var(--cream)')+';color:'+(look[key]===val?'#fff':'var(--green)')+';border-radius:8px;cursor:pointer;font-size:11px;font-weight:600;margin:2px;display:inline-block;">'+label+'</div>';
     const gOn=(look.gender==="female")?"female":"male";
     const pill=(label,on,fn)=>'<div onclick="'+fn+'" style="padding:6px 12px;background:'+(on?'var(--green)':'var(--cream)')+';color:'+(on?'#fff':'var(--green)')+';border-radius:8px;cursor:pointer;font-size:11px;font-weight:600;margin:2px;display:inline-block;">'+label+'</div>';
-    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">👕 Wardrobe</div>'+
-      '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">🧍 Character</div>'+pill("👦 Man",gOn==="male","window._setGender(\'male\')")+pill("👧 Woman",gOn==="female","window._setGender(\'female\')")+' '+BUILDS.map(b=>pill(b.label,(look.build||"normal")===b.id,"window._setLook(\'build\',\'"+b.id+"\')")).join("")+'</div>'+
+    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">👕 Wardrobe</div>'+_cpSlotHtml()+
+      '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">🧍 Character</div>'+pill("👦 Man",gOn==="male","window._previewGender(\'male\')")+pill("👧 Woman",gOn==="female","window._previewGender(\'female\')")+' '+BUILDS.map(b=>pill(b.label,(look.build||"normal")===b.id,"window._setLook(\'build\',\'"+b.id+"\')")).join("")+'</div>'+
       '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">'+(gOn==="female"?"👗 Women\'s outfits":"👔 Men\'s outfits")+'</div>'+outfitsFor(gOn).map(o=>pill(o.name,look.outfitId===o.id,"window._setOutfit(\'"+o.id+"\')")).join("")+'</div>'+
       '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">🎨 Top Colour</div><div style="display:flex;flex-wrap:wrap;">'+colours.map(c=>swatch(c,look.top,"top")).join("")+'</div></div>'+
       '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">👖 Bottom Colour</div><div style="display:flex;flex-wrap:wrap;">'+colours.map(c=>swatch(c,look.bottom,"bottom")).join("")+'</div></div>'+
@@ -1020,6 +1023,7 @@ function _showPhoneApp(appId) {
       '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">👖 Bottom Style</div>'+styleCard("Trousers","trousers","bottomStyle")+styleCard("Shorts","shorts","bottomStyle")+'</div>'+
       '<button onclick="window._saveLook()" style="width:100%;background:var(--green);color:#fff;border:none;border-radius:10px;padding:14px;cursor:pointer;font-size:14px;font-weight:700;margin-top:6px;">✓ Save Outfit</button>'+
       backBtn;
+    _cpMount(look);
     return;
   }
   if(appId==="contacts"){
@@ -1619,6 +1623,33 @@ function _showPhoneApp(appId) {
   // fallback (shouldn't reach here)
   c.innerHTML='<div style="padding:20px;text-align:center;color:#666;font-size:13px;">App "'+appId+'" not found.</div>'+backBtn;
 }
+const _cpSlotHtml = (label) => '<div id="cp-slot" style="position:relative;height:240px;border-radius:14px;overflow:hidden;margin-bottom:10px;background:radial-gradient(circle at 50% 35%,#3a4150,#14161a);"><div id="cp-label" style="position:absolute;left:0;right:0;bottom:0;padding:6px 10px;font-size:11px;color:#dfe3ea;background:linear-gradient(transparent,rgba(0,0,0,.65));text-align:center;pointer-events:none;">'+(label||'Drag to turn · this is how you look')+'</div></div><div id="cp-bar"></div>';
+const _cpMount = (look) => mountPreview(document.getElementById("cp-slot"), look);
+function _cpLabel(t) { const e = document.getElementById("cp-label"); if (e) e.textContent = t; }
+// Boutique "Try on": dress the PREVIEW only (nothing is bought or worn for real)
+window._tryItem = (id) => {
+  const it = SHOP.find(x => x.id === id); if (!it) return;
+  const L = game.state.look, T = { ...L, worn: { ...(L.worn || {}) } };
+  if (it.patch) Object.assign(T, it.patch);
+  T.worn[it.slot] = id;
+  setPreviewLook(T);
+  const owned = (L.owned || []).includes(id);
+  _cpLabel("Trying: " + it.name + (owned ? " (you own this)" : " · ₦" + it.price.toLocaleString()));
+  const bar = document.getElementById("cp-bar");
+  if (bar) bar.innerHTML = '<div style="display:flex;gap:6px;margin:-4px 0 10px;">' + (owned ? '' : '<button onclick="window.buyClothing(\''+id+'\')" style="flex:1;background:var(--green);color:#fff;border:none;border-radius:10px;padding:10px;font-weight:700;font-size:12px;cursor:pointer;">Buy ₦'+it.price.toLocaleString()+'</button>') + '<button onclick="window._tryReset()" style="flex:1;background:#2a2c33;color:#f2f2f4;border:none;border-radius:10px;padding:10px;font-weight:700;font-size:12px;cursor:pointer;">↩ Back to my look</button></div>';
+  document.getElementById("cp-slot")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+};
+window._tryReset = () => { setPreviewLook(game.state.look); _cpLabel("Drag to turn · this is how you look"); const b = document.getElementById("cp-bar"); if (b) b.innerHTML = ""; };
+// Wardrobe: look at the other gender before you switch (switching reloads the game)
+window._previewGender = (g) => {
+  const L = game.state.look;
+  if ((L.gender || "male") === g) { window._tryReset(); return; }
+  const o = outfitsFor(g)[0], T = { ...L, ...o, gender: g, outfitId: o.id, worn: {} };
+  setPreviewLook(T);
+  _cpLabel("Preview: " + (g === "female" ? "Woman" : "Man") + " — not saved yet");
+  const bar = document.getElementById("cp-bar");
+  if (bar) bar.innerHTML = '<div style="display:flex;gap:6px;margin:-4px 0 10px;"><button onclick="window._setGender(\''+g+'\')" style="flex:1;background:var(--green);color:#fff;border:none;border-radius:10px;padding:10px;font-weight:700;font-size:12px;cursor:pointer;">✓ Switch to '+(g==="female"?"Woman":"Man")+' (game reloads)</button><button onclick="window._tryReset()" style="flex:1;background:#2a2c33;color:#f2f2f4;border:none;border-radius:10px;padding:10px;font-weight:700;font-size:12px;cursor:pointer;">Cancel</button></div>';
+};
 function showPhoneApp(appId){
   _showPhoneApp(appId);
   const c=$("phone-content"); if(!c) return;
