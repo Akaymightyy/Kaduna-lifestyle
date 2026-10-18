@@ -86,13 +86,13 @@ export function buildWorld(scene) {
   world.add(ground);
 
   // ---- road ----
-  const asphalt = new THREE.MeshLambertMaterial({ color: 0x3a3d43, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }); // flat planes: plain Lambert (cheapest). polygonOffset = no flicker/skipping on far roads
-  const road = new THREE.Mesh(new THREE.PlaneGeometry(WORLD_HALF_X * 2 + 200, ROAD_HALF * 2), asphalt);
+  const asphalt = stylize(new THREE.MeshLambertMaterial({ color: 0x3a3d43, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), { pat: true, ao: false, fake: false }); // flat planes: plain Lambert (cheapest). polygonOffset = no flicker/skipping on far roads
+  const road = new THREE.Mesh(withPat(new THREE.PlaneGeometry(WORLD_HALF_X * 2 + 200, ROAD_HALF * 2), 13), asphalt);
   road.rotation.x = -Math.PI / 2; road.position.y = 0.01; road.receiveShadow = true;
   world.add(road);
 
   for (const sx of SIDE_STREETS) {
-    const sp = new THREE.Mesh(new THREE.PlaneGeometry(12, 120), asphalt);
+    const sp = new THREE.Mesh(withPat(new THREE.PlaneGeometry(12, 120), 13), asphalt);
     sp.rotation.x = -Math.PI / 2; sp.position.set(sx, 0.012, 0); sp.receiveShadow = true;
     world.add(sp);
   }
@@ -114,7 +114,7 @@ export function buildWorld(scene) {
       strip(0, cz, len, AW, aGeos, Y);
       for (let x = -MAP_HALF_X + 16; x < MAP_HALF_X - 16; x += 9) strip(x, cz, 3.4, 0.22, dGeos, Y + 0.012);
     }
-    const am = new THREE.Mesh(mergeGeometries(aGeos), asphalt); am.receiveShadow = true; world.add(am);
+    const am = new THREE.Mesh(withPat(mergeGeometries(aGeos), 13), asphalt); am.receiveShadow = true; world.add(am);
     const dm = new THREE.Mesh(mergeGeometries(dGeos), new THREE.MeshBasicMaterial({ color: 0xf2f2ee, polygonOffset: true, polygonOffsetFactor: -5, polygonOffsetUnits: -5 })); world.add(dm);
     aGeos.forEach((g) => g.dispose()); dGeos.forEach((g) => g.dispose());
   }
