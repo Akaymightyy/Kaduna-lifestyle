@@ -153,13 +153,31 @@ function mergeSkinned(model, opts = {}) {
   for (const m of made) parent.add(m);
 }
 
+// Parse each GLB only ONCE. The female fallback reuses the male.glb (with a different build), and parsing + decoding it a
+// second time cost ~150 ms. Every caller gets its own deep clone (own skeleton, own materials), so they cannot affect each other.
+const _gltfCache = {};
+function _loadScene(manager, url) {
+  if (!_gltfCache[url]) {
+    _gltfCache[url] = new GLTFLoader(manager).loadAsync(url).then((g) => g.scene);
+    _gltfCache[url].catch(() => { delete _gltfCache[url]; });   // never remember a failed download
+  }
+  return _gltfCache[url].then((scene) => {
+    const model = cloneSkinned(scene);
+    // Give this caller its own materials, but clone each DISTINCT material only once: pieces that shared a material must keep
+    // sharing it, otherwise mergeSkinned() can no longer group them (that cost 57 meshes / 499 draw calls instead of 6 / 80).
+    const own = new Map(), mine = (m) => { if (!own.has(m)) own.set(m, m.clone()); return own.get(m); };
+    model.traverse((o) => { if (o.isMesh && o.material) o.material = Array.isArray(o.material) ? o.material.map(mine) : mine(o.material); });
+    return model;
+  });
+}
 function loadOne(manager, url, opts = {}) {
-  return new GLTFLoader(manager).loadAsync(url).then((g) => {
-    const model = g.scene;
+  return _loadScene(manager, url).then((model) => {
+    try { mergeSkinned(model, opts); } catch (e) { console.warn("character merge failed", e); }
+    // PERF: measure the body AFTER the merge. Before, Box3.setFromObject skinned all 242 raw pieces (2.8 million vertices,
+    // ~520 ms on a desktop, several seconds on a phone). The merged model has 6 meshes / ~12k vertices: same box, ~2 ms.
     const box = new THREE.Box3().setFromObject(model);
     const size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
     model.userData.info = { box, size, center };
-    try { mergeSkinned(model, opts); } catch (e) { console.warn("character merge failed", e); }
     return model;
   });
 }
