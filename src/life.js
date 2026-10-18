@@ -7,10 +7,11 @@ import * as THREE from "three";
 import { WIDE_AVENUES_X, WIDE_CROSS_Z, MAP_HALF_X, MAP_HALF_Z } from "./config.js";
 import { AREAS } from "./areas.js";
 import { LAKE, AIRPORT } from "./scenery.js";
+import { makeBlobShadows } from "./street.js";
 import { carShape, busShape, personParts, hash2, paint, flatten, B, done } from "./town.js";
 
 let _scene = null, _on = false, _t = 0, _last = 0;
-let carMesh = null, busMesh = null, pm = null, boats = [], plane = null;
+let SH = null, carMesh = null, busMesh = null, pm = null, boats = [], plane = null;
 const cars = [], buses = [], people = [];
 const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(1, 1, 1);
 const _up = new THREE.Vector3(0, 1, 0), _col = new THREE.Color(), _mb = new THREE.Matrix4(), _m2 = new THREE.Matrix4(), _m3 = new THREE.Matrix4(), _Z = new THREE.Matrix4().makeScale(0, 0, 0), _s2 = new THREE.Vector3();
@@ -97,6 +98,7 @@ export function initLife(scene) {
   put(new THREE.BoxGeometry(0.5, 7, 5).translate(0, 6.8, -14), 0x0f7a4a);
   put(new THREE.BoxGeometry(12, 0.4, 3.5).translate(0, 4.2, -14.5), 0xe8eef2);
   plane = new THREE.Mesh(done(P), mat); plane.frustumCulled = false; plane.rotation.order = "YXZ"; scene.add(plane);
+  SH = makeBlobShadows(scene, cars.length + buses.length + people.length);
   _on = true;
 }
 
@@ -107,6 +109,7 @@ export function tickLife(px, pz, show = true) {
   carMesh.visible = busMesh.visible = show; for (const k in pm) pm[k].visible = show;
   for (const b of boats) b.m.visible = show;
   plane.visible = show;
+  if (SH) SH.mesh.visible = show;
   if (!show) return;
 
   // cars + buses
@@ -117,6 +120,7 @@ export function tickLife(px, pz, show = true) {
     _s2.setScalar(ek);
     const yaw = Math.atan2(-(nx.z - _p.z), nx.x - _p.x);
     _q.setFromAxisAngle(_up, yaw); _m.compose(_p, _q, _s2); mesh.setMatrixAt(i, _m);
+    SH.set(mesh === carMesh ? i : cars.length + i, _p.x, _p.z, (mesh === carMesh ? 2.6 : 3.4) * ek, (mesh === carMesh ? 5.4 : 12) * ek, yaw + Math.PI / 2);
   };
   cars.forEach((c, i) => place(carMesh, i, c)); buses.forEach((c, i) => place(busMesh, i, c));
   carMesh.instanceMatrix.needsUpdate = true; busMesh.instanceMatrix.needsUpdate = true;
@@ -127,7 +131,9 @@ export function tickLife(px, pz, show = true) {
     if (p.chat) { x = p.cx; yaw = p.face; moving = false; }
     else { const ph = (_t * p.sp + p.ph) / p.span, f = ph % 2, u = f < 1 ? f : 2 - f; x = p.ax - p.span + u * p.span * 2; yaw = f < 1 ? Math.PI / 2 : -Math.PI / 2; }
     const dx = x - px, dz = z - pz;
-    if (dx * dx + dz * dz > 300 * 300) { for (const k in pm) pm[k].setMatrixAt(i, _Z); return; }
+    const si = cars.length + buses.length + i;
+    if (dx * dx + dz * dz > 300 * 300) { for (const k in pm) pm[k].setMatrixAt(i, _Z); SH.hide(si); return; }
+    SH.set(si, x, z, 0.9 * p.sc, 0.9 * p.sc);
     const w = _t * p.sp * (p.sc < 0.7 ? 7 : 5.2) + p.ph, sw = moving ? Math.sin(w) * 0.62 : 0, bob = moving ? Math.abs(Math.sin(w)) * 0.035 * p.sc : 0;
     const g = moving ? 0 : Math.sin(_t * 1.7 + p.ph) * 0.3;                                   // chatting: little arm gestures + head-nod sway
     _p.set(x, bob, z); _q.setFromAxisAngle(_up, yaw + (moving ? 0 : Math.sin(_t * 0.8 + p.ph) * 0.12)); _s2.setScalar(p.sc); _mb.compose(_p, _q, _s2);
@@ -138,6 +144,7 @@ export function tickLife(px, pz, show = true) {
     part(pm.armL, -0.28, 1.5, moving ? -sw * 0.8 : -0.5 + g); part(pm.armR, 0.28, 1.5, moving ? sw * 0.8 : -0.9 - g);
   });
   for (const k in pm) pm[k].instanceMatrix.needsUpdate = true;
+  SH.done();
 
   // boats drift in slow ovals
   boats.forEach((b) => {

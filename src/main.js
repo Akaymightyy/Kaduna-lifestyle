@@ -51,6 +51,7 @@ import { initAreaWorld, tickAreaWorld, setAreaLampsNight, disposeAreaWorld, getR
 // Way is filtered out (already rendered by world.js) to avoid double-render.
 import { fetchKadunaData, buildRealMap } from "./realmap.js";
 import { VEHICLE_CATALOG, getVehicle, initVehicles, buyVehicle, getOwned, ownsVehicle, isRiding, getRideSpeed, getRideId, spawnRideVehicle, despawnRideVehicle, tickRideVehicle } from "./vehicles.js";
+import { buildStreetDetail, makeBlobShadows } from "./street.js";
 import { initActivity, startActivity, tickActivity, isBusy, cancelActivity, eatSpec, toiletSpec, sitSpec, funSpec, placeSpec } from "./activity.js";
 import { initWorldChat, toggleWorldChat, closeWorldChat, setChatBlocked, setChatOnline } from "./worldchat.js";
 import { initBillboards, getBillboards, getBillboardPositions, getBillboardAdInfo, buyBillboardAd } from "./billboards.js";
@@ -433,6 +434,8 @@ function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.asp
 addEventListener("resize", resize); resize();
 
 const world = buildWorld(scene);
+world.world.add(buildStreetDetail(scene, world.colliders));
+const _pShadow = makeBlobShadows(scene, 1);
 addScenery(scene, world);
 initLife(scene);
 initActivity(scene);
@@ -542,6 +545,7 @@ function applyTime() {
   }
   // ---- Update sky + sun + clouds based on hour ----
   updateSky(hour);
+  _pShadow.set(0, player.pos.x, player.pos.z, 1.0, 1.0); _pShadow.done();
   const night = hour < 6.5 || hour > 19.5;
   // sun follows the player (shadows) — position set by updateSky, but we offset to follow player
   sun.position.x += player.pos.x;
