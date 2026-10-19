@@ -256,7 +256,7 @@ export function buildWorld(scene) {
       x += w + 3 + R() * 5;
     }
   }
-  for (const sx of SIDE_STREETS) for (const side of [1, -1]) addBuilding(sx, side * 62, 26, 12, 16, C(0xe8d3b0), side);
+  // (no buildings across the ends of the side streets any more: they are avenues now and cars drive through there)
   const bMat = addWindowGlow(OLP({ map: windowTexture(), vertexColors: true }));
   const buildings = new THREE.Mesh(mergeGeometries(geos), bMat);
   buildings.castShadow = false; buildings.receiveShadow = true; // big merged mesh — only receive, don't cast (saves shadow map cost)

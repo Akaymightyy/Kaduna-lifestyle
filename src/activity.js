@@ -67,6 +67,7 @@ function _beginAct() {
   if (sp.props && sp.props.length) c.props = _buildProps(sp, pl.pos.x, pl.pos.z, yaw);
   pl.yOff = sp.yOff || 0;
   c.rig?.animate?.emote?.(sp.anim, sp.seconds + 0.3);
+  try { window.__actAnim && window.__actAnim(sp.anim, sp.seconds + 0.3); } catch (e) {}      // other players see it too
   _showBar(sp);
 }
 function _finish(ok) {
@@ -75,6 +76,7 @@ function _finish(ok) {
   _disposeProps(c.props);
   c.player.yOff = 0; c.player.speed = 0;
   c.rig?.animate?.stopEmote?.();
+  try { window.__actAnim && window.__actAnim("", 0); } catch (e) {}
   try { c.spec.onDone && c.spec.onDone(ok); } catch (e) { console.warn(e); }
 }
 export function cancelActivity() { if (_cur) _finish(false); }

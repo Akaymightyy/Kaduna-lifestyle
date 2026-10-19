@@ -76,6 +76,11 @@ export function sendPosition(x,z,heading) {
 // Which room am I in? "" = outside in the city, "home:<ownerUid>" = inside that player's house, otherwise the place id.
 // Other players only show up for me when we are in the SAME room (before, someone inside a house stood in the road
 // for people outside, and nobody inside a house could be seen).
+// Tell everybody what I am doing (emote or activity animation) so they see it too. type "" = stopped.
+export function sendEmote(type, dur = 0) {
+  if (!_uid || !_liveOk) return;
+  update(ref(db, "live/" + _uid), { emote: type || "", emoteDur: dur || 0, emoteTs: Date.now() }).catch(() => {});
+}
 export function setMyPlace(key) {
   key = key || "";
   if (key === _myPlace) return;
@@ -216,6 +221,14 @@ function updateAvatars() {
       continue;
     }
     m.group.visible = true;
+    if (m.ch && m.ch.animate && m.ch.animate.emote) {                // their emote / activity (eating, swimming, sleeping...)
+      const key = (d.emote || "") + "|" + (d.emoteTs || 0);
+      if (key !== m.emoteKey) {
+        m.emoteKey = key;
+        const age = (Date.now() - (d.emoteTs || 0)) / 1000, left = (d.emoteDur || 0) - age;
+        if (d.emote && left > 0.5) m.ch.animate.emote(d.emote, left); else if (m.ch.animate.stopEmote) m.ch.animate.stopEmote();
+      }
+    }
     m.group.position.set(px, 0, pz);
     m.group.rotation.y = d.heading||0;
     // Determine if moving (compare to last pos)

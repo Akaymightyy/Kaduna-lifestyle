@@ -19,7 +19,9 @@ export async function fetchKadunaData() {
     // Also filter out any building within ±30 of z=0 (those overlap with
     // world.js's procedural buildings and would clip).
     data.roads = data.roads.filter(r => r.name !== "Ahmadu Bello Way");
-    data.buildings = (data.buildings || []).filter(b => Math.abs(b.z) > 35);
+    // The old sketch roads / buildings / river cut straight through the real street grid (roads over shops, cars through walls).
+    // The procedural city already has the proper roads + buildings, so draw none of them.
+    data.roads = []; data.buildings = []; data.water = [];
     return data;
   } catch (e) { return null; }
 }

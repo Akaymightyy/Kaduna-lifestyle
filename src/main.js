@@ -10,7 +10,7 @@ import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAIL
 import { createGameState } from "./needs.js";
 import { auth, db } from "./firebase.js";
 import { initAuth, showAuthModal, wireAuthUI, logout, isAuthed } from "./auth.js";
-import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition, getRemotePlayers, setMyPlace, setMyLook, setBlockedUids } from "./multiplayer.js";
+import { sendEmote, initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition, getRemotePlayers, setMyPlace, setMyLook, setBlockedUids } from "./multiplayer.js";
 import { startRide, travelToZone, travelToPlace, getDestinations } from "./travel.js";
 import { subscribeRichList } from "./economy.js";
 import { createNPCs } from "./npcs.js";
@@ -2704,11 +2704,12 @@ function _onFunActivityTap() {
   startActivity(funSpec(place, act, player, finish), player, rig);
 }
 // FEATURE: Emotes — REAL character animations via bone manipulation
+window.__actAnim = (a, s) => sendEmote(a, s);
 window._emote = (type, duration = 3) => {
   if (!rig || !rig.animate || !rig.animate.emote) { toast("Character not loaded yet"); return; }
   if (isBusy()) cancelActivity();
   if (type === "sit") { startActivity(sitSpec(player, null, 25), player, rig); toast("🪑 You sat down on a stool (move to stand up)"); return; }
-  rig.animate.emote(type, duration);
+  rig.animate.emote(type, duration); sendEmote(type, duration);
   const labels = { wave: "waved", dance: "is dancing", sit: "sat down", clap: "is clapping", jump: "jumped", squat: "squatted", point: "is pointing", laugh: "is laughing", pray: "is praying" };
   const icons = { wave: "👋", dance: "💃", sit: "🪑", clap: "👏", jump: "🦘", squat: "🏋️", point: "👆", laugh: "😂", pray: "🙏" };
   toast(icons[type] + " " + (getMyName() || "You") + " " + (labels[type] || type) + "!");
@@ -3848,6 +3849,6 @@ Promise.all([loadPlayer(manager, scene, game.state.look), addCity(scene, world, 
   
   frame();
   $("loading").classList.add("done");
-  window.__dbg = { rain: (on) => on ? _startRain() : _stopRain(), player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig };
+  window.__dbg = { colliders: world.colliders, rain: (on) => on ? _startRain() : _stopRain(), player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig };
   window.__ready = true;
 }).catch((e) => showError("Could not load the game: " + e.message));

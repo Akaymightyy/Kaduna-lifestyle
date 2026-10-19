@@ -89,7 +89,8 @@ export function buildStreetDetail(scene, colliders, areas = []) {
   // ---- every district: poles + wires along its own road, bins, potholes, a speed bump, drain covers, a generator ----
   for (const a of areas) {
     const row = []; for (let x = a.x - 56; x <= a.x + 60; x += 28) row.push({ x: x + (((Math.round(x / 28) % 2) + 2) % 2) * 0, z: a.z + (Math.round((x - a.x) / 28) % 2 ? 4.7 : -4.7) });
-    line(row, 0);
+    for (let i = row.length - 1; i >= 0; i--) if (WIDE_AVENUES_X.some((ax) => Math.abs(row[i].x - ax) < 9) || Math.abs(row[i].x) < 0) row.splice(i, 1);   // never a pole on an avenue
+    let seg = []; for (const p of row) { if (seg.length && p.x - seg[seg.length - 1].x > 40) { line(seg, 0); seg = []; } seg.push(p); } if (seg.length) line(seg, 0);
     for (const p of row) colliders.push({ minX: p.x - 0.2, maxX: p.x + 0.2, minZ: p.z - 0.2, maxZ: p.z + 0.2 });
     for (let i = 0; i < 5; i++) { const x = a.x - 50 + i * 24 + R() * 6, z = a.z + (i % 2 ? 4.55 : -4.55); cyl(0.28, 0.24, 0.8, x, 0.4, z, [0x2e7d4f, 0x2e6fa5, 0x555a60][i % 3], 10); cyl(0.3, 0.3, 0.07, x, 0.83, z, 0x222222, 10); }
     for (let i = 0; i < 4; i++) { const x = a.x - 52 + R() * 104, z = a.z + (R() - 0.5) * 3.6, r = 0.3 + R() * 0.35; disc(r + 0.12, x, z, 0x2b2d31, 1.3, 1, 0.034); disc(r, x, z, 0x1b1c1f, 1.3, 1, 0.036); }
