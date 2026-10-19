@@ -7,11 +7,13 @@ import { WIDE_AVENUES_X, WIDE_CROSS_Z, rng } from "./config.js";
 
 export const LAKE = { x: 0, z: 500, rx: 190, rz: 95 };
 export const AIRPORT = { x: 640, z: 0 };
+// Landmarks outside the city. `id` makes the map tag tappable (opens the Ride app with it picked).
+// `land` = where you arrive (on open ground, clear of buildings, water and hills) and `face` = the direction you look.
 export const SCENERY_LABELS = [
-  { name: "🛫 Kaduna Airport", x: AIRPORT.x, z: AIRPORT.z },
-  { name: "🌊 Kangimi Lake", x: LAKE.x, z: LAKE.z - 20 },
-  { name: "⛰️ Kufena Hills", x: -520, z: 380 },
-  { name: "⛰️ Kajuru Hills", x: 560, z: -420 },
+  { id: "spot:airport", name: "🛫 Kaduna Airport", x: AIRPORT.x, z: AIRPORT.z, land: { x: AIRPORT.x - 40, z: AIRPORT.z - 10, face: [1, 0] } },
+  { id: "spot:kangimi", name: "🌊 Kangimi Lake", x: LAKE.x, z: LAKE.z - 20, land: { x: LAKE.x, z: LAKE.z - LAKE.rz - 25, face: [0, 1] } },
+  { id: "spot:kufena", name: "⛰️ Kufena Hills", x: -520, z: 380, land: { x: -400, z: 250, face: [-0.62, 0.78] } },
+  { id: "spot:kajuru", name: "⛰️ Kajuru Hills", x: 560, z: -420, land: { x: 440, z: -290, face: [0.68, -0.73] } },
 ];
 
 const paint = (g, hex) => {

@@ -814,6 +814,8 @@ function _showPhoneApp(appId) {
     const groups = [];
     groups.push({ t: "📍 Places", items: dests.map(d => ({ id: d.id, label: (d.icon || "📍") + " " + d.name, off: d.open === false })) });
     groups.push({ t: "🏘️ Areas", items: AREAS.map(a => ({ id: "area:" + a.id, label: "📍 " + a.name })) });
+    groups.push({ t: "🛫 Landmarks", items: SCENERY_LABELS.filter(l => l.id).map(l => ({ id: l.id, label: l.name })) });
+    groups.push({ t: "🎡 Fun spots", items: districtFunLabels().map(f => ({ id: f.id, label: f.name })) });
     const homes = _myHomesList();
     if (homes.length) groups.push({ t: "🏠 My Houses", items: homes.map(hm => ({ id: "house:" + hm.a + ":" + hm.p, label: "🏠 " + hm.name + " · Plot #" + hm.p })) });
     window._rdGroups = groups;
@@ -1911,32 +1913,13 @@ window._saveLook=()=>{
   toast("✓ Outfit saved! Other players can see it.");
 };
 const AREA_TRAVEL_FARE = 300;
-window.travelToArea=(areaId)=>{
-  const a = getArea(areaId);
-  if (!a) return;
-  if (getActivePlace()) { toast("Leave the building first."); return; }
-  if (game.state.money < AREA_TRAVEL_FARE) { toast("A keke to " + a.name + " costs ₦" + AREA_TRAVEL_FARE + " — you don't have enough."); return; }
-  game.state.money -= AREA_TRAVEL_FARE;
-  game.save?.();
-  const uid = getMyUid();
-  if (uid) update(ref(db, "economy/" + uid), { balance: game.state.money });
-  // arrive on the district's own road, west end, facing east
-  player.pos.x = a.x - 48; player.pos.z = a.z;
-  ctl.yaw = -Math.PI / 2 + Math.PI;
-  updateHUD();
-  closePhone?.();
-  toast("🛺 Welcome to " + a.name + " (−₦" + AREA_TRAVEL_FARE + ")");
-};
-window.travelToPlace=(placeId)=>{
-  // Called from the map app: open the ride app with this place preselected
-  toast("Opening travel to " + (getPlace(placeId)?.name || placeId) + "...");
+// Tapping a name on any map opens the Ride app with that place already picked, so you see every ride and its price.
+window._openRideTo=(destId)=>{
+  window._rideDest = destId;     // the Ride app reads this when it opens
   showPhoneApp("ride");
-  // Preselect the destination in the dropdown
-  setTimeout(() => {
-    const sel = document.getElementById("ride-dest-select");
-    if (sel) sel.value = placeId;
-  }, 50);
 };
+window.travelToArea=(areaId)=>{ if (getArea(areaId)) window._openRideTo("area:" + areaId); };
+window.travelToPlace=(placeId)=>window._openRideTo(placeId);
 window.sendMessage=(uid,name)=>{
   sendChat("👋 Hi "+name+"!");
   toast("Waved at "+name);
@@ -2849,14 +2832,40 @@ window._rdPick=(id)=>{
   const list=document.getElementById("rd-list"); if(list) list.style.display="none";
   const arrow=document.getElementById("rd-arrow"); if(arrow) arrow.textContent="▼";
 };
+// Where you arrive for the newer kinds of destination: far landmarks ("spot:") and fun spots inside districts ("fun:").
+function _rideTarget(destId) {
+  if (destId.startsWith("spot:")) {
+    const s = SCENERY_LABELS.find(l => l.id === destId); if (!s || !s.land) return null;
+    return { name: s.name, x: s.land.x, z: s.land.z, face: s.land.face };
+  }
+  if (destId.startsWith("fun:")) {
+    const [, aid, i] = destId.split(":"), a = getArea(aid), f = a && districtLayout(a).fun[+i]; if (!f) return null;
+    return { name: f.name, x: f.x, z: f.z + (f.d || 10) / 2 + 4, face: [0, -1] };   // south side, looking at it
+  }
+  return null;
+}
 window.bookRide=(rideId)=>{
   const destId=window._rideDest||"";
   if(!destId){toast("Pick a destination first");return;}
   const fareMap={walk:0,keke:300,bus:200,okada:500,taxi:1500};
   const fare=fareMap[rideId] ?? 0;
   if(game.state.money<fare){toast("Not enough money");return;}
+  if((destId.startsWith("area:")||destId.startsWith("spot:")||destId.startsWith("fun:")) && getActivePlace()){toast("Leave the building first.");return;}
   game.state.money-=fare;
   closePhone();
+  if (destId.startsWith("spot:") || destId.startsWith("fun:")) {
+    const t = _rideTarget(destId);
+    if (t) {
+      player.pos.set(t.x, 0, t.z);
+      player.heading = Math.atan2(t.face[0], t.face[1]);
+      ctl.yaw = Math.atan2(-t.face[0], -t.face[1]);      // camera looks the way the landmark is
+      toast("📍 " + (rideId === "walk" ? "Walked" : "Rode to") + " " + t.name);
+      updateHUD(); game.save?.();
+      const titleEl=document.querySelector(".chip.title");
+      if(titleEl) titleEl.firstChild.textContent = "📍 " + t.name;
+      return;
+    }
+  }
   // FEATURE: handle new destination types — area:xxx and house:areaId:plotNo
   if (destId.startsWith("area:")) {
     const areaId = destId.slice(5);
@@ -3593,6 +3602,7 @@ let _mapMe = null;
 initLiveMap({ getMe: () => _mapMe, onClose: () => { if (_mapMe) { peekWorld(false); _mapMe = null; } }, scene, camera, player, AREAS, listPlaces, getHomePos: () => window._myHomePos, getHomes: () => window._myHomes || [], limits: { x: 560, z: 400 }, extraLabels: SCENERY_LABELS.concat(districtFunLabels()),
   travelPlace: (id) => { closeLiveMap(); window.travelToPlace(id); },
   travelArea: (id) => { closeLiveMap(); window.travelToArea(id); },
+  rideTo: (id) => { closeLiveMap(); window._openRideTo(id); },
   tickWorld: (x, z, r) => { tickAreaWorld(x, z, r); tickPlotDoors(x, z); tickLife(x, z, true); } });
 
 let _lastFrameT = 0;

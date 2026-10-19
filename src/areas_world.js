@@ -251,7 +251,7 @@ export function districtLayout(area) {
 }
 export function districtFunLabels() {                              // for the live map
   const out = [];
-  for (const a of AREAS) for (const f of districtLayout(a).fun) out.push({ name: f.icon + " " + f.name, x: f.x, z: f.z });
+  for (const a of AREAS) districtLayout(a).fun.forEach((f, i) => out.push({ id: "fun:" + a.id + ":" + i, name: f.icon + " " + f.name, x: f.x, z: f.z }));
   return out;
 }
 function _buildStatic(area) {

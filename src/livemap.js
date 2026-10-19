@@ -38,7 +38,7 @@ function build() {
   root = document.createElement("div"); root.id = "livemap";
   root.innerHTML = '<div class="lm-top"><button class="lm-btn" id="lm-back">← Back</button><button class="lm-btn on" id="lm-names">🏷️ Names</button><button class="lm-btn" id="lm-me">📍 Me</button></div>' +
     '<div class="lm-zoom"><button class="lm-btn" id="lm-in">＋</button><button class="lm-btn" id="lm-out">－</button></div>' +
-    '<div class="lm-hint">Drag to move · pinch or ＋ － to zoom · tap a name to travel</div><div id="lm-labels"></div>';
+    '<div class="lm-hint">Drag to move · pinch or ＋ － to zoom · tap a name to see ride prices</div><div id="lm-labels"></div>';
   document.body.appendChild(root);
   labelBox = root.querySelector("#lm-labels");
   root.querySelector("#lm-back").onclick = closeLiveMap;
@@ -71,13 +71,19 @@ function makeLabels() {
   labelBox.innerHTML = ""; labels = [];
   const add = (txt, x, z, kind, id, y = 6) => {
     const el = document.createElement("div"); el.className = "lm-tag " + kind; el.textContent = txt; labelBox.appendChild(el);
-    el.addEventListener("click", () => { if (root._moved() > 8) return; if (kind === "place") S.travelPlace(id); else if (kind === "area" && id) S.travelArea(id); });
+    el.addEventListener("click", () => {
+      if (root._moved() > 8) return;                                    // it was a drag, not a tap
+      if (kind === "place") S.travelPlace(id);
+      else if (kind === "area" && id && /^(spot|fun):/.test(id)) S.rideTo(id);   // landmarks + fun spots
+      else if (kind === "area" && id) S.travelArea(id);
+      else if (kind === "home" && id) S.rideTo(id);                    // your own houses
+    });
     labels.push({ el, x, y, z, kind });
   };
   for (const a of S.AREAS) add("🏘️ " + a.name, a.x, a.z, "area", a.id, 8);
   for (const p of S.listPlaces()) add((p.minimapIcon || "📍") + " " + p.name, p.entranceX, p.entranceZ, "place", p.id, 8);
   const hs = (S.getHomes && S.getHomes()) || [];
-  if (hs.length) for (const h of hs) add("🏠 " + (hs.length > 1 ? h.name + " #" + h.p : "My Home"), h.x, h.z, "home", null, 6);
+  if (hs.length) for (const h of hs) add("🏠 " + (hs.length > 1 ? h.name + " #" + h.p : "My Home"), h.x, h.z, "home", (h.a != null && h.p != null) ? "house:" + h.a + ":" + h.p : null, 6);
   else { const h = S.getHomePos && S.getHomePos(); if (h) add("🏠 My Home", h.x, h.z, "home", null, 6); }
   for (const e of (S.extraLabels || [])) add(e.name, e.x, e.z, "area", null, 10);
   add("📍 You", 0, 0, "me", null, 4); labels[labels.length - 1].follow = true;
