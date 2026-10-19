@@ -140,6 +140,51 @@
         ".read": "auth != null",
         ".write": "auth != null && (!data.exists() || data.child('uid').val() === auth.uid)"
       }
+    },
+    "chats": {
+      "$chatId": {
+        ".read": "auth != null",
+        "meta": {
+          ".read": "auth != null",
+          ".write": "auth != null && (!data.exists() || data.child('members/' + auth.uid).val() === true || data.child('owner').val() === auth.uid)"
+        },
+        "messages": {
+          "$msgId": {
+            ".read": "auth != null",
+            ".write": "auth != null && (!data.exists() || data.child('from').val() === auth.uid)"
+          }
+        }
+      }
+    },
+    "userChats": {
+      "$uid": {
+        ".read": "auth.uid === $uid",
+        "$chatId": {
+          ".read": "auth.uid === $uid",
+          ".write": "auth.uid === $uid"
+        }
+      }
+    },
+    "live": {
+      ".read": "auth != null",
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth.uid === $uid"
+      }
+    },
+    "weather": {
+      ".read": "auth != null",
+      "$worldId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "traffic": {
+      ".read": "auth != null",
+      "$sessionId": {
+        ".read": "auth != null",
+        ".write": "auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'"
+      }
     }
   }
 }
