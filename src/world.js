@@ -220,6 +220,22 @@ export function buildWorld(scene) {
       const signColors = [0x0f4d3a, 0xc0392b, 0x1d5fa8];
       geos.push(part(w * 0.6, 0.8, 0.1, x, 4.2, az + faceSign * 0.8, signColors[Math.floor(R() * signColors.length)]));
     }
+    // ---- extra depth: plinth, corner pilasters, floor ledges, balconies, shutters, AC boxes, drain pipe ----
+    const fd = -faceSign, fz = z + fd * d / 2, base = color.clone().multiplyScalar(0.78), light = color.clone().lerp(new THREE.Color(0xffffff), 0.35);
+    geos.push(part(w + 0.5, 0.7, d + 0.5, x, 0.35, z, base.getHex(), 5));                                  // stone plinth
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) geos.push(part(0.7, h, 0.7, x + sx * (w / 2 - 0.1), h / 2, z + sz * (d / 2 - 0.1), light.getHex(), 9));   // corner pilasters
+    for (let y = 3.6; y < h - 0.5; y += 3.6) geos.push(part(w + 0.45, 0.28, d + 0.45, x, y, z, light.getHex(), 9));                                           // floor ledges
+    geos.push(part(w + 0.9, 0.35, d + 0.9, x, h - 0.15, z, light.getHex(), 9));                                                                               // cornice under the parapet
+    for (let y = 3.6; y < h - 3.0; y += 3.6) {                                                              // balconies with railings on the road face
+      const bx = x + (R() - 0.5) * w * 0.4, bw = Math.min(5, w * 0.35);
+      geos.push(part(bw, 0.22, 1.3, bx, y + 0.1, fz + fd * 0.65, light.getHex(), 9));
+      geos.push(part(bw, 0.8, 0.06, bx, y + 0.6, fz + fd * 1.27, 0x2b2f35));
+      for (const e of [-1, 1]) geos.push(part(0.06, 0.8, 1.2, bx + e * bw / 2, y + 0.6, fz + fd * 0.65, 0x2b2f35));
+    }
+    const nsh = Math.max(1, Math.floor(w / 6));                                                             // roller shutters + side pillars on the shopfront
+    for (let i = 0; i < nsh; i++) { const sxp = x - w / 2 + (i + 0.5) * (w / nsh); geos.push(part(w / nsh * 0.62, 2.5, 0.12, sxp, 1.35, fz + fd * 0.08, [0x8c9399, 0x6f767d, 0x9a8a70][i % 3], 4)); geos.push(part(0.45, 3.1, 0.5, sxp - w / nsh / 2 + 0.2, 1.55, fz + fd * 0.2, light.getHex(), 9)); }
+    for (let k = 0; k < 2; k++) if (R() < 0.7) { const ay = 4.6 + Math.floor(R() * Math.max(1, (h - 6) / 3.6)) * 3.6; if (ay < h - 1) geos.push(part(0.9, 0.55, 0.45, x + (R() - 0.5) * w * 0.7, ay, fz + fd * 0.3, 0xe4e6e8)); }   // AC boxes
+    geos.push(part(0.16, h - 0.5, 0.16, x + w / 2 - 0.9, (h - 0.5) / 2, fz + fd * 0.15, 0x5a5f66));          // rain pipe
     colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 });
     mapShapes.buildings.push({ x, z, w, d });
   };
