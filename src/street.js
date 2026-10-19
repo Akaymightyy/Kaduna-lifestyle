@@ -45,7 +45,7 @@ function trader(x, z, face, R) {                    // umbrella + table + crates
   box(0.5, 0.35, 0.5, x + 1.1, 0.18, z + face * 0.2, 0xc9a56a); box(0.5, 0.35, 0.5, x + 1.1, 0.53, z + face * 0.2, 0xb8946a);
 }
 
-export function buildStreetDetail(scene, colliders) {
+export function buildStreetDetail(scene, colliders, areas = []) {
   const R = rng(777);
   const pts = (arr) => arr;
   // ---- main street: poles on both pavements, every ~36 m ----
@@ -79,12 +79,25 @@ export function buildStreetDetail(scene, colliders) {
   }
   for (const x of [-120, 60, 150]) for (let k = 0; k < 6; k++) box(0.5, 0.06, 7.6, x + k * 0.55, 0.05, 0, k % 2 ? 0x222222 : 0xe8c02a);   // speed bump (rumble strip) across the main street
   for (const sgn of [1, -1]) for (let x = -190; x < 190; x += 14) box(2.4, 0.04, 0.55, x + 3, 0.03, sgn * (ROAD_HALF + 0.35), 0x1d1e22);           // gutter covers along the kerb
-  // ---- piles of rubbish + generators near the shopfronts ----
-  for (let i = 0; i < 16; i++) {
-    const x = -185 + R() * 370, sgn = R() < 0.5 ? 1 : -1, z = sgn * (ROAD_HALF + 1.2);
-    for (let k = 0; k < 5; k++) box(0.25 + R() * 0.3, 0.12 + R() * 0.2, 0.25 + R() * 0.3, x + (R() - 0.5) * 1.1, 0.1, z + (R() - 0.5) * 0.5, [0x5a6a4a, 0x7a6a50, 0x9a8a70, 0x3a3a3a, 0xc0b090][k], R() * 3);
+  // ---- tidy bins along the main street pavements ----
+  for (let i = 0; i < 22; i++) {
+    const x = -190 + i * 17.5 + R() * 5, sgn = i % 2 ? 1 : -1, z = sgn * (ROAD_HALF + 1.0);
+    cyl(0.3, 0.26, 0.85, x, 0.43, z, [0x2e7d4f, 0x2e6fa5, 0x555a60][i % 3], 10); cyl(0.32, 0.32, 0.07, x, 0.88, z, 0x222222, 10);
   }
   for (let i = 0; i < 9; i++) { const x = -170 + i * 42 + R() * 10, sgn = i % 2 ? 1 : -1, z = sgn * (ROAD_HALF + 7.6); box(1.0, 0.8, 0.6, x, 0.4, z, 0x7a8088); box(1.02, 0.14, 0.62, x, 0.82, z, 0xe08a20); cyl(0.05, 0.05, 0.5, x + 0.3, 1.05, z, 0x333333, 6); colliders.push({ minX: x - 0.55, maxX: x + 0.55, minZ: z - 0.35, maxZ: z + 0.35 }); }
+
+  // ---- every district: poles + wires along its own road, bins, potholes, a speed bump, drain covers, a generator ----
+  for (const a of areas) {
+    const row = []; for (let x = a.x - 56; x <= a.x + 60; x += 28) row.push({ x: x + (((Math.round(x / 28) % 2) + 2) % 2) * 0, z: a.z + (Math.round((x - a.x) / 28) % 2 ? 4.7 : -4.7) });
+    line(row, 0);
+    for (const p of row) colliders.push({ minX: p.x - 0.2, maxX: p.x + 0.2, minZ: p.z - 0.2, maxZ: p.z + 0.2 });
+    for (let i = 0; i < 5; i++) { const x = a.x - 50 + i * 24 + R() * 6, z = a.z + (i % 2 ? 4.55 : -4.55); cyl(0.28, 0.24, 0.8, x, 0.4, z, [0x2e7d4f, 0x2e6fa5, 0x555a60][i % 3], 10); cyl(0.3, 0.3, 0.07, x, 0.83, z, 0x222222, 10); }
+    for (let i = 0; i < 4; i++) { const x = a.x - 52 + R() * 104, z = a.z + (R() - 0.5) * 3.6, r = 0.3 + R() * 0.35; disc(r + 0.12, x, z, 0x2b2d31, 1.3, 1, 0.034); disc(r, x, z, 0x1b1c1f, 1.3, 1, 0.036); }
+    for (let k = 0; k < 5; k++) box(0.5, 0.06, 5.4, a.x - 20 + k * 0.55, 0.05, a.z, k % 2 ? 0x222222 : 0xe8c02a);
+    for (let x = -48; x < 52; x += 16) box(2.2, 0.04, 0.5, a.x + x, 0.03, a.z + 3.0, 0x1d1e22);
+    const gx = a.x - 36 + R() * 8; box(1.0, 0.8, 0.6, gx, 0.4, a.z - 4.9, 0x7a8088); box(1.02, 0.14, 0.62, gx, 0.82, a.z - 4.9, 0xe08a20);
+    colliders.push({ minX: gx - 0.55, maxX: gx + 0.55, minZ: a.z - 5.25, maxZ: a.z - 4.55 });
+  }
 
   const geo = mergeGeometries(L); L.length = 0;
   const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }));

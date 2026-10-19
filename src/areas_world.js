@@ -15,6 +15,7 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import { AREAS, getArea, getPlotPosition } from "./areas.js";
 import { getAreaHouses } from "./plots.js";
 import { WIDE_CROSS_Z, WIDE_AVENUES_X } from "./config.js";
+import { stylize, NIGHT_GLOW } from "./art/style.js";
 import { funKinds, funGeometry, FUN_INFO } from "./fun.js";
 import { tierShapes, npcTier, wallRing, treeShape, carShape, kioskShape, landmark, landmarkKind, hash2, isVacantPlot, plotArchetype, paint, flatten } from "./town.js";
 
@@ -39,10 +40,45 @@ function _lampGeometry() {
   const head = new THREE.BoxGeometry(0.45, 0.18, 0.3); head.translate(0, 5.5, 0);
   return mergeGeometries([paint(flatten(post), 0x4a4f55), paint(flatten(head), 0xfff0b0)], false);
 }
+
+// ---- district surface patterns: give every vertex an aPat code so roads, pavements, walls, roofs and windows get the textured look ----
+function _patFor(r) {                                           // house parts are painted with a grey value; it tells us what they are
+  if (r >= 0.99) return 3;                                      // walls -> plaster
+  if (r >= 0.8) return 9;                                       // columns, steps, balconies -> concrete
+  if (r >= 0.4 && r <= 0.62) return 4;                          // roofs -> zinc / tile
+  if (r >= 0.24 && r <= 0.3) return 2;                          // doors -> wood
+  if (r > 0.1 && r < 0.14) return 14;                           // windows -> glass that glows at night
+  return 0;
+}
+function _patify(g, code) {
+  const n = g.attributes.position.count, a = new Float32Array(n), c = g.attributes.color;
+  for (let i = 0; i < n; i++) a[i] = code != null ? code : (c ? _patFor(c.getX(i)) : 0);
+  g.setAttribute("aPat", new THREE.BufferAttribute(a, 1)); return g;
+}
+const _DGLOW = `
+#ifdef ART_PAT
+if (vPat > 13.5 && vPat < 14.5) {
+  float on = step(0.38, fract(sin(dot(vColor.rgb, vec3(12.9898, 78.233, 37.719))) * 43758.5453));
+  outgoingLight = mix(outgoingLight, vec3(1.0, 0.78, 0.4) * 1.05, on * uNightGlow * 0.9);
+}
+#endif
+`;
+function _districtMaterial() {
+  const m = new THREE.MeshLambertMaterial({ vertexColors: true });
+  stylize(m, { pat: true, ao: true, fake: false });
+  const prev = m.onBeforeCompile, key = m.customProgramCacheKey;
+  m.onBeforeCompile = (sh, r) => {
+    prev(sh, r); sh.uniforms.uNightGlow = NIGHT_GLOW;
+    sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nuniform float uNightGlow;").replace("#include <opaque_fragment>", _DGLOW + "\n#include <opaque_fragment>");
+  };
+  m.customProgramCacheKey = () => key.call(m) + "|dglow";
+  return m;
+}
 function _getShapes() {
   if (_shapes) return _shapes;
   _shapes = { houses: tierShapes(), wall: wallRing(), tree: treeShape(), car: carShape(), kiosk: kioskShape(), lamp: _lampGeometry(), lm: {} };
-  _vcMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  for (const g of _shapes.houses) _patify(g); _patify(_shapes.wall, 5);
+  _vcMat = _districtMaterial();
   return _shapes;
 }
 
@@ -175,8 +211,8 @@ function _drawRentSign(canvas, ctx, isForSale, area) {
 }
 
 // ---- Static part of a district: ground pad, road, pavements, centre line, landmark ----
-function _quad(L, w, d, x, y, z, color) {
-  const g = new THREE.PlaneGeometry(w, d); g.rotateX(-Math.PI / 2); g.translate(x, y, z); L.push(paint(flatten(g), color));
+function _quad(L, w, d, x, y, z, color, code = 0) {
+  const g = new THREE.PlaneGeometry(w, d); g.rotateX(-Math.PI / 2); g.translate(x, y, z); L.push(_patify(paint(flatten(g), color), code));
 }
 // Where the landmark and the fun places of a district go (shared by the 3D build and the map labels).
 const _layouts = new Map();
@@ -221,19 +257,19 @@ export function districtFunLabels() {                              // for the li
 function _buildStatic(area) {
   const L = [], lay = districtLayout(area), { zmin, zmax, kind, depth, lz } = lay;
   const padCol = area.tier === "rich" ? 0x8fbf7a : area.tier === "middle" ? 0xa9bf86 : 0xbfae85;
-  _quad(L, 92, zmax - zmin + 14, area.x - 4, 0.008, (zmin + zmax) / 2, padCol);
+  _quad(L, 92, zmax - zmin + 14, area.x - 4, 0.008, (zmin + zmax) / 2, padCol, 12);
   const roadW = 124;
-  _quad(L, roadW, 6, area.x, 0.015, area.z, 0x3a3d43);
-  _quad(L, roadW, 1.5, area.x, 0.012, area.z + 3.75, 0xd2bf9c);
-  _quad(L, roadW, 1.5, area.x, 0.012, area.z - 3.75, 0xd2bf9c);
+  _quad(L, roadW, 6, area.x, 0.015, area.z, 0x3a3d43, 13);
+  _quad(L, roadW, 1.5, area.x, 0.012, area.z + 3.75, 0xd2bf9c, 9);
+  _quad(L, roadW, 1.5, area.x, 0.012, area.z - 3.75, 0xd2bf9c, 9);
   for (let x = -roadW / 2 + 4; x < roadW / 2 - 3; x += 8) _quad(L, 3.5, 0.16, area.x + x, 0.02, area.z, 0xe9d36a);
   const boxes = [];
   if (lz != null) {
-    const g = landmark(kind); g.translate(area.x - 6, 0.02, lz); L.push(g);
+    const g = landmark(kind); g.translate(area.x - 6, 0.02, lz); L.push(_patify(g, 0));
     if (kind !== "market") boxes.push({ minX: area.x - 6 - 6, maxX: area.x - 6 + 6, minZ: lz - depth / 2, maxZ: lz + depth / 2 });
   }
   for (const f of lay.fun) {                                       // fun places
-    const g = funGeometry(f.kind).clone(); g.rotateY(f.rot); g.translate(f.x, 0.02, f.z); L.push(g);
+    const g = funGeometry(f.kind).clone(); g.rotateY(f.rot); g.translate(f.x, 0.02, f.z); L.push(_patify(g, 0));
     if (f.solid) boxes.push({ minX: f.x - f.w / 2 + 1, maxX: f.x + f.w / 2 - 1, minZ: f.z - f.d / 2 + 1, maxZ: f.z + f.d / 2 - 1 });
   }
   const geo = mergeGeometries(L, false);

@@ -49,7 +49,7 @@ export function getPlotPosition(area, plotNo) {
   const col = plotNo % plotsPerRow;
   const spacing = 8;  // metres between plots
   const startX = area.x - (plotsPerRow * spacing) / 2;
-  const startZ = area.z - (area.plots / plotsPerRow * spacing) / 2;
+  const startZ = area.z - (area.plots / plotsPerRow * spacing) / 2 - (area.plots >= 100 ? 8 : 0);   // 100-plot districts: start higher so the last row stays off the cross street
   // The area's own road runs along X through the centre (z = area.z, 6 m + 1.5 m pavements).
   // Rows that would land on that road are pushed past it so houses never sit in the road.
   let baseZ = startZ + row * spacing;

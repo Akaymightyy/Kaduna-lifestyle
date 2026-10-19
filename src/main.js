@@ -437,7 +437,7 @@ function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.asp
 addEventListener("resize", resize); resize();
 
 const world = buildWorld(scene);
-world.world.add(buildStreetDetail(scene, world.colliders));
+world.world.add(buildStreetDetail(scene, world.colliders, AREAS));
 const _pShadow = makeBlobShadows(scene, 1);
 addScenery(scene, world);
 initLife(scene);
@@ -3672,7 +3672,7 @@ function _frame() {
   const active = getActivePlace();
   // SAFETY: auto-dismount vehicle when entering a place (can't ride inside a shop)
   if (active && isRiding()) { despawnRideVehicle(); toast("🚶 Dismounted (entered building)"); }
-  if (!active && !isBusy()) collide(player.pos, world.colliders);
+  if (!active && !isBusy()) collide(player.pos, world.colliders, isRiding() ? 1.7 : 0.55);
   // If we're inside a place, also collide with the place's local colliders
   if (active?.handle?.colliders && !isBusy()) {
     for (const c of active.handle.colliders) {
