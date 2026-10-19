@@ -50,6 +50,7 @@ import { initAreaWorld, tickAreaWorld, setAreaLampsNight, disposeAreaWorld, getR
 // (a static OSM-derived file shipped in public/data/). The main Ahmadu Bello
 // Way is filtered out (already rendered by world.js) to avoid double-render.
 import { fetchKadunaData, buildRealMap } from "./realmap.js";
+import { driveStep } from "./drive.js";
 import { VEHICLE_CATALOG, getVehicle, initVehicles, buyVehicle, getOwned, ownsVehicle, isRiding, getRideSpeed, getRideId, spawnRideVehicle, despawnRideVehicle, tickRideVehicle } from "./vehicles.js";
 import { buildStreetDetail, makeBlobShadows } from "./street.js";
 import { initActivity, startActivity, tickActivity, isBusy, cancelActivity, eatSpec, toiletSpec, sitSpec, funSpec, placeSpec } from "./activity.js";
@@ -153,7 +154,7 @@ function _armBeforeUnload(uid) {
 
 // ---- FEATURE: Vehicle driving controls (on-screen buttons) ----
 // When riding, dedicated left/right/accelerate/brake buttons appear.
-// These set window._vehBtnSteer / window._vehBtnThrottle which the
+// These set the held flags in window._veh which the
 // movement loop reads in addition to the joystick + keyboard.
 let _vehControlsEl = null;
 function _ensureVehicleControls() {
@@ -190,19 +191,29 @@ function _ensureVehicleControls() {
     "width:56px;height:56px;border-radius:50%;background:rgba(15,77,58,.92);color:#fff;border:2px solid rgba(255,255,255,.3);" +
     "font-size:22px;font-weight:700;cursor:pointer;pointer-events:auto;touch-action:none;" +
     "box-shadow:0 4px 12px rgba(0,0,0,.4);user-select:none;-webkit-user-select:none;";
-  // Wire up pointer events for each button
-  const wireBtn = (el, steerVal, throttleVal) => {
-    const start = (e) => { e.preventDefault(); if (steerVal !== undefined) window._vehBtnSteer = (window._vehBtnSteer || 0) + steerVal; if (throttleVal !== undefined) window._vehBtnThrottle = (window._vehBtnThrottle || 0) + throttleVal; el.style.transform = el.style.transform.replace("scale(1)", "scale(0.92)"); };
-    const end = (e) => { e.preventDefault(); if (steerVal !== undefined) window._vehBtnSteer = (window._vehBtnSteer || 0) - steerVal; if (throttleVal !== undefined) window._vehBtnThrottle = (window._vehBtnThrottle || 0) - throttleVal; el.style.transform = el.style.transform.replace("scale(0.92)", "scale(1)"); };
-    el.addEventListener("pointerdown", start);
-    el.addEventListener("pointerup", end);
-    el.addEventListener("pointercancel", end);
-    el.addEventListener("pointerleave", end);
+  // Wire up pointer events for each button.
+  // BUGFIX: this used to ADD 1 on press and SUBTRACT 1 on release / cancel / leave. On a phone "pointerup" and then
+  // "pointerleave" both fire for one tap, so one tap subtracted twice and left steering or throttle stuck on the
+  // opposite value: the car kept turning ("swinging") or driving by itself. Now each button is just held / not held,
+  // set on press, cleared on release, and clearing twice is harmless.
+  const V = (window._veh = window._veh || { left: false, right: false, accel: false, brake: false });
+  const wireBtn = (el, key) => {
+    const press = (e) => { e.preventDefault(); try { el.setPointerCapture(e.pointerId); } catch (_) {} V[key] = true; el.style.opacity = "0.82"; };
+    const release = () => { V[key] = false; el.style.opacity = ""; };
+    el.addEventListener("pointerdown", press);
+    el.addEventListener("pointerup", release);
+    el.addEventListener("pointercancel", release);
+    el.addEventListener("lostpointercapture", release);
+    el.addEventListener("contextmenu", (e) => e.preventDefault());
   };
-  wireBtn(accelBtn, undefined, 1);     // accelerate
-  wireBtn(brakeBtn, undefined, -1);    // brake/reverse
-  wireBtn(leftBtn, -1, undefined);     // steer left
-  wireBtn(rightBtn, 1, undefined);     // steer right
+  // never leave a pedal "pressed" when the page loses focus or the tab goes to the background
+  const _vehClear = () => { V.left = V.right = V.accel = V.brake = false; };
+  addEventListener("blur", _vehClear);
+  document.addEventListener("visibilitychange", () => { if (document.hidden) _vehClear(); });
+  wireBtn(accelBtn, "accel");
+  wireBtn(brakeBtn, "brake");     // brake / reverse
+  wireBtn(leftBtn, "left");
+  wireBtn(rightBtn, "right");
   _vehControlsEl.appendChild(accelBtn);
   _vehControlsEl.appendChild(brakeBtn);
   _vehControlsEl.appendChild(leftBtn);
@@ -2346,6 +2357,8 @@ window._rideVehicle = async (vehicleId) => {
   const ok = await spawnRideVehicle(vehicleId, player.pos, player.heading, toast);
   if (ok) {
     closePhone();
+    ctl.yaw = player.heading + Math.PI;           // camera behind the car, looking the way it faces
+    player.steerSm = 0;
     const v = getVehicle(vehicleId);
     toast("🚗 Riding " + (v?.name || vehicleId) + "! Speed boosted.");
   } else { toast("Could not spawn vehicle — try again"); }
@@ -3408,16 +3421,18 @@ function _frame() {
   if (isLiveMapOn()) { liveMapFrame(dt); perfBeforeRender(); renderer.render(scene, camera); perfAfterRender(renderer, getQuality()); requestAnimationFrame(frame); return; }
   const now = Date.now() / 1000;
   const _riding = isRiding();
+  if (!_riding && window._veh) { const V = window._veh; V.left = V.right = V.accel = V.brake = false; player.steerSm = 0; }
   // FEATURE: show/hide driving buttons based on riding state
   if (_vehControlsEl) _vehControlsEl.style.display = _riding ? "block" : "none";
   if (_riding) {
-    // FEATURE: VEHICLE CONTROL — dedicated driving buttons + joystick + keyboard
-    // _vehBtnSteer / _vehBtnThrottle are set by the on-screen driving buttons.
-    // Joystick left/right also steers; joystick up/down also throttles.
-    // Keyboard WASD/arrows also work.
+    // VEHICLE CONTROL: on-screen buttons + joystick + keyboard.
+    // Directions (same as walking): the car's forward is (sin h, cos h), and steering RIGHT must turn the heading
+    // DOWN (it used to turn it up = right button steered left, and "forward" was the opposite of where the car faced).
+    const V = window._veh || (window._veh = { left: false, right: false, accel: false, brake: false });
+    const dz = (x) => (Math.abs(x) < 0.15 ? 0 : x);                 // joystick dead zone, so resting a thumb does not steer
     const maxVehSpd = getRideSpeed() * 1.8;
-    let steer = (window._vehBtnSteer || 0) + (ctl.joyX || 0);
-    let throttle = (window._vehBtnThrottle || 0) + (ctl.joyY || 0);
+    let steer = (V.right ? 1 : 0) - (V.left ? 1 : 0) + dz(ctl.joyX || 0);
+    let throttle = (V.accel ? 1 : 0) - (V.brake ? 1 : 0) + dz(ctl.joyY || 0);
     const k = ctl.keys || {};
     if (k["w"] || k["arrowup"]) throttle += 1;
     if (k["s"] || k["arrowdown"]) throttle -= 1;
@@ -3425,21 +3440,13 @@ function _frame() {
     if (k["d"] || k["arrowright"]) steer += 1;
     steer = Math.max(-1, Math.min(1, steer));
     throttle = Math.max(-1, Math.min(1, throttle));
-    // Acceleration: throttle sets target speed, ramp is gradual (vehicle feel)
-    const target = throttle * maxVehSpd;
-    player.speed += (target - player.speed) * (1 - Math.exp(-dt * 3));
-    // BUGFIX: steering rate was 2.8 (too high — car "swung" instead of drove).
-    // Now 1.2 rad/s, scaled by speed factor so turns are wider at high speed
-    // (like a real car) and tighter at low speed. Feels like DRIVING not swinging.
-    if (Math.abs(player.speed) > 0.3) {
-      const speedFactor = Math.min(1, Math.abs(player.speed) / maxVehSpd);
-      const steerRate = 1.2;
-      player.heading += steer * steerRate * dt * (player.speed > 0 ? 1 : -1) * (0.4 + speedFactor * 0.6);
+    driveStep(player, { steer, throttle }, dt, maxVehSpd);        // src/drive.js
+    const v = player.speed;
+    // chase camera: swing round behind the car while driving forward (camera yaw = heading + PI means "behind")
+    if (v > 0.6) {
+      let d = (player.heading + Math.PI) - ctl.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
+      ctl.yaw += d * (1 - Math.exp(-dt * 2.2));
     }
-    // Move forward along heading (not camera-relative)
-    const fx = -Math.sin(player.heading), fz = -Math.cos(player.heading);
-    player.pos.x += fx * player.speed * dt;
-    player.pos.z += fz * player.speed * dt;
   } else {
     // NORMAL WALKING (existing camera-relative control scheme)
     const it = ctl.intent();
