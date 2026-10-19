@@ -161,7 +161,7 @@
         ".read": "auth.uid === $uid",
         "$chatId": {
           ".read": "auth.uid === $uid",
-          ".write": "auth.uid === $uid"
+          ".write": "auth.uid === $uid || root.child('chats/' + $chatId + '/meta/members/' + auth.uid).val() === true"
         }
       }
     },
