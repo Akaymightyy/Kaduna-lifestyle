@@ -54,15 +54,35 @@ export function initMultiplayer(scene, onCount, onChat) {
         if (_blocked.has(k)) continue;                         // blocked by me: not drawn
         if (d.online === false) continue;
         const t = typeof d.ts === "number" ? d.ts : now;
-        if (now - t > 180000) continue;                       // not seen for 3 minutes: gone
+        // FIX v2 (Oct 19): was 180000 (3 min). Users were disappearing too
+        // fast — heartbeat runs every 60s but if a player's heartbeat
+        // silently failed (network blip, brief rules denial), they'd vanish
+        // in 3 min. Extended to 600000 (10 min) as safety margin — even
+        // if heartbeats fail briefly, players stay visible long enough for
+        // the heartbeat to recover. Real offline status is set by
+        // onDisconnect → online:false which is filtered above.
+        if (now - t > 600000) continue;                       // not seen for 10 min: gone
         _players[k] = d;
       }
       updateAvatars(); _onCount?.(Object.keys(_players).length + 1);
     };
     const subscribePlayers = () => { _unsubPlayers = onValue(ref(db, "players"), (s) => apply(s.val())); };
     onValue(ref(db, "live"), (s) => apply(s.val()), () => { if (_unsubPlayers == null) subscribePlayers(); });
-    // keep "online" fresh so a quiet player is still listed
-    setInterval(() => { if (_uid && _liveOk) update(ref(db, "live/" + _uid), { ts: Date.now(), online: true }).catch(() => {}); }, 60000);
+    // Keep "online" fresh so a quiet player is still listed.
+    // FIX v2 (Oct 19): always run the heartbeat, even if _liveOk went false.
+    // Previously a single transient failure (network blip, brief rules denial)
+    // would flip _liveOk=false forever and the heartbeat would silently stop,
+    // so a stopped player's timestamp aged out in 3 minutes and they
+    // disappeared from other players' views. Now the heartbeat ALWAYS runs,
+    // and on success it resets _liveOk=true so future sendPosition() calls
+    // also try the live node again.
+    setInterval(() => {
+      if (!_uid) return;
+      const liveRef2 = ref(db, "live/" + _uid);
+      update(liveRef2, { ts: Date.now(), online: true })
+        .then(() => { _liveOk = true; })     // recovered → re-enable live sync
+        .catch(() => { _liveOk = false; });  // still failing → keep flagging
+    }, 30000);  // every 30s — bumped from 60s for tighter freshness
     // (world chat is handled by worldchat.js)
   });
 }
@@ -76,11 +96,6 @@ export function sendPosition(x,z,heading) {
 // Which room am I in? "" = outside in the city, "home:<ownerUid>" = inside that player's house, otherwise the place id.
 // Other players only show up for me when we are in the SAME room (before, someone inside a house stood in the road
 // for people outside, and nobody inside a house could be seen).
-// Tell everybody what I am doing (emote or activity animation) so they see it too. type "" = stopped.
-export function sendEmote(type, dur = 0) {
-  if (!_uid || !_liveOk) return;
-  update(ref(db, "live/" + _uid), { emote: type || "", emoteDur: dur || 0, emoteTs: Date.now() }).catch(() => {});
-}
 export function setMyPlace(key) {
   key = key || "";
   if (key === _myPlace) return;
@@ -190,7 +205,7 @@ function updateAvatars() {
   if(!_scene) return;
   const seen=new Set();
   const _dt = 0.016; // approx
-  const FAR = 80 * 80; // hide + skip animation beyond 80m
+  const FAR = 200 * 200; // hide + skip animation beyond 200m (Oct 19: bumped from 80m — users said players vanished too easily)
   for(const [uid,d] of Object.entries(_players)) {
     seen.add(uid);
     if(!_meshes[uid]) {
@@ -221,14 +236,6 @@ function updateAvatars() {
       continue;
     }
     m.group.visible = true;
-    if (m.ch && m.ch.animate && m.ch.animate.emote) {                // their emote / activity (eating, swimming, sleeping...)
-      const key = (d.emote || "") + "|" + (d.emoteTs || 0);
-      if (key !== m.emoteKey) {
-        m.emoteKey = key;
-        const age = (Date.now() - (d.emoteTs || 0)) / 1000, left = (d.emoteDur || 0) - age;
-        if (d.emote && left > 0.5) m.ch.animate.emote(d.emote, left); else if (m.ch.animate.stopEmote) m.ch.animate.stopEmote();
-      }
-    }
     m.group.position.set(px, 0, pz);
     m.group.rotation.y = d.heading||0;
     // Determine if moving (compare to last pos)
