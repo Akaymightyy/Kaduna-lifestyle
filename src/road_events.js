@@ -18,7 +18,7 @@
 
 import { startRain, stopRain, isRaining } from "./particles.js";
 import { sfx } from "./sfx.js";
-import { ref, onValue, set, onDisconnect, get } from "firebase/database";
+import { ref, onValue, set, get } from "firebase/database";
 
 let _scene = null;
 let _playerGetPos = () => ({ x: 0, z: 0 });
@@ -89,9 +89,12 @@ export function initRoadEvents({ scene, playerGetPos, gameHourGet, toast, db, wo
       }
       _weatherTimer = 100 + Math.random() * 80;
     });
-    // Clear weather on disconnect — but only if I am the owner (we set the
-    // "owner" field). Otherwise leaving the page doesn't kill the rain.
-    onDisconnect(wRef).remove();
+    // SYNC FIX (Oct 19): we do NOT call onDisconnect(wRef).remove() here.
+    // If we did, ANY client that closes the tab/app would wipe the shared
+    // weather state → when one player exits, rain stops for everyone else
+    // (the user reported exactly this bug). Instead, the weather persists
+    // until another client rolls a stop (see _decideWeather) — that client
+    // writes the new state, and all subscribed clients apply it.
   }
 }
 

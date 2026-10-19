@@ -91,7 +91,7 @@ export function sendPosition(x,z,heading) {
   if(!_uid) return;
   if(_sendT) return; _sendT=setTimeout(()=>{_sendT=null;},200);
   update(ref(db,"players/"+_uid),{x,z,heading,ts:serverTimestamp()});
-  if (_liveOk) update(ref(db,"live/"+_uid),{x,z,heading,place:_myPlace,online:true,ts:Date.now()}).catch(()=>{ _liveOk=false; });
+  if (_liveOk) update(ref(db,"live/"+_uid),{x,z,heading,place:_myPlace,online:true,ts:Date.now(),riding:_myRiding||null,passengerOf:_myPassengerOf||null}).catch(()=>{ _liveOk=false; });
 }
 // Which room am I in? "" = outside in the city, "home:<ownerUid>" = inside that player's house, otherwise the place id.
 // Other players only show up for me when we are in the SAME room (before, someone inside a house stood in the road
@@ -106,6 +106,23 @@ export function setMyPlace(key) {
 export function setMyLook(look) {
   _myLook = look || null;
   if (_uid && _liveOk && _myLook) update(ref(db,"live/"+_uid),{look:_myLook}).catch(()=>{});
+}
+// SYNC (Oct 19): tell other players what vehicle I'm currently riding
+// (null = on foot). They'll render my avatar with a small 🏍️/🚗 badge
+// above my name tag so they know I'm not just walking.
+let _myRiding = null;
+export function setMyRiding(vehicleId) {
+  _myRiding = vehicleId || null;
+  if (_uid && _liveOk) update(ref(db,"live/"+_uid),{riding:_myRiding}).catch(()=>{});
+}
+// SYNC (Oct 19): tell other players that I'm a passenger on another
+// player's ride. They'll hide my avatar (I'm sitting on someone else's
+// bike) and the driver will see me riding pillion.
+let _myPassengerOf = null;
+export function setMyPassengerOf(driverUid) {
+  _myPassengerOf = driverUid || null;
+  if (_uid && _liveOk) update(ref(db,"live/"+_uid),{passengerOf:_myPassengerOf}).catch(()=>{});
+  updateAvatars();
 }
 
 export function sendChat(text) {
@@ -227,6 +244,9 @@ function updateAvatars() {
     }
     // Only show people who are in the same room as me (city / the same house / the same shop)
     if ((d.place || "") !== _myPlace) { m.group.visible = false; continue; }
+    // SYNC (Oct 19): if this player is a passenger on MY ride, hide their
+    // avatar — they're sitting on my bike, not walking around.
+    if (d.passengerOf && d.passengerOf === _uid) { m.group.visible = false; continue; }
     // Distance from local player
     const ddx = px - _myX, ddz = pz - _myZ;
     const distSq = ddx * ddx + ddz * ddz;
@@ -238,6 +258,12 @@ function updateAvatars() {
     m.group.visible = true;
     m.group.position.set(px, 0, pz);
     m.group.rotation.y = d.heading||0;
+    // SYNC (Oct 19): update the riding badge above the name tag
+    // (null = on foot, "okada"/"keke"/etc = show vehicle emoji badge)
+    if (m.riding !== (d.riding || null)) {
+      m.riding = d.riding || null;
+      _updateRidingBadge(m);
+    }
     // Determine if moving (compare to last pos)
     const dx = px - m.lastX, dz = pz - m.lastZ;
     const dist = Math.sqrt(dx*dx + dz*dz);
@@ -252,8 +278,56 @@ function updateAvatars() {
   }
 }
 
+// SYNC (Oct 19): show a small vehicle emoji badge above a remote player's
+// name tag so you can tell they're riding, not walking. Updated whenever
+// their `riding` field changes.
+const RIDING_EMOJI = {
+  okada: "🏍️", keke: "🛺", bicycle: "🚲", car: "🚗", suv: "🚙",
+  bus: "🚌", taxi: "🚕", sedan: "🚗", hatch: "🚗", sports: "🏎️", truck: "🚚",
+};
+function _updateRidingBadge(m) {
+  // dispose old badge if it exists
+  if (m.ridingBadge) {
+    if (m.ridingBadge.parent) m.ridingBadge.parent.remove(m.ridingBadge);
+    if (m.ridingBadge.material) {
+      if (m.ridingBadge.material.map) m.ridingBadge.material.map.dispose();
+      m.ridingBadge.material.dispose();
+    }
+    m.ridingBadge = null;
+  }
+  if (!m.riding) return;
+  const emoji = RIDING_EMOJI[m.riding] || "🛵";
+  // draw emoji on a small canvas + sprite
+  const c = document.createElement("canvas");
+  c.width = 64; c.height = 32;
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = "rgba(15,77,58,0.85)";
+  ctx.fillRect(0, 0, 64, 32);
+  ctx.font = "20px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(emoji, 32, 16);
+  const tex = new THREE.CanvasTexture(c);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
+  sp.position.y = 2.7; sp.scale.set(1.0, 0.5, 1);
+  m.group.add(sp);
+  m.ridingBadge = sp;
+}
+
 export function getMyUid(){return _uid;}
 export function getMyName(){return _name;}
 // FEATURE: expose the remote-player meshes map so main.js can raycast against
 // them on tap (for the "click another user's name to DM them" flow).
 export function getRemotePlayers() { return _meshes; }
+// SYNC (Oct 19): get UIDs of players who are passengers on my ride.
+// Used by main.js to (a) drop them off when I dismount, (b) include them
+// in the "is anyone on my ride?" check before picking up more.
+export function getPassengerUids(driverUid) {
+  const out = [];
+  for (const [uid, d] of Object.entries(_players)) {
+    if (d && d.passengerOf === driverUid) out.push(uid);
+  }
+  return out;
+}
+// SYNC (Oct 19): get the live data for a specific remote player (used by
+// main.js to check "is player X currently riding?" before sending them
+// a pickup invite).
+export function getRemotePlayerData(uid) { return _players[uid] || null; }

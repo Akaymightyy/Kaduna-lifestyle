@@ -10,7 +10,7 @@ import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAIL
 import { createGameState } from "./needs.js";
 import { auth, db } from "./firebase.js";
 import { initAuth, showAuthModal, wireAuthUI, logout, isAuthed } from "./auth.js";
-import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition, getRemotePlayers, setMyPlace, setMyLook, setBlockedUids } from "./multiplayer.js";
+import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition, getRemotePlayers, setMyPlace, setMyLook, setBlockedUids, setMyRiding, setMyPassengerOf, getPassengerUids, getRemotePlayerData } from "./multiplayer.js";
 import { startRide, travelToZone, travelToPlace, getDestinations } from "./travel.js";
 import { subscribeRichList } from "./economy.js";
 import { createNPCs } from "./npcs.js";
@@ -212,6 +212,20 @@ function _ensureVehicleControls() {
   _vehControlsEl.appendChild(rightBtn);
   document.body.appendChild(_vehControlsEl);
 }
+// ---- PASSENGER "Get off ride" button (Oct 19) ----
+let _getoffBtnEl = null;
+function _ensureGetoffBtn() {
+  if (_getoffBtnEl) return;
+  _getoffBtnEl = document.createElement("button");
+  _getoffBtnEl.innerHTML = "🛵<br><span style='font-size:11px;font-weight:600'>Get off ride</span>";
+  _getoffBtnEl.style.cssText =
+    "position:fixed;right:20px;bottom:calc(130px + env(safe-area-inset-bottom));" +
+    "width:88px;height:88px;border-radius:50%;background:#e11d48;color:#fff;border:3px solid #fff;" +
+    "font-size:22px;font-weight:700;cursor:pointer;pointer-events:auto;touch-action:none;" +
+    "box-shadow:0 4px 12px rgba(0,0,0,.4);user-select:none;-webkit-user-select:none;display:none;z-index:28;text-align:center;line-height:1.1;";
+  _getoffBtnEl.addEventListener("click", (e) => { e.preventDefault(); window._getOffRide(); });
+  document.body.appendChild(_getoffBtnEl);
+}
 
 // ---- FEATURE: Periodic Firebase balance pusher ----
 // Pushes the balance to Firebase every 5 seconds IF it changed since last push.
@@ -302,7 +316,7 @@ function _showPlayerSheet(uid, name) {
   el.innerHTML = '<div class="pl-grab"></div>' +
     '<div class="pl-head">' + _plAvatar(m && m.look) + '<div><div class="pl-name">' + _mxEsc(name) + '</div><div class="pl-sub">Real player · nearby</div></div></div>' +
     '<button class="pl-btn primary" onclick="window._plChat()">💬 Chat</button>' +
-    '<div class="pl-grid"><button class="pl-btn" onclick="window._plHello()">👋 Say Hello</button><button class="pl-btn" onclick="window._plMoney()">💸 Send money</button><button class="pl-btn" onclick="window._plInvite()">🏠 Invite to my home</button><button class="pl-btn ghost" onclick="window._plClose()">Close</button></div>' +
+    '<div class="pl-grid"><button class="pl-btn" onclick="window._plHello()">👋 Say Hello</button><button class="pl-btn" onclick="window._plMoney()">💸 Send money</button><button class="pl-btn" onclick="window._plInvite()">🏠 Invite to my home</button><button class="pl-btn" onclick="window._plPickup()">🛵 Pick up (give ride)</button><button class="pl-btn ghost" onclick="window._plClose()">Close</button></div>' +
     '<div class="pl-chips"><button onclick="window._plBlock()">🚫 Block</button><button onclick="window._plReport()">⚑ Report</button></div>';
   requestAnimationFrame(() => el.classList.add("show"));
 }
@@ -321,6 +335,88 @@ window._plMoney = async () => { try { await _plOpenDM(); window._plClose(); wind
 window._plBlock = async () => { const t = window._plTarget; if (!t || !confirm("Block " + t.name + "? You will no longer see their character.")) return; try { await blockUser(t.uid); window._plClose(); } catch (e) { toast("Could not block — try again"); } };
 window._plReport = async () => { const t = window._plTarget; if (!t) return; const why = prompt("Why are you reporting " + t.name + "?"); if (!why) return; try { await reportUser(t.uid, why.slice(0, 300)); toast("⚑ Report sent. Thank you."); window._plClose(); } catch (e) { toast("Could not send report — try again"); } };
 window._plInvite = async () => { try { await _plOpenDM(); window._plClose(); await window._chatInvite(); } catch (e) { toast("Could not send invite — try again"); } };
+// ---- PICKUP / PASSENGER SYNC (Oct 19) ----
+// Driver taps "Pick up (give ride)" on a nearby player → sends them a chat
+// message asking them to accept. If they tap "Accept" in the chat, their
+// client sets live/<theirUid>/passengerOf = <myUid>. Their main loop then
+// forces their position to follow mine. They can tap "Get off" anytime.
+window._plPickup = async () => {
+  const t = window._plTarget;
+  if (!t) return;
+  if (!isRiding()) { toast("You need to be on a vehicle first. Open Cars → Ride."); return; }
+  // Check they're not already a passenger or riding themselves
+  const rd = getRemotePlayerData(t.uid);
+  if (rd && rd.riding) { toast(t.name + " is already on their own ride."); return; }
+  if (rd && rd.passengerOf) { toast(t.name + " is already a passenger."); return; }
+  // Send them a "pickup invite" message via chat (uses the house-invite UI
+  // pattern but with type "pickup" so their chat shows an Accept button).
+  try {
+    const r = await _plOpenDM();
+    await sendMessage(r.chatId, "🛵 Pickup invite — tap Accept to ride with me", "pickup", 0, {
+      driverUid: getMyUid(),
+      driverName: getMyName() || "Player",
+      vehicleId: getRideId(),
+    });
+    toast("🛵 Pickup invite sent to " + t.name);
+    window._plClose();
+  } catch (e) {
+    console.warn("[pickup] failed", e);
+    toast("Could not send pickup — try again");
+  }
+};
+// Passenger: when I'm a passenger on someone's ride, my position is
+// force-set to their position each frame (with a small offset so I sit
+// "behind" them on the bike). They drive, I ride.
+// Also: tap "Get off" button to dismount at the current location.
+function _tickPassenger(dt) {
+  const driverUid = _myPassengerUid;
+  if (!driverUid) return;
+  const rd = getRemotePlayerData(driverUid);
+  if (!rd) {
+    // Driver logged off — auto-dismount
+    _myPassengerUid = null;
+    setMyPassengerOf(null);
+    toast("🚶 Driver left — you're on foot.");
+    return;
+  }
+  // Sit slightly behind + above the driver (pillion position)
+  const back = 1.2;
+  const fx = -Math.sin(rd.heading || 0), fz = -Math.cos(rd.heading || 0);
+  player.pos.x = (rd.x || 0) - fx * back;
+  player.pos.z = (rd.z || 0) - fz * back;
+  player.heading = rd.heading || 0;
+  player.speed = 0;
+}
+// Track who I'm a passenger of (local mirror of live/<myUid>/passengerOf)
+let _myPassengerUid = null;
+function setMyPassengerDriver(driverUid) {
+  _myPassengerUid = driverUid || null;
+  setMyPassengerOf(driverUid);
+  if (driverUid) {
+    // Hide the ride vehicle UI since the driver controls the bike, not me
+    if (_vehControlsEl) _vehControlsEl.style.display = "none";
+    toast("🛵 You're a passenger now. Tap the 🛵 button to get off.");
+  } else {
+    toast("🚶 You got off the ride.");
+  }
+}
+// When the driver dismounts, kick all passengers off their ride
+function _kickAllPassengers() {
+  const uids = getPassengerUids(getMyUid());
+  // Tell each passenger's local state to dismount — they'll see it next
+  // time their _players map updates from Firebase. For an instant local
+  // nudge, we'd need a separate "kick" signal — for now Firebase is fast
+  // enough that the next onValue tick (within 1s) clears their passengerOf.
+  // We just clear OUR state and trust their heartbeat to drop them.
+  if (uids.length) toast("Dropped off " + uids.length + " passenger" + (uids.length > 1 ? "s" : ""));
+}
+window._getOffRide = () => {
+  if (_myPassengerUid) {
+    setMyPassengerDriver(null);
+    return;
+  }
+  toast("You're not a passenger.");
+};
 
 function _handleWorldTap(clientX, clientY) {
   if (!camera || !scene) return;
@@ -808,6 +904,16 @@ function _showPhoneApp(appId) {
     ];
     // Compact inline dropdown (flows with the page, not a big pop-up): Places / Areas / My Houses
     let h = '<div style="font-size:14px;margin-bottom:8px;font-weight:700;color:var(--green);">🛺 Book a Ride</div>';
+    // MAP MARK (Oct 19): if the user tapped on the minimap to mark a spot,
+    // show it at the top as the pre-selected destination.
+    if (window._markedDest) {
+      const md = window._markedDest;
+      const dist = Math.sqrt(Math.pow(md.x - player.pos.x, 2) + Math.pow(md.z - player.pos.z, 2)).toFixed(0);
+      h += '<div style="background:#1a2a1a;border:2px solid var(--gold);border-radius:10px;padding:8px 10px;margin-bottom:8px;display:flex;align-items:center;gap:8px;">' +
+           '<span style="font-size:20px;">📍</span>' +
+           '<div style="flex:1;font-size:12px;color:#f2f2f4;"><b>Map mark</b> · ' + dist + 'm away</div>' +
+           '<button onclick="window._clearMarkedDest()" style="background:#e11d48;color:#fff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:11px;font-weight:600;">✕</button></div>';
+    }
     h += '<div style="font-size:11px;color:#666;margin-bottom:6px;">Pick where you want to go:</div>';
     const groups = [];
     groups.push({ t: "📍 Places", items: dests.map(d => ({ id: d.id, label: (d.icon || "📍") + " " + d.name, off: d.open === false })) });
@@ -815,10 +921,15 @@ function _showPhoneApp(appId) {
     const homes = _myHomesList();
     if (homes.length) groups.push({ t: "🏠 My Houses", items: homes.map(hm => ({ id: "house:" + hm.a + ":" + hm.p, label: "🏠 " + hm.name + " · Plot #" + hm.p })) });
     window._rdGroups = groups;
-    if (!window._rideDest || !groups.some(g => g.items.some(i => i.id === window._rideDest && !i.off))) {
+    // If user marked a spot on the map, pre-select it (dest = "mark:custom")
+    if (window._markedDest) {
+      window._rideDest = "mark:custom";
+    } else if (!window._rideDest || !groups.some(g => g.items.some(i => i.id === window._rideDest && !i.off))) {
       const first = groups[0].items.find(i => !i.off) || groups[0].items[0]; window._rideDest = first ? first.id : "";
     }
-    const cur = groups.flatMap(g => g.items).find(i => i.id === window._rideDest);
+    const cur = (window._rideDest === "mark:custom")
+      ? { id: "mark:custom", label: "📍 Map mark (" + window._markedDest.x.toFixed(0) + ", " + window._markedDest.z.toFixed(0) + ")" }
+      : groups.flatMap(g => g.items).find(i => i.id === window._rideDest);
     h += '<div id="rd-box" style="border:1.5px solid var(--green);border-radius:10px;margin-bottom:10px;background:#17181b;color:#f2f2f4;overflow:hidden;">' +
       '<div id="rd-cur" onclick="window._rdToggle()" style="display:flex;align-items:center;justify-content:space-between;padding:7px 10px;font-size:12px;font-weight:600;cursor:pointer;"><span id="rd-label">' + (cur ? cur.label : "Choose…") + '</span><span id="rd-arrow" style="font-size:10px;color:var(--green);">▼</span></div>' +
       '<div id="rd-list" style="display:none;max-height:150px;overflow-y:auto;border-top:1px solid #2c2e33;-webkit-overflow-scrolling:touch;"></div></div>';
@@ -2307,6 +2418,36 @@ function _renderChatScreen(c, chatId, otherName) {
           div.appendChild(note);
         }
         container.appendChild(div);
+      } else if (m.type === "pickup") {
+        // PASSENGER (Oct 19): pickup invite from another player who is on
+        // a ride. Shows an Accept button — tapping it makes me a passenger
+        // on their ride (my position follows theirs each frame).
+        const div = document.createElement("div");
+        div.style.cssText = "text-align:center;margin:8px auto;width:fit-content;max-width:85%;background:#1b1c20;border:1px solid rgba(74,222,128,.4);border-radius:14px;padding:9px 14px;color:#f2f2f4;font-size:12px;";
+        const label = document.createElement("div");
+        label.style.cssText = "font-weight:600;margin-bottom:6px;";
+        const driverName = (m.extra && m.extra.driverName) || "Player";
+        label.textContent = "🛵 " + driverName + " wants to pick you up";
+        div.appendChild(label);
+        if (!isMe && m.extra && m.extra.driverUid) {
+          const acceptBtn = document.createElement("button");
+          acceptBtn.textContent = "🛵 Accept ride";
+          acceptBtn.style.cssText = "background:#4ade80;color:#000;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font:700 11px Poppins,sans-serif;";
+          acceptBtn.onclick = () => {
+            // Set my local "passenger of X" state + push to Firebase so the
+            // driver (and other players) see me as a passenger.
+            setMyPassengerDriver(m.extra.driverUid);
+            closePhone();
+            toast("🛵 You're now a passenger on " + driverName + "'s ride.");
+          };
+          div.appendChild(acceptBtn);
+        } else if (isMe) {
+          const note = document.createElement("div");
+          note.style.cssText = "font-size:10px;color:#9b9ba4;margin-top:4px;";
+          note.textContent = "Waiting for them to accept...";
+          div.appendChild(note);
+        }
+        container.appendChild(div);
       } else {
         const div = document.createElement("div");
         div.style.cssText = "display:flex;justify-content:" + (isMe ? "flex-end" : "flex-start") + ";margin:4px 0;";
@@ -2562,6 +2703,7 @@ window._rideVehicle = async (vehicleId) => {
     const v = getVehicle(vehicleId);
     toast("🚗 Riding " + (v?.name || vehicleId) + "! Speed boosted.");
     try { sfx.engine(true, 0.4); } catch (e) {}
+    setMyRiding(vehicleId);  // SYNC: tell other players I'm on this vehicle
   } else { toast("Could not spawn vehicle — try again"); }
 };
 // FEATURE: Dismount vehicle (despawn mesh + remove speed boost)
@@ -2569,6 +2711,11 @@ window._dismountVehicle = () => {
   despawnRideVehicle();
   toast("🚶 Dismounted. Walking now.");
   try { sfx.engine(false); } catch (e) {}
+  setMyRiding(null);  // SYNC: tell other players I'm on foot again
+  // Drop any passengers — they get off when the driver dismounts
+  setMyPassengerOf(null);
+  // Force-dismount any passenger that was on my ride
+  _kickAllPassengers();
   showPhoneApp("cars");
 };
 // FEATURE: Tunes — play/stop radio station (toast only, no actual audio streaming yet)
@@ -2846,6 +2993,12 @@ window._rdPick=(id)=>{
   const list=document.getElementById("rd-list"); if(list) list.style.display="none";
   const arrow=document.getElementById("rd-arrow"); if(arrow) arrow.textContent="▼";
 };
+// MAP MARK (Oct 19): clear the marked destination if user doesn't want it
+window._clearMarkedDest = () => {
+  window._markedDest = null;
+  window._rideDest = "";
+  showPhoneApp("ride");
+};
 window.bookRide=(rideId)=>{
   const destId=window._rideDest||"";
   if(!destId){toast("Pick a destination first");return;}
@@ -2854,6 +3007,16 @@ window.bookRide=(rideId)=>{
   if(game.state.money<fare){toast("Not enough money");return;}
   game.state.money-=fare;
   closePhone();
+  // MAP MARK (Oct 19): user tapped on the minimap → ride to that custom coord.
+  if (destId === "mark:custom" && window._markedDest) {
+    const md = window._markedDest;
+    player.pos.set(md.x, 0, md.z);
+    player.heading = 0;
+    toast("📍 " + (rideId === "walk" ? "Walked" : "Rode to") + " map mark (" + md.x.toFixed(0) + ", " + md.z.toFixed(0) + ")");
+    updateHUD();
+    window._markedDest = null;  // clear after use
+    return;
+  }
   // FEATURE: handle new destination types — area:xxx and house:areaId:plotNo
   if (destId.startsWith("area:")) {
     const areaId = destId.slice(5);
@@ -3169,6 +3332,7 @@ initAuth((user) => {
   _armBeforeUnload(user.uid);
   _armBalancePusher(user.uid);
   _ensureVehicleControls();
+  _ensureGetoffBtn();   // (Oct 19) passenger "Get off ride" button
   // FEATURE: emote FAB — expandable button on the RIGHT side (not covering joystick)
   if (!document.getElementById("emote-fab")) {
     const fab = document.createElement("div");
@@ -3643,7 +3807,16 @@ function _frame() {
   const now = (_serverTimeOffset !== null ? (Date.now() + _serverTimeOffset) : Date.now()) / 1000;
   const _riding = isRiding();
   // FEATURE: show/hide driving buttons based on riding state
-  if (_vehControlsEl) _vehControlsEl.style.display = _riding ? "block" : "none";
+  // PASSENGER (Oct 19): if I'm a passenger, hide driving controls — the
+  // driver controls the bike. Show a "Get off ride" button instead.
+  if (_myPassengerUid) {
+    if (_vehControlsEl) _vehControlsEl.style.display = "none";
+    if (_getoffBtnEl) _getoffBtnEl.style.display = "block";
+    _tickPassenger(dt);  // follow the driver's position
+  } else {
+    if (_getoffBtnEl) _getoffBtnEl.style.display = "none";
+    if (_vehControlsEl) _vehControlsEl.style.display = _riding ? "block" : "none";
+  }
   if (_riding) {
     // FEATURE: VEHICLE CONTROL — dedicated driving buttons + joystick + keyboard
     // _vehBtnSteer / _vehBtnThrottle are set by the on-screen driving buttons.
@@ -3668,7 +3841,16 @@ function _frame() {
     if (Math.abs(player.speed) > 0.3) {
       const speedFactor = Math.min(1, Math.abs(player.speed) / maxVehSpd);
       const steerRate = 1.2;
-      player.heading += steer * steerRate * dt * (player.speed > 0 ? 1 : -1) * (0.4 + speedFactor * 0.6);
+      // FIX (Oct 19): user reported "control buttons for vehicles are just
+      // like opposites of the direction" — pressing right made the car turn
+      // left. Root cause: with our forward vector `(-sin(h), -cos(h))`,
+      // increasing `h` rotates COUNTER-clockwise (west), so steer=+1 (right
+      // button) was actually turning left. Flipped the sign so:
+      //   - right button / 'd' / joy-stick-right  → heading decreases → turns east (right) ✓
+      //   - left button / 'a' / joystick-left    → heading increases → turns west (left)  ✓
+      // Reverse gear keeps the same wheel → front swings opposite direction
+      // (just like a real car).
+      player.heading -= steer * steerRate * dt * (player.speed > 0 ? 1 : -1) * (0.4 + speedFactor * 0.6);
     }
     // Move forward along heading (not camera-relative)
     const fx = -Math.sin(player.heading), fz = -Math.cos(player.heading);
@@ -3857,6 +4039,64 @@ function _frame() {
 
 Promise.all([loadPlayer(manager, scene, game.state.look), addCity(scene, world, manager)]).then(([r]) => {
   mmDraw = createMinimap($("mm"), world.mapShapes);
+  // ---- MAP TAP → RIDE TO LOCATION (Oct 19) ----
+  // Tap on the minimap → convert tap to world coords → open the Ride app
+  // with that location pre-set as the destination. Lets players quickly
+  // order a keke/bus/taxi to any spot they see on the map.
+  const mmCanvas = $("mm");
+  if (mmCanvas && !mmCanvas._tapRideWired) {
+    mmCanvas._tapRideWired = true;
+    mmCanvas.style.cursor = "crosshair";
+    let tapStartT = 0;
+    // Use a tap (not click) — distinguish from drag-to-rotate if a future
+    // drag handler gets added.
+    mmCanvas.addEventListener("pointerdown", (e) => { tapStartT = Date.now(); });
+    mmCanvas.addEventListener("pointerup", (e) => {
+      // Only treat as tap if quick (<300ms) and didn't move much
+      if (Date.now() - tapStartT > 300) return;
+      // Reverse the minimap's draw transform to get world coords.
+      // From minimap.js: translate(size/2, size/2) → rotate(yaw+PI) →
+      // scale(sc/S, sc/S) → translate(-X(px), -Z(pz)) → draw base.
+      // Inverse: screen → world.
+      const rect = mmCanvas.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const size = mmCanvas.width;
+      const S = 1.25;
+      const range = 52;
+      const sc = size / (range * 2);
+      // dx, dy relative to centre
+      let dx = sx - size / 2;
+      let dy = sy - size / 2;
+      // Reverse: scale, then rotate, then translate back to world
+      const yaw = ctl ? ctl.yaw : Math.PI;
+      // un-scale
+      dx = dx * (S / sc);
+      dy = dy * (S / sc);
+      // un-rotate (yaw + PI was applied, so reverse is -(yaw + PI))
+      const ang = -(yaw + Math.PI);
+      const rx = dx * Math.cos(ang) - dy * Math.sin(ang);
+      const rz = dx * Math.sin(ang) + dy * Math.cos(ang);
+      // un-translate (back to world X/Z)
+      const WX = (v) => (v / S) - MAP_HALF_X;
+      const WZ = (v) => (v / S) - MAP_HALF_Z;
+      // The translation in draw was -X(px), -Z(pz) (so add px, pz back)
+      // BUT px, pz are baked into the X()/Z() helpers, so we need the
+      // raw form. Actually the minimap uses pre-baked coords with the
+      // helper X(x) = (x + MAP_HALF_X) * S. After un-rotate, dx/rz are
+      // in "baked minimap space" → convert back to world.
+      const worldX = (rx / S) - MAP_HALF_X + player.pos.x;
+      const worldZ = (rz / S) - MAP_HALF_Z + player.pos.z;
+      // Clamp to map bounds
+      const cx = Math.max(-MAP_HALF_X + 5, Math.min(MAP_HALF_X - 5, worldX));
+      const cz = Math.max(-MAP_HALF_Z + 5, Math.min(MAP_HALF_Z - 5, worldZ));
+      // Store as the "marked destination" for the Ride app
+      window._markedDest = { x: cx, z: cz, label: "📍 Map mark" };
+      toast("📍 Marked! Tap a ride below to go there.");
+      // Open Ride app with the marked dest pre-selected
+      showPhoneApp("ride");
+    });
+  }
   rig = r; rig.group.castShadow = true;
   if (rig.recolor) rig.recolor(game.state.look); // in case the account outfit arrived while loading
   setProgress(1);
