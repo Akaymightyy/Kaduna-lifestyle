@@ -90,7 +90,9 @@ export function startRide(rideId, destId, money, onProgress, onComplete) {
     const pct = document.getElementById("travel-pct");
     const tipEl = document.getElementById("travel-tip");
     const titleEl = document.getElementById("travel-title");
+    const iconEl = document.getElementById("travel-icon");
     if (titleEl) titleEl.textContent = ride.icon + " " + ride.name + " → " + dest.name;
+    if (iconEl) iconEl.textContent = ride.icon;
     if (tipEl) tipEl.textContent = tips[0];
 
     const interval = setInterval(() => {

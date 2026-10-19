@@ -179,6 +179,21 @@ export function nightAmount(hour) {
 
 export function updateSky(hour) {
   NIGHT_GLOW.value = nightAmount(hour);     // cheap, every frame: smooth dusk/dawn for the glow
+
+  // ---- Dynamic tone-mapping exposure (FIX v2, Oct 19) ----
+  // Day: 1.0. Night: 1.4 — this is the single biggest "I can finally see at
+  // night" lever. ACES tone mapping crushes darks; bumping exposure lifts
+  // the midtones so you can see building shapes + road without washing out
+  // the bright UI overlays or headlights.
+  // Runs every frame so the lerp converges smoothly (the rest of updateSky
+  // is gated on hour-change to save CPU).
+  if (_renderer) {
+    const na = nightAmount(hour); // 0 = full day, 1 = full night
+    // dawn/dusk boost is the middle hump — 1.15 at na=0.5, 1.4 at na=1, 1.0 at na=0
+    const expo = 1.0 + na * 0.4;
+    _renderer.toneMappingExposure += (expo - _renderer.toneMappingExposure) * 0.05;
+  }
+
   const h = Math.floor(hour * 10) / 10; // quantize to 0.1h = 6min
   if (h === _lastHour) return;
   _lastHour = h;
@@ -231,10 +246,12 @@ export function updateSky(hour) {
     const isNight = elevation < 0.05;
     const isDawnDusk = elevation > 0.05 && elevation < 0.25;
     if (isNight) {
-      // FIX: brighter moonlight (was 0.1, too dim). 0.18 lets the player see
-      // building silhouettes + the road ahead without killing the night mood.
-      _sun.intensity = 0.18;
-      _sun.color.setHex(0x6a7aaa); // moonlight blue, slightly brighter
+      // FIX v2 (Oct 19): user reported "I ain't seeing nothing at night" —
+      // even with the previous 0.18 the streets were pitch black. Bumped to
+      // 0.42 — still feels like night, but you can actually see the road,
+      // building shapes, other players, and street props.
+      _sun.intensity = 0.42;
+      _sun.color.setHex(0x8aa0d8); // brighter moonlight blue
     } else if (isDawnDusk) {
       _sun.intensity = 1.2;
       _sun.color.setHex(0xff9a5a); // warm orange
@@ -246,20 +263,21 @@ export function updateSky(hour) {
 
   // ---- Environment (IBL) strength follows the daylight ----
   // Kept modest: the hemisphere light already lights everything, IBL only adds believable sheen + soft bounce.
-  _envIntensity = elevation < 0.05 ? 0.12 : elevation < 0.25 ? 0.32 : 0.36 + Math.min(0.14, elevation * 0.2);
+  // FIX v2 (Oct 19): night IBL was 0.12 — way too dark. Bumped to 0.28 so
+  // car paint and windows still catch a moon highlight at night.
+  _envIntensity = elevation < 0.05 ? 0.28 : elevation < 0.25 ? 0.32 : 0.36 + Math.min(0.14, elevation * 0.2);
   if (_scene && _scene.environment) _scene.environmentIntensity = _envIntensity;
 
   // ---- Hemisphere light ----
   if (_hemi) {
     const isNight = elevation < 0.05;
     if (isNight) {
-      // FIX: brighter night hemi (was 0.3, too dark — streets were pitch black
-      // even with lamps on, players couldn't see anything beyond 10m).
-      // Bumped to 0.55 so the player can always see the road, building shapes,
-      // and other players, while still feeling like night.
-      _hemi.intensity = 0.55;
-      _hemi.color.setHex(0x4a5a8a);   // brighter sky-blue
-      _hemi.groundColor.setHex(0x2a2a3a);  // less black ground tint
+      // FIX v2 (Oct 19): user said "I ain't seeing nothing" at night. Was 0.55,
+      // bumped to 0.95 — streets are now visible enough to walk/drive without
+      // guessing. Sky tint bumped to a brighter blue, ground tint less black.
+      _hemi.intensity = 0.95;
+      _hemi.color.setHex(0x6a7ab0);   // brighter sky-blue
+      _hemi.groundColor.setHex(0x3a3a4a);  // less black ground tint
     } else {
       _hemi.intensity = 0.6 + elevation * 0.5;
       _hemi.color.setHex(0xdfeeff);
@@ -288,8 +306,11 @@ export function updateSky(hour) {
     const isNight = elevation < 0.05;
     const isDawnDusk = elevation > 0.05 && elevation < 0.25;
     if (isNight) {
-      _scene.fog.color.setHex(0x0b1230);
-      _scene.background = new THREE.Color(0x0b1230);
+      // FIX v2 (Oct 19): was 0x0b1230 — almost pure black. Bumped to 0x1a2358
+      // so the sky is visibly "night blue" rather than pitch black, matching
+      // the brighter moon/hemi so distant geometry doesn't disappear.
+      _scene.fog.color.setHex(0x1a2358);
+      _scene.background = new THREE.Color(0x1a2358);
     } else if (isDawnDusk) {
       _scene.fog.color.setHex(0xf08a5d);
       _scene.background = new THREE.Color(0xf08a5d);

@@ -28,6 +28,9 @@ import { ORIGINS, HOUSE_TIERS, upgradeCost, getRentInfo, payRent, checkRentDue, 
 import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
 import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
 import { celebrate } from "./celebrate.js";
+import { initSfx, sfx, setMuted as setSfxMuted, isMuted as isSfxMuted } from "./sfx.js";
+import { initParticles, emitConfetti, emitDust, tickParticles } from "./particles.js";
+import { initRoadEvents, tickRoadEvents, getCurrentWeather as getRoadWeather, resetRoadEvents, trafficSpeedMultiplierAt } from "./road_events.js";
 import { addScenery, SCENERY_LABELS } from "./scenery.js";
 import { initLife, tickLife } from "./life.js";
 import { initLiveMap, openLiveMap, closeLiveMap, isLiveMapOn, liveMapFrame } from "./livemap.js";
@@ -50,7 +53,6 @@ import { initAreaWorld, tickAreaWorld, setAreaLampsNight, disposeAreaWorld, getR
 // (a static OSM-derived file shipped in public/data/). The main Ahmadu Bello
 // Way is filtered out (already rendered by world.js) to avoid double-render.
 import { fetchKadunaData, buildRealMap } from "./realmap.js";
-import { driveStep } from "./drive.js";
 import { VEHICLE_CATALOG, getVehicle, initVehicles, buyVehicle, getOwned, ownsVehicle, isRiding, getRideSpeed, getRideId, spawnRideVehicle, despawnRideVehicle, tickRideVehicle } from "./vehicles.js";
 import { buildStreetDetail, makeBlobShadows } from "./street.js";
 import { initActivity, startActivity, tickActivity, isBusy, cancelActivity, eatSpec, toiletSpec, sitSpec, funSpec, placeSpec } from "./activity.js";
@@ -154,7 +156,7 @@ function _armBeforeUnload(uid) {
 
 // ---- FEATURE: Vehicle driving controls (on-screen buttons) ----
 // When riding, dedicated left/right/accelerate/brake buttons appear.
-// These set the held flags in window._veh which the
+// These set window._vehBtnSteer / window._vehBtnThrottle which the
 // movement loop reads in addition to the joystick + keyboard.
 let _vehControlsEl = null;
 function _ensureVehicleControls() {
@@ -191,29 +193,19 @@ function _ensureVehicleControls() {
     "width:56px;height:56px;border-radius:50%;background:rgba(15,77,58,.92);color:#fff;border:2px solid rgba(255,255,255,.3);" +
     "font-size:22px;font-weight:700;cursor:pointer;pointer-events:auto;touch-action:none;" +
     "box-shadow:0 4px 12px rgba(0,0,0,.4);user-select:none;-webkit-user-select:none;";
-  // Wire up pointer events for each button.
-  // BUGFIX: this used to ADD 1 on press and SUBTRACT 1 on release / cancel / leave. On a phone "pointerup" and then
-  // "pointerleave" both fire for one tap, so one tap subtracted twice and left steering or throttle stuck on the
-  // opposite value: the car kept turning ("swinging") or driving by itself. Now each button is just held / not held,
-  // set on press, cleared on release, and clearing twice is harmless.
-  const V = (window._veh = window._veh || { left: false, right: false, accel: false, brake: false });
-  const wireBtn = (el, key) => {
-    const press = (e) => { e.preventDefault(); try { el.setPointerCapture(e.pointerId); } catch (_) {} V[key] = true; el.style.opacity = "0.82"; };
-    const release = () => { V[key] = false; el.style.opacity = ""; };
-    el.addEventListener("pointerdown", press);
-    el.addEventListener("pointerup", release);
-    el.addEventListener("pointercancel", release);
-    el.addEventListener("lostpointercapture", release);
-    el.addEventListener("contextmenu", (e) => e.preventDefault());
+  // Wire up pointer events for each button
+  const wireBtn = (el, steerVal, throttleVal) => {
+    const start = (e) => { e.preventDefault(); if (steerVal !== undefined) window._vehBtnSteer = (window._vehBtnSteer || 0) + steerVal; if (throttleVal !== undefined) window._vehBtnThrottle = (window._vehBtnThrottle || 0) + throttleVal; el.style.transform = el.style.transform.replace("scale(1)", "scale(0.92)"); };
+    const end = (e) => { e.preventDefault(); if (steerVal !== undefined) window._vehBtnSteer = (window._vehBtnSteer || 0) - steerVal; if (throttleVal !== undefined) window._vehBtnThrottle = (window._vehBtnThrottle || 0) - throttleVal; el.style.transform = el.style.transform.replace("scale(0.92)", "scale(1)"); };
+    el.addEventListener("pointerdown", start);
+    el.addEventListener("pointerup", end);
+    el.addEventListener("pointercancel", end);
+    el.addEventListener("pointerleave", end);
   };
-  // never leave a pedal "pressed" when the page loses focus or the tab goes to the background
-  const _vehClear = () => { V.left = V.right = V.accel = V.brake = false; };
-  addEventListener("blur", _vehClear);
-  document.addEventListener("visibilitychange", () => { if (document.hidden) _vehClear(); });
-  wireBtn(accelBtn, "accel");
-  wireBtn(brakeBtn, "brake");     // brake / reverse
-  wireBtn(leftBtn, "left");
-  wireBtn(rightBtn, "right");
+  wireBtn(accelBtn, undefined, 1);     // accelerate
+  wireBtn(brakeBtn, undefined, -1);    // brake/reverse
+  wireBtn(leftBtn, -1, undefined);     // steer left
+  wireBtn(rightBtn, 1, undefined);     // steer right
   _vehControlsEl.appendChild(accelBtn);
   _vehControlsEl.appendChild(brakeBtn);
   _vehControlsEl.appendChild(leftBtn);
@@ -553,6 +545,15 @@ function applyTime() {
     initGraphics({ renderer, scene, sun, hemi, quality: autoQ }).then(() => {
       applyQuality(autoQ, { renderer, sun, scene });
     });
+    // ---- Init new systems (sfx, particles, road events) ----
+    initSfx();
+    initParticles(scene);
+    initRoadEvents({
+      scene,
+      playerGetPos: () => ({ x: player.pos.x, z: player.pos.z }),
+      gameHourGet: () => _gameHour(),
+      toast,
+    });
   }
   // ---- Update sky + sun + clouds based on hour ----
   updateSky(hour);
@@ -613,7 +614,15 @@ function savePos(dt) {
   try { localStorage.setItem("kaduna-pos", JSON.stringify({ x: +player.pos.x.toFixed(1), z: +player.pos.z.toFixed(1), h: +player.heading.toFixed(2) })); } catch (e) {}
 }
 let rig; let toastT=0;
-function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("show"),2000);}
+function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("show"),2000);
+  // SFX: chime for toast notifications — money emoji = money sound, error words = error sound, default = tap
+  try {
+    if (/(₦|\+money|gained|paid|earned|reward|won|jackpot|claimed)/i.test(m)) sfx.money();
+    else if (/(not enough|fail|error|can't|cannot|blocked|busy|already|invalid|unknown)/i.test(m)) sfx.error();
+    else if (/(level|rank up|achievement|mission complete|done|success|unlocked|🎉|✅|🏆)/i.test(m)) sfx.success();
+    else sfx.tap();
+  } catch (e) {}
+}
 
 // ---- Place Manager init ----
 // The shared context that every place module can use.
@@ -717,8 +726,8 @@ function updateHUD() {
 }
 
 // ---- Phone UI (chat moved inside phone) ----
-function openPhone(){$("phone-modal").classList.add("show");showPhoneApp("home");}
-function closePhone(){$("phone-modal").classList.remove("show");}
+function openPhone(){$("phone-modal").classList.add("show");showPhoneApp("home");try{sfx.click();}catch(e){}}
+function closePhone(){$("phone-modal").classList.remove("show");try{sfx.back();}catch(e){}}
 window.closePhone=closePhone;
 
 function _showPhoneApp(appId) {
@@ -760,10 +769,12 @@ function _showPhoneApp(appId) {
       {id:"tunes",icon:"🎵",label:"Tunes"},
       {id:"gallery",icon:"📸",label:"Gallery"},
       {id:"invest",icon:"📈",label:"Invest"},
+      {id:"nepa",icon:"⚡",label:"NEPA"},
+      {id:"company",icon:"🏢",label:"Company"},
       {id:"settings",icon:"⚙️",label:"Settings"}
     ];
     if(isAdmin()) apps.push({id:"admin",icon:"🔐",label:"Admin"});
-    const COL={food:["#f59e0b","#f97316"],jobs:["#8b5cf6","#6366f1"],bank:["#3b82f6","#2563eb"],ride:["#10b981","#059669"],cars:["#6366f1","#4f46e5"],map:["#06b6d4","#0891b2"],daily:["#ec4899","#db2777"],health:["#ef4444","#dc2626"],richlist:["#f59e0b","#d97706"],profile:["#6366f1","#4f46e5"],events:["#d946ef","#c026d3"],news:["#64748b","#475569"],boutique:["#d946ef","#a855f7"],myoutfits:["#f97316","#ea580c"],wardrobe:["#14b8a6","#0d9488"],contacts:["#6366f1","#818cf8"],wallet:["#f59e0b","#d97706"],tunes:["#a855f7","#9333ea"],gallery:["#06b6d4","#0891b2"],invest:["#10b981","#059669"],settings:["#64748b","#475569"],admin:["#ef4444","#b91c1c"],hunt:["#f2b134","#d97706"],missions:["#dc2626","#b91c1c"],realestate:["#16a34a","#15803d"],homestore:["#ea580c","#c2410c"],storage:["#0891b2","#0e7490"],messages:["#22c55e","#16a34a"]};
+    const COL={food:["#f59e0b","#f97316"],jobs:["#8b5cf6","#6366f1"],bank:["#3b82f6","#2563eb"],ride:["#10b981","#059669"],cars:["#6366f1","#4f46e5"],map:["#06b6d4","#0891b2"],daily:["#ec4899","#db2777"],health:["#ef4444","#dc2626"],richlist:["#f59e0b","#d97706"],profile:["#6366f1","#4f46e5"],events:["#d946ef","#c026d3"],news:["#64748b","#475569"],boutique:["#d946ef","#a855f7"],myoutfits:["#f97316","#ea580c"],wardrobe:["#14b8a6","#0d9488"],contacts:["#6366f1","#818cf8"],wallet:["#f59e0b","#d97706"],tunes:["#a855f7","#9333ea"],gallery:["#06b6d4","#0891b2"],invest:["#10b981","#059669"],settings:["#64748b","#475569"],admin:["#ef4444","#b91c1c"],hunt:["#f2b134","#d97706"],missions:["#dc2626","#b91c1c"],realestate:["#16a34a","#15803d"],homestore:["#ea580c","#c2410c"],storage:["#0891b2","#0e7490"],messages:["#22c55e","#16a34a"],nepa:["#facc15","#ca8a04"],company:["#1e40af","#1e3a8a"]};
     const now=new Date(), hh=String(now.getHours()).padStart(2,"0"), mm=String(now.getMinutes()).padStart(2,"0");
     const dateTxt=now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})+" · Kaduna";
     c.innerHTML='<div class="ph-home-clock">'+hh+':'+mm+'</div><div class="ph-home-date">'+dateTxt+'</div><div class="ph-home-bal"><span>₦'+(game.state.money||0).toLocaleString()+'</span></div>'+
@@ -995,14 +1006,59 @@ function _showPhoneApp(appId) {
     return;
   }
   if(appId==="news"){
-    const news=[
-      {time:"Today",title:"Sallah Festival Approaching",body:"Hamdala Hotel preparing for the biggest Sallah celebration in Kaduna. Free food for all residents!"},
-      {time:"Yesterday",title:"Kaduna Poly Students Win Tech Competition",body:"Students from Kaduna Polytechnic took first place at the Northern Nigeria tech hackathon."},
-      {time:"This Week",title:"Market Day at Kawo",body:"Kawo Market now open late. Best suya spots and fresh produce. Bring your keke!"},
-      {time:"This Week",title:"Football Match at Ahmadu Bello Stadium",body:"Kaduna United vs Rangers — Friday 4 PM. Free entry for first 100 students."},
-      {time:"Recent",title:"Railway Station Modernization",body:"Rigasa Train Station gets new Lagos-Kaduna route. Travel time now under 3 hours."},
+    // Daily newspaper: rotate content by date so each day feels fresh.
+    // Uses a seeded RNG based on YYYYMMDD so every reader sees the same
+    // "today's edition" — feels like a real shared newspaper.
+    const _today = new Date();
+    const _dateKey = _today.getFullYear()*10000 + (_today.getMonth()+1)*100 + _today.getDate();
+    function _seedRng(seed){let s=seed|0;return ()=>{s=(s*1664525+1013904223)|0;return ((s>>>0)%100000)/100000;};}
+    const _rng=_seedRng(_dateKey);
+    const _pick=(arr)=>arr[Math.floor(_rng()*arr.length)];
+    const _dateStr=_today.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+    const _heads=[
+      "Sallah Festival Approaching",
+      "Kaduna Poly Students Win Tech Competition",
+      "Market Day at Kawo",
+      "Football Match at Ahmadu Bello Stadium",
+      "Railway Station Modernization",
+      "Harmattan Hits Hard This Year",
+      "New Expressway Opens to Abuja",
+      "NEPA Announces New Tariff",
+      "Trader Wins Big at Money Hunt",
+      "Local Football Team Signs New Coach",
+      "Rain Forecast for the Week",
+      "Governor Visits Sabon Tasha",
+      "Barnawa River Festival Announced",
+      "Keke Drivers Union Strike Averted",
+      "New Suya Spot Opens Downtown",
     ];
-    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">📰 Kaduna Gist</div>'+news.map(n=>'<div style="padding:10px;border-bottom:1px solid #eee;margin-bottom:6px;"><div style="font-size:10px;color:#999;text-transform:uppercase;">'+n.time+'</div><div style="font-size:13px;font-weight:600;color:var(--ink);margin-top:2px;">'+n.title+'</div><div style="font-size:11px;color:#666;margin-top:4px;line-height:1.4;">'+n.body+'</div></div>').join("")+backBtn;
+    const _bodies={
+      "Sallah Festival Approaching":"Hamdala Hotel preparing for the biggest Sallah celebration in Kaduna. Free food for all residents!",
+      "Kaduna Poly Students Win Tech Competition":"Students from Kaduna Polytechnic took first place at the Northern Nigeria tech hackathon. Cash prize of ₦500,000 awarded.",
+      "Market Day at Kawo":"Kawo Market now open late. Best suya spots and fresh produce. Bring your keke!",
+      "Football Match at Ahmadu Bello Stadium":"Kaduna United vs Rangers — Friday 4 PM. Free entry for first 100 students.",
+      "Railway Station Modernization":"Rigasa Train Station gets new Lagos-Kaduna route. Travel time now under 3 hours.",
+      "Harmattan Hits Hard This Year":"Cold dry wind from the Sahara expected all week. Health officials advise drinking plenty water.",
+      "New Expressway Opens to Abuja":"The new four-lane expressway cuts Abuja travel to 90 minutes. Toll: ₦500.",
+      "NEPA Announces New Tariff":"Electricity tariff revised. Prepaid users to pay ₦50/kWh, up from ₦45. Top up early to avoid cutoff.",
+      "Trader Wins Big at Money Hunt":"Local trader Mama Chidi found a ₦50,000 jackpot spot near Kawo Market yesterday.",
+      "Local Football Team Signs New Coach":"Kaduna United signs Coach Musa from Kano. Fans hopeful for the season ahead.",
+      "Rain Forecast for the Week":"Meteorological department predicts rain Tuesday through Thursday. Drive carefully on wet roads.",
+      "Governor Visits Sabon Tasha":"Governor tours Sabon Tasha market, promises new road project within the year.",
+      "Barnawa River Festival Announced":"Annual festival at River Kaduna set for next month. Boat racing, food stalls, live music.",
+      "Keke Drivers Union Strike Averted":"After 6-hour meeting with the union, the government agreed to freeze fuel levies for 6 months.",
+      "New Suya Spot Opens Downtown":"Malam Yusuf's spot on Ahmadu Bello Way now serving kilishi and ram suya. Long lines expected.",
+    };
+    const top1=_pick(_heads), top2=_pick(_heads.filter(h=>h!==top1)), top3=_pick(_heads.filter(h=>h!==top1&&h!==top2));
+    const news=[
+      {time:_dateStr+" · Top Story",title:top1,body:_bodies[top1]},
+      {time:"Today · Sports",title:top2,body:_bodies[top2]},
+      {time:"Today · Business",title:top3,body:_bodies[top3]},
+    ];
+    c.innerHTML='<div style="font-size:14px;margin-bottom:2px;font-weight:700;color:var(--green);">📰 Daily Kaduna Gist</div>'+
+      '<div style="font-size:10px;color:#999;margin-bottom:10px;">'+_dateStr+' · Edition #'+(_dateKey%1000)+'</div>'+
+      news.map(n=>'<div style="padding:10px;border-bottom:1px solid #eee;margin-bottom:6px;"><div style="font-size:10px;color:#999;text-transform:uppercase;">'+n.time+'</div><div style="font-size:13px;font-weight:600;color:var(--ink);margin-top:2px;">'+n.title+'</div><div style="font-size:11px;color:#666;margin-top:4px;line-height:1.4;">'+n.body+'</div></div>').join("")+
+      '<div style="font-size:10px;color:#999;text-align:center;padding:8px;">📰 New edition daily. Come back tomorrow for fresh gist.</div>'+backBtn;
     return;
   }
   if(appId==="boutique"){
@@ -1627,6 +1683,11 @@ function _showPhoneApp(appId) {
         '<button onclick="window.resetGame()" style="width:100%;background:#e11d48;color:#fff;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:13px;font-weight:600;">🗑 Reset Game (lose all progress)</button>'+
       '</div>'+
       '<div style="background:var(--cream);border-radius:10px;padding:12px;margin-bottom:8px;">'+
+        '<div style="font-size:12px;font-weight:600;margin-bottom:6px;">🔊 Sound</div>'+
+        '<div style="font-size:10px;color:#666;margin-bottom:8px;">UI clicks, money sounds, engine, rain. Auto-mutes if your phone is on silent.</div>'+
+        '<button onclick="window._toggleSfxMute()" id="sfx-toggle-btn" style="width:100%;background:'+(isSfxMuted()?'#e11d48':'var(--green)')+';color:#fff;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:13px;font-weight:600;">'+(isSfxMuted()?'🔇 Sound: Off':'🔊 Sound: On')+'</button>'+
+      '</div>'+
+      '<div style="background:var(--cream);border-radius:10px;padding:12px;margin-bottom:8px;">'+
         '<div style="font-size:12px;font-weight:600;margin-bottom:6px;">Account</div>'+
         '<div style="font-size:11px;color:#666;margin-bottom:4px;">Signed in as: <b>'+(getMyName()||"Guest")+'</b></div>'+
         '<div style="font-size:10px;color:#999;margin-bottom:10px;">UID: '+(getMyUid()||"guest").slice(0,20)+'</div>'+
@@ -1636,6 +1697,71 @@ function _showPhoneApp(appId) {
         '<div style="font-size:12px;font-weight:600;margin-bottom:6px;">About</div>'+
         '<div style="font-size:11px;color:#666;line-height:1.5;">Kaduna Lifestyle v0.3 — A 3D multiplayer life-sim set in Kaduna, Nigeria. Built with Three.js + Firebase. © OpenStreetMap contributors for road data.</div>'+
       '</div>'+backBtn;
+    return;
+  }
+  if(appId==="nepa"){
+    const s=game.state;
+    if(!s.nepa) s.nepa={ balance: 100, units: 0, lastTopup: 0, cutoff: false };
+    const n=s.nepa;
+    // consume ~0.5 units per real second (= 0.5 * REAL_MS_PER_GAME_HOUR/1000 game-hours per ms)
+    // simplified: drain 1 unit per 60s real-time, cutoff at 0
+    const nowMs=Date.now();
+    if(!n.lastDrain) n.lastDrain=nowMs;
+    const elapsedS=(nowMs-n.lastDrain)/1000;
+    const consumed=elapsedS*(1/60);  // 1 unit per 60s
+    if(n.units>0){
+      n.units=Math.max(0, n.units-consumed);
+      if(n.units===0 && !n.cutoff){
+        n.cutoff=true;
+        toast("⚡ NEPA don cut light! Top up to restore.");
+      }
+    }
+    n.lastDrain=nowMs;
+    const meterPct=Math.min(100,(n.units/50)*100);
+    const meterColor=n.units<10?'#e11d48':n.units<25?'#f59e0b':'#16a34a';
+    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">⚡ NEPA Prepaid Meter</div>'+
+      '<div style="background:linear-gradient(145deg,#1a1a1a,#2a2a2a);border-radius:12px;padding:14px;margin-bottom:10px;color:#facc15;font-family:monospace;text-align:center;">'+
+        '<div style="font-size:10px;color:#888;margin-bottom:4px;">METER NO: KD-'+(getMyUid()||"guest").slice(0,8).toUpperCase().padEnd(8,'0')+'</div>'+
+        '<div style="font-size:32px;font-weight:700;letter-spacing:2px;">'+(n.cutoff?'—— ——':n.units.toFixed(1))+'</div>'+
+        '<div style="font-size:10px;color:#888;margin-top:4px;">kWh remaining</div>'+
+        '<div style="margin-top:10px;height:8px;border-radius:4px;background:#333;overflow:hidden;"><div style="height:100%;width:'+meterPct+'%;background:'+meterColor+';transition:width .3s;"></div></div>'+
+        '<div style="margin-top:8px;font-size:10px;color:'+(n.cutoff?'#e11d48':'#888')+';">'+(n.cutoff?'⚠ LIGHT OFF — buy units':'✓ Light on')+'</div>'+
+      '</div>'+
+      '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:10px;">'+
+        '<div style="font-size:12px;font-weight:600;margin-bottom:8px;">Buy Units (Tariff: ₦50/kWh)</div>'+
+        [[1000,20],[2000,40],[5000,100],[10000,200]].map(([p,u])=>'<button onclick="window._nepaTopup('+p+','+u+')" style="display:flex;justify-content:space-between;width:100%;background:#fff;border:2px solid var(--green);border-radius:8px;padding:9px 12px;margin-bottom:6px;cursor:pointer;font-size:12px;font-weight:600;color:var(--green);"><span>₦'+p.toLocaleString()+'</span><span>+'+u+' kWh</span></button>').join("")+
+      '</div>'+
+      '<div style="font-size:10px;color:#999;padding:0 4px;line-height:1.5;">When units reach 0, light goes off (cosmetic only for now — full house-light cut coming in a later build).</div>'+backBtn;
+    return;
+  }
+  if(appId==="company"){
+    const s=game.state;
+    if(!s.company) s.company=null;
+    const COMPANY_TYPES=[
+      { id:"suya", name:"Suya Spot", icon:"🍢", cost:50000, dailyIncome:3000, desc:"Evening rush, weekend boost. The classic." },
+      { id:"carwash", name:"Car Wash", icon:"🧽", cost:80000, dailyIncome:5000, desc:"Slow weekdays, jam Saturdays. Best near car parks." },
+      { id:"boutique", name:"Fashion Boutique", icon:"👗", cost:150000, dailyIncome:9000, desc:"Steady sales, big festive spikes." },
+      { id:"import", name:"Import/Export", icon:"📦", cost:300000, dailyIncome:18000, desc:"High risk, high reward. Lagos-Kano route." },
+      { id:"pos", name:"POS & Banking Agent", icon:"💳", cost:120000, dailyIncome:7000, desc:"Steady traffic, low risk. Market spots best." },
+    ];
+    if(!s.company){
+      c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">🏢 Start a Company</div>'+
+        '<div style="font-size:11px;color:#666;margin-bottom:10px;line-height:1.5;">Be your own boss. Pick a business type, pay the start cost, collect daily income (auto-paid at midnight game-time).</div>'+
+        COMPANY_TYPES.map(t=>'<div style="display:flex;align-items:center;gap:8px;padding:10px;border:1px solid #eee;border-radius:8px;margin-bottom:6px;"><span style="font-size:24px;">'+t.icon+'</span><div style="flex:1;"><div style="font-size:13px;font-weight:600;">'+t.name+'</div><div style="font-size:11px;color:#666;line-height:1.3;">'+t.desc+'</div><div style="font-size:10px;color:var(--green);font-weight:600;margin-top:2px;">Income: ₦'+t.dailyIncome.toLocaleString()+'/day</div></div><button onclick="window._startCompany(\''+t.id+'\')" style="background:var(--green);color:#fff;border:none;border-radius:8px;padding:8px 12px;cursor:pointer;font-size:12px;font-weight:700;">₦'+t.cost.toLocaleString()+'</button></div>').join("")+backBtn;
+    } else {
+      const t=COMPANY_TYPES.find(x=>x.id===s.company.type);
+      const since=s.company.lastCollect||Date.now();
+      const elapsedDays=Math.floor((Date.now()-since)/86400000);
+      const pending=elapsedDays*t.dailyIncome;
+      c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">🏢 '+t.name+' '+t.icon+'</div>'+
+        '<div style="background:var(--cream);border-radius:10px;padding:12px;margin-bottom:10px;">'+
+          '<div style="font-size:11px;color:#666;margin-bottom:6px;">Daily income: <b style="color:var(--green);">₦'+t.dailyIncome.toLocaleString()+'</b></div>'+
+          '<div style="font-size:11px;color:#666;margin-bottom:6px;">Days owned: <b>'+Math.max(1,elapsedDays)+'</b></div>'+
+          '<div style="font-size:11px;color:#666;margin-bottom:10px;">Pending collection: <b style="color:var(--gold);">₦'+pending.toLocaleString()+'</b></div>'+
+          (pending>0?'<button onclick="window._collectCompany()" style="width:100%;background:var(--green);color:#fff;border:none;border-radius:8px;padding:11px;cursor:pointer;font-size:13px;font-weight:700;">💰 Collect ₦'+pending.toLocaleString()+'</button>':'<div style="font-size:11px;color:#999;text-align:center;padding:8px;">No income to collect yet — come back tomorrow.</div>')+
+        '</div>'+
+        '<button onclick="window._sellCompany()" style="width:100%;background:#e11d48;color:#fff;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:12px;font-weight:600;">Sell company (recover 50% of start cost)</button>'+backBtn;
+    }
     return;
   }
   if(appId==="admin"){
@@ -1812,6 +1938,80 @@ window.sendMessage=(uid,name)=>{
   toast("Waved at "+name);
 };
 window.saveGame=()=>{game.save?.();toast("Game saved!");};
+// ---- SFX mute toggle (Oct 19) ----
+window._toggleSfxMute = () => {
+  setSfxMuted(!isSfxMuted());
+  toast(isSfxMuted() ? "🔇 Sound off" : "🔊 Sound on");
+  showPhoneApp("settings");
+};
+// ---- NEPA prepaid meter topup (Oct 19) ----
+window._nepaTopup = (price, units) => {
+  if (game.state.money < price) { toast("Not enough money for ₦" + price + " top-up"); return; }
+  game.state.money -= price;
+  const n = game.state.nepa || (game.state.nepa = { balance: 0, units: 0, cutoff: false });
+  n.units = (n.units || 0) + units;
+  n.cutoff = false;
+  n.lastTopup = Date.now();
+  n.lastDrain = Date.now();
+  toast("⚡ Bought " + units + " kWh for ₦" + price.toLocaleString() + ". Light restored!");
+  try { sfx.success(); } catch (e) {}
+  try { emitConfetti(player.pos, 30); } catch (e) {}
+  updateHUD();
+  game.save?.();
+  showPhoneApp("nepa");
+};
+// ---- Company start / collect / sell (Oct 19) ----
+window._startCompany = (type) => {
+  const TYPES = {
+    suya:    { name: "Suya Spot",         cost: 50000,  daily: 3000  },
+    carwash: { name: "Car Wash",          cost: 80000,  daily: 5000  },
+    boutique:{ name: "Fashion Boutique",  cost: 150000, daily: 9000  },
+    import:  { name: "Import/Export",     cost: 300000, daily: 18000 },
+    pos:     { name: "POS & Banking",     cost: 120000, daily: 7000  },
+  };
+  const t = TYPES[type];
+  if (!t) return;
+  if (game.state.company) { toast("You already own a company. Sell it first."); return; }
+  if (game.state.money < t.cost) { toast("Not enough money. Need ₦" + t.cost.toLocaleString()); return; }
+  game.state.money -= t.cost;
+  game.state.company = { type, name: t.name, started: Date.now(), lastCollect: Date.now() };
+  toast("🎉 You now own a " + t.name + "! Check back daily for income.");
+  try { sfx.success(); } catch (e) {}
+  try { emitConfetti(player.pos, 60); } catch (e) {}
+  updateHUD();
+  game.save?.();
+  showPhoneApp("company");
+};
+window._collectCompany = () => {
+  const c = game.state.company;
+  if (!c) return;
+  const TYPES = { suya: 3000, carwash: 5000, boutique: 9000, import: 18000, pos: 7000 };
+  const daily = TYPES[c.type] || 0;
+  const days = Math.floor((Date.now() - (c.lastCollect || Date.now())) / 86400000);
+  if (days <= 0) { toast("No income to collect yet — come back tomorrow."); return; }
+  const payout = days * daily;
+  game.state.money += payout;
+  c.lastCollect = Date.now();
+  toast("💰 Collected ₦" + payout.toLocaleString() + " from your " + c.name + ".");
+  try { sfx.money(); } catch (e) {}
+  try { emitConfetti(player.pos, 40); } catch (e) {}
+  updateHUD();
+  game.save?.();
+  showPhoneApp("company");
+};
+window._sellCompany = () => {
+  const c = game.state.company;
+  if (!c) return;
+  const TYPES = { suya: 50000, carwash: 80000, boutique: 150000, import: 300000, pos: 120000 };
+  const refund = Math.floor((TYPES[c.type] || 0) * 0.5);
+  game.state.money += refund;
+  game.state.company = null;
+  toast("Sold company. Recovered ₦" + refund.toLocaleString() + ".");
+  try { sfx.money(); } catch (e) {}
+  updateHUD();
+  game.save?.();
+  showPhoneApp("company");
+};
 window._setGraphicsQuality = (q) => {
   applyQuality(q, { renderer, sun, scene });
   toast("🎨 Graphics set to " + q.toUpperCase() + ". Reload to see full effect.");
@@ -2357,16 +2557,16 @@ window._rideVehicle = async (vehicleId) => {
   const ok = await spawnRideVehicle(vehicleId, player.pos, player.heading, toast);
   if (ok) {
     closePhone();
-    ctl.yaw = player.heading + Math.PI;           // camera behind the car, looking the way it faces
-    player.steerSm = 0;
     const v = getVehicle(vehicleId);
     toast("🚗 Riding " + (v?.name || vehicleId) + "! Speed boosted.");
+    try { sfx.engine(true, 0.4); } catch (e) {}
   } else { toast("Could not spawn vehicle — try again"); }
 };
 // FEATURE: Dismount vehicle (despawn mesh + remove speed boost)
 window._dismountVehicle = () => {
   despawnRideVehicle();
   toast("🚶 Dismounted. Walking now.");
+  try { sfx.engine(false); } catch (e) {}
   showPhoneApp("cars");
 };
 // FEATURE: Tunes — play/stop radio station (toast only, no actual audio streaming yet)
@@ -3365,7 +3565,7 @@ onValue(ref(db, "events"), (snap) => {
 
 // ---- Main loop ----
 const clock = new THREE.Clock();
-let mmT=0, hitCool=0, hudT=0, _missionCheckT=0;
+let mmT=0, hitCool=0, hudT=0, _missionCheckT=0, _stepT=0;
 // ---- Automatic speed governor: if the phone is slow, lower quality step by step ----
 let _gAcc = 0, _gN = 0, _gLevel = 0, _gWarm = 0;
 function governor(raw) {
@@ -3421,18 +3621,16 @@ function _frame() {
   if (isLiveMapOn()) { liveMapFrame(dt); perfBeforeRender(); renderer.render(scene, camera); perfAfterRender(renderer, getQuality()); requestAnimationFrame(frame); return; }
   const now = Date.now() / 1000;
   const _riding = isRiding();
-  if (!_riding && window._veh) { const V = window._veh; V.left = V.right = V.accel = V.brake = false; player.steerSm = 0; }
   // FEATURE: show/hide driving buttons based on riding state
   if (_vehControlsEl) _vehControlsEl.style.display = _riding ? "block" : "none";
   if (_riding) {
-    // VEHICLE CONTROL: on-screen buttons + joystick + keyboard.
-    // Directions (same as walking): the car's forward is (sin h, cos h), and steering RIGHT must turn the heading
-    // DOWN (it used to turn it up = right button steered left, and "forward" was the opposite of where the car faced).
-    const V = window._veh || (window._veh = { left: false, right: false, accel: false, brake: false });
-    const dz = (x) => (Math.abs(x) < 0.15 ? 0 : x);                 // joystick dead zone, so resting a thumb does not steer
+    // FEATURE: VEHICLE CONTROL — dedicated driving buttons + joystick + keyboard
+    // _vehBtnSteer / _vehBtnThrottle are set by the on-screen driving buttons.
+    // Joystick left/right also steers; joystick up/down also throttles.
+    // Keyboard WASD/arrows also work.
     const maxVehSpd = getRideSpeed() * 1.8;
-    let steer = (V.right ? 1 : 0) - (V.left ? 1 : 0) + dz(ctl.joyX || 0);
-    let throttle = (V.accel ? 1 : 0) - (V.brake ? 1 : 0) + dz(ctl.joyY || 0);
+    let steer = (window._vehBtnSteer || 0) + (ctl.joyX || 0);
+    let throttle = (window._vehBtnThrottle || 0) + (ctl.joyY || 0);
     const k = ctl.keys || {};
     if (k["w"] || k["arrowup"]) throttle += 1;
     if (k["s"] || k["arrowdown"]) throttle -= 1;
@@ -3440,13 +3638,21 @@ function _frame() {
     if (k["d"] || k["arrowright"]) steer += 1;
     steer = Math.max(-1, Math.min(1, steer));
     throttle = Math.max(-1, Math.min(1, throttle));
-    driveStep(player, { steer, throttle }, dt, maxVehSpd);        // src/drive.js
-    const v = player.speed;
-    // chase camera: swing round behind the car while driving forward (camera yaw = heading + PI means "behind")
-    if (v > 0.6) {
-      let d = (player.heading + Math.PI) - ctl.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
-      ctl.yaw += d * (1 - Math.exp(-dt * 2.2));
+    // Acceleration: throttle sets target speed, ramp is gradual (vehicle feel)
+    const target = throttle * maxVehSpd;
+    player.speed += (target - player.speed) * (1 - Math.exp(-dt * 3));
+    // BUGFIX: steering rate was 2.8 (too high — car "swung" instead of drove).
+    // Now 1.2 rad/s, scaled by speed factor so turns are wider at high speed
+    // (like a real car) and tighter at low speed. Feels like DRIVING not swinging.
+    if (Math.abs(player.speed) > 0.3) {
+      const speedFactor = Math.min(1, Math.abs(player.speed) / maxVehSpd);
+      const steerRate = 1.2;
+      player.heading += steer * steerRate * dt * (player.speed > 0 ? 1 : -1) * (0.4 + speedFactor * 0.6);
     }
+    // Move forward along heading (not camera-relative)
+    const fx = -Math.sin(player.heading), fz = -Math.cos(player.heading);
+    player.pos.x += fx * player.speed * dt;
+    player.pos.z += fz * player.speed * dt;
   } else {
     // NORMAL WALKING (existing camera-relative control scheme)
     const it = ctl.intent();
@@ -3506,6 +3712,15 @@ function _frame() {
     // The vehicle mesh IS the visual representation — without this, the
     // player's feet + legs clip through the vehicle body.
     rig.group.visible = !isRiding();
+    // ---- Footstep dust + sound (Oct 19) ----
+    if (player.speed > 0.05 && !isRiding() && !active) {
+      _stepT = (_stepT || 0) - dt;
+      if (_stepT <= 0) {
+        _stepT = 0.45;  // footstep interval (s)
+        try { emitDust(player.pos, 3); } catch (e) {}
+        try { sfx.step(); } catch (e) {}
+      }
+    }
   }
   // FEATURE: update the ride vehicle mesh to follow the player
   tickRideVehicle(player.pos, player.heading);
@@ -3594,6 +3809,10 @@ function _frame() {
   tickMoneyHunt(Date.now());
   // ---- Graphics tick: cloud drift ----
   tickGraphics(dt);
+  // ---- Particles tick: confetti, dust, rain (Oct 19) ----
+  tickParticles(dt, camera);
+  // ---- Road events tick: rain/weather, checkpoints, traffic jams (Oct 19) ----
+  tickRoadEvents(dt);
   // ---- Plot doors tick: render doors at nearby occupied plots + detect knock range (step 2c) ----
   // Only tick when NOT inside a place (otherwise we waste cycles on doors the player can't see)
   if (!active) tickPlotDoors(player.pos.x, player.pos.z);
