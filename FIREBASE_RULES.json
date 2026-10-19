@@ -38,10 +38,7 @@
     },
     "chat": {
       ".read": "auth != null",
-      "$id": {
-        ".write": "auth != null && (!data.exists() && newData.child('uid').val() === auth.uid || (data.exists() && !newData.exists() && root.child('admins').child(auth.uid).exists()))",
-        ".validate": "newData.hasChildren(['uid','name','text','ts']) && newData.child('text').isString() && newData.child('text').val().length > 0 && newData.child('text').val().length <= 200 && newData.child('name').val().length <= 30 && newData.child('ts').val() <= now + 60000"
-      }
+      ".write": "auth != null"
     },
     "dms": {
       "$chatId": {
@@ -76,25 +73,25 @@
           ".write": "auth != null && (!data.exists() || data.child('ownerUid').val() === auth.uid)",
           "furniture": {
             ".read": "auth != null",
-            ".write": "data.parent().child('ownerUid').val() === auth.uid"
+            ".write": "data.parent.child('ownerUid').val() === auth.uid"
           },
           "locked": {
-            ".write": "data.parent().child('ownerUid').val() === auth.uid"
+            ".write": "data.parent.child('ownerUid').val() === auth.uid"
           },
           "forSale": {
-            ".write": "data.parent().child('ownerUid').val() === auth.uid"
+            ".write": "data.parent.child('ownerUid').val() === auth.uid"
           },
           "forRent": {
-            ".write": "data.parent().child('ownerUid').val() === auth.uid"
+            ".write": "data.parent.child('ownerUid').val() === auth.uid"
           },
           "price": {
-            ".write": "data.parent().child('ownerUid').val() === auth.uid"
+            ".write": "data.parent.child('ownerUid').val() === auth.uid"
           },
           "tier": {
-            ".write": "data.parent().child('ownerUid').val() === auth.uid"
+            ".write": "data.parent.child('ownerUid').val() === auth.uid"
           },
           "colors": {
-            ".write": "data.parent().child('ownerUid').val() === auth.uid"
+            ".write": "data.parent.child('ownerUid').val() === auth.uid"
           }
         }
       }
@@ -130,51 +127,18 @@
         ".write": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'"
       }
     },
-    "chats": {
-      "$chatId": {
-        ".read": "auth != null && (!data.exists() || data.child('meta/members/'+auth.uid).val() === true)",
-        ".write": "auth != null && (!data.exists() || data.child('meta/members/'+auth.uid).val() === true)"
-      }
-    },
-    "userChats": {
-      "$uid": {
-        ".read": "auth.uid === $uid",
-        "$chatId": {
-          ".write": "auth != null"
-        }
-      }
-    },
-    "presence": {
-      ".read": "auth != null",
-      "$uid": {
-        ".write": "auth.uid === $uid"
-      }
-    },
-    "blocks": {
-      "$uid": {
-        ".read": "auth.uid === $uid",
-        ".write": "auth.uid === $uid"
-      }
-    },
-    "reports": {
-      ".read": "auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
-      ".write": "auth != null"
-    },
-    "transfers": {
-      ".read": "auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
-      ".write": "auth != null"
-    },
-    "live": {
-      ".read": "auth != null",
-      "$uid": {
-        ".write": "auth.uid === $uid"
-      }
-    },
     "billboards": {
       ".read": "auth != null",
-      "$id": {
-        ".write": "auth != null && newData.child('ownerId').val() === auth.uid && (!data.exists() || data.child('expiresAt').val() < now || data.child('ownerId').val() === auth.uid)",
-        ".validate": "newData.hasChildren(['ownerId','expiresAt']) && newData.child('expiresAt').val() <= now + 691200000 && (!newData.child('text').exists() || newData.child('text').val().length <= 120) && (!newData.child('imageUrl').exists() || newData.child('imageUrl').val().length <= 400)"
+      "$billboardId": {
+        ".read": "auth != null",
+        ".write": "auth != null && (!data.exists() || data.child('ownerId').val() === auth.uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1')"
+      }
+    },
+    "worldchat": {
+      ".read": "auth != null",
+      "$msgId": {
+        ".read": "auth != null",
+        ".write": "auth != null && (!data.exists() || data.child('uid').val() === auth.uid)"
       }
     }
   }
