@@ -10,7 +10,7 @@ import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAIL
 import { createGameState } from "./needs.js";
 import { auth, db } from "./firebase.js";
 import { initAuth, showAuthModal, wireAuthUI, logout, isAuthed } from "./auth.js";
-import { sendEmote, initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition, getRemotePlayers, setMyPlace, setMyLook, setBlockedUids } from "./multiplayer.js";
+import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition, getRemotePlayers, setMyPlace, setMyLook, setBlockedUids } from "./multiplayer.js";
 import { startRide, travelToZone, travelToPlace, getDestinations } from "./travel.js";
 import { subscribeRichList } from "./economy.js";
 import { createNPCs } from "./npcs.js";
@@ -29,8 +29,7 @@ import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpots
 import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
 import { celebrate } from "./celebrate.js";
 import { initSfx, sfx, setMuted as setSfxMuted, isMuted as isSfxMuted } from "./sfx.js";
-import { tickWeatherFx } from "./weatherfx.js";
-import { initParticles, emitConfetti, emitDust, tickParticles, startRain as _startRain, stopRain as _stopRain } from "./particles.js";
+import { initParticles, emitConfetti, emitDust, tickParticles } from "./particles.js";
 import { initRoadEvents, tickRoadEvents, getCurrentWeather as getRoadWeather, resetRoadEvents, trafficSpeedMultiplierAt } from "./road_events.js";
 import { addScenery, SCENERY_LABELS } from "./scenery.js";
 import { initLife, tickLife } from "./life.js";
@@ -438,10 +437,8 @@ function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.asp
 addEventListener("resize", resize); resize();
 
 const world = buildWorld(scene);
-world.world.add(buildStreetDetail(scene, world.colliders, AREAS));
+world.world.add(buildStreetDetail(scene, world.colliders));
 const _pShadow = makeBlobShadows(scene, 1);
-let _wfxLast = performance.now();
-function _wfxDt() { const n = performance.now(), d = Math.min(0.1, (n - _wfxLast) / 1000); _wfxLast = n; return d; }
 addScenery(scene, world);
 initLife(scene);
 initActivity(scene);
@@ -556,11 +553,12 @@ function applyTime() {
       playerGetPos: () => ({ x: player.pos.x, z: player.pos.z }),
       gameHourGet: () => _gameHour(),
       toast,
+      db,
+      worldId: "kaduna",
     });
   }
   // ---- Update sky + sun + clouds based on hour ----
   updateSky(hour);
-  tickWeatherFx(_wfxDt(), { scene, sun, hemi, asphalt: world.asphalt });
   if (traffic.setGlow) traffic.setGlow(nightAmount(hour));   // headlight + tail light glow, smooth at dusk/dawn
   _pShadow.set(0, player.pos.x, player.pos.z, 1.0, 1.0); _pShadow.done();
   const night = hour < 6.5 || hour > 19.5;
@@ -814,8 +812,6 @@ function _showPhoneApp(appId) {
     const groups = [];
     groups.push({ t: "📍 Places", items: dests.map(d => ({ id: d.id, label: (d.icon || "📍") + " " + d.name, off: d.open === false })) });
     groups.push({ t: "🏘️ Areas", items: AREAS.map(a => ({ id: "area:" + a.id, label: "📍 " + a.name })) });
-    groups.push({ t: "🛫 Landmarks", items: SCENERY_LABELS.filter(l => l.id).map(l => ({ id: l.id, label: l.name })) });
-    groups.push({ t: "🎡 Fun spots", items: districtFunLabels().map(f => ({ id: f.id, label: f.name })) });
     const homes = _myHomesList();
     if (homes.length) groups.push({ t: "🏠 My Houses", items: homes.map(hm => ({ id: "house:" + hm.a + ":" + hm.p, label: "🏠 " + hm.name + " · Plot #" + hm.p })) });
     window._rdGroups = groups;
@@ -1913,13 +1909,32 @@ window._saveLook=()=>{
   toast("✓ Outfit saved! Other players can see it.");
 };
 const AREA_TRAVEL_FARE = 300;
-// Tapping a name on any map opens the Ride app with that place already picked, so you see every ride and its price.
-window._openRideTo=(destId)=>{
-  window._rideDest = destId;     // the Ride app reads this when it opens
-  showPhoneApp("ride");
+window.travelToArea=(areaId)=>{
+  const a = getArea(areaId);
+  if (!a) return;
+  if (getActivePlace()) { toast("Leave the building first."); return; }
+  if (game.state.money < AREA_TRAVEL_FARE) { toast("A keke to " + a.name + " costs ₦" + AREA_TRAVEL_FARE + " — you don't have enough."); return; }
+  game.state.money -= AREA_TRAVEL_FARE;
+  game.save?.();
+  const uid = getMyUid();
+  if (uid) update(ref(db, "economy/" + uid), { balance: game.state.money });
+  // arrive on the district's own road, west end, facing east
+  player.pos.x = a.x - 48; player.pos.z = a.z;
+  ctl.yaw = -Math.PI / 2 + Math.PI;
+  updateHUD();
+  closePhone?.();
+  toast("🛺 Welcome to " + a.name + " (−₦" + AREA_TRAVEL_FARE + ")");
 };
-window.travelToArea=(areaId)=>{ if (getArea(areaId)) window._openRideTo("area:" + areaId); };
-window.travelToPlace=(placeId)=>window._openRideTo(placeId);
+window.travelToPlace=(placeId)=>{
+  // Called from the map app: open the ride app with this place preselected
+  toast("Opening travel to " + (getPlace(placeId)?.name || placeId) + "...");
+  showPhoneApp("ride");
+  // Preselect the destination in the dropdown
+  setTimeout(() => {
+    const sel = document.getElementById("ride-dest-select");
+    if (sel) sel.value = placeId;
+  }, 50);
+};
 window.sendMessage=(uid,name)=>{
   sendChat("👋 Hi "+name+"!");
   toast("Waved at "+name);
@@ -2687,12 +2702,11 @@ function _onFunActivityTap() {
   startActivity(funSpec(place, act, player, finish), player, rig);
 }
 // FEATURE: Emotes — REAL character animations via bone manipulation
-window.__actAnim = (a, s) => sendEmote(a, s);
 window._emote = (type, duration = 3) => {
   if (!rig || !rig.animate || !rig.animate.emote) { toast("Character not loaded yet"); return; }
   if (isBusy()) cancelActivity();
   if (type === "sit") { startActivity(sitSpec(player, null, 25), player, rig); toast("🪑 You sat down on a stool (move to stand up)"); return; }
-  rig.animate.emote(type, duration); sendEmote(type, duration);
+  rig.animate.emote(type, duration);
   const labels = { wave: "waved", dance: "is dancing", sit: "sat down", clap: "is clapping", jump: "jumped", squat: "squatted", point: "is pointing", laugh: "is laughing", pray: "is praying" };
   const icons = { wave: "👋", dance: "💃", sit: "🪑", clap: "👏", jump: "🦘", squat: "🏋️", point: "👆", laugh: "😂", pray: "🙏" };
   toast(icons[type] + " " + (getMyName() || "You") + " " + (labels[type] || type) + "!");
@@ -2832,40 +2846,14 @@ window._rdPick=(id)=>{
   const list=document.getElementById("rd-list"); if(list) list.style.display="none";
   const arrow=document.getElementById("rd-arrow"); if(arrow) arrow.textContent="▼";
 };
-// Where you arrive for the newer kinds of destination: far landmarks ("spot:") and fun spots inside districts ("fun:").
-function _rideTarget(destId) {
-  if (destId.startsWith("spot:")) {
-    const s = SCENERY_LABELS.find(l => l.id === destId); if (!s || !s.land) return null;
-    return { name: s.name, x: s.land.x, z: s.land.z, face: s.land.face };
-  }
-  if (destId.startsWith("fun:")) {
-    const [, aid, i] = destId.split(":"), a = getArea(aid), f = a && districtLayout(a).fun[+i]; if (!f) return null;
-    return { name: f.name, x: f.x, z: f.z + (f.d || 10) / 2 + 4, face: [0, -1] };   // south side, looking at it
-  }
-  return null;
-}
 window.bookRide=(rideId)=>{
   const destId=window._rideDest||"";
   if(!destId){toast("Pick a destination first");return;}
   const fareMap={walk:0,keke:300,bus:200,okada:500,taxi:1500};
   const fare=fareMap[rideId] ?? 0;
   if(game.state.money<fare){toast("Not enough money");return;}
-  if((destId.startsWith("area:")||destId.startsWith("spot:")||destId.startsWith("fun:")) && getActivePlace()){toast("Leave the building first.");return;}
   game.state.money-=fare;
   closePhone();
-  if (destId.startsWith("spot:") || destId.startsWith("fun:")) {
-    const t = _rideTarget(destId);
-    if (t) {
-      player.pos.set(t.x, 0, t.z);
-      player.heading = Math.atan2(t.face[0], t.face[1]);
-      ctl.yaw = Math.atan2(-t.face[0], -t.face[1]);      // camera looks the way the landmark is
-      toast("📍 " + (rideId === "walk" ? "Walked" : "Rode to") + " " + t.name);
-      updateHUD(); game.save?.();
-      const titleEl=document.querySelector(".chip.title");
-      if(titleEl) titleEl.firstChild.textContent = "📍 " + t.name;
-      return;
-    }
-  }
   // FEATURE: handle new destination types — area:xxx and house:areaId:plotNo
   if (destId.startsWith("area:")) {
     const areaId = destId.slice(5);
@@ -3122,6 +3110,15 @@ initAuth((user) => {
       log.appendChild(div); log.scrollTop=log.scrollHeight;
       while(log.children.length>30) log.removeChild(log.firstChild);
     });
+  // SYNC (Oct 19): fetch Firebase server time so all browsers in this world
+  // compute the same "now". Browser clocks can drift seconds→minutes, which
+  // made NPC cars appear at different x-positions in different browsers.
+  // We compute the offset ONCE here: offset = serverTime - localTime. The
+  // main loop then uses (Date.now() + offset) as a server-aligned clock.
+  get(ref(db, ".info/serverTimeOffset")).then((snap) => {
+    const off = snap.val();
+    _serverTimeOffset = (typeof off === "number") ? off : 0;
+  }).catch(() => { _serverTimeOffset = 0; });
   // Check daily reward on login
   checkDailyReward(user.uid).then((reward) => {
     if (reward) { game.state.money += reward.money; updateHUD(); toast(reward.label+'! Welcome back.'); }
@@ -3582,6 +3579,10 @@ const clock = new THREE.Clock();
 let mmT=0, hitCool=0, hudT=0, _missionCheckT=0, _stepT=0;
 // ---- Automatic speed governor: if the phone is slow, lower quality step by step ----
 let _gAcc = 0, _gN = 0, _gLevel = 0, _gWarm = 0;
+// SYNC (Oct 19): offset between Firebase server time and local browser time.
+// Used by the main loop so NPC traffic is at the same x-position across
+// all browsers. Fetched once after auth.
+let _serverTimeOffset = null;
 function governor(raw) {
   if (raw > 0.25) return;                 // tab was hidden / big hitch: ignore
   _gWarm += raw; if (_gWarm < 4) return;  // let loading finish first
@@ -3602,7 +3603,6 @@ let _mapMe = null;
 initLiveMap({ getMe: () => _mapMe, onClose: () => { if (_mapMe) { peekWorld(false); _mapMe = null; } }, scene, camera, player, AREAS, listPlaces, getHomePos: () => window._myHomePos, getHomes: () => window._myHomes || [], limits: { x: 560, z: 400 }, extraLabels: SCENERY_LABELS.concat(districtFunLabels()),
   travelPlace: (id) => { closeLiveMap(); window.travelToPlace(id); },
   travelArea: (id) => { closeLiveMap(); window.travelToArea(id); },
-  rideTo: (id) => { closeLiveMap(); window._openRideTo(id); },
   tickWorld: (x, z, r) => { tickAreaWorld(x, z, r); tickPlotDoors(x, z); tickLife(x, z, true); } });
 
 let _lastFrameT = 0;
@@ -3634,7 +3634,13 @@ function _frame() {
   const _raw = clock.getDelta(); governor(_raw);
   const dt = Math.min(_raw, 0.05);
   if (isLiveMapOn()) { liveMapFrame(dt); perfBeforeRender(); renderer.render(scene, camera); perfAfterRender(renderer, getQuality()); requestAnimationFrame(frame); return; }
-  const now = Date.now() / 1000;
+  // SYNC FIX (Oct 19): use Firebase server-time-adjusted clock so all browsers
+  // see the same NPC car positions. Browser clocks can drift seconds→minutes;
+  // Date.now() in browser A vs browser B differs → cars at different x.
+  // _serverTimeOffset is fetched once at init (offset = serverTime - localTime),
+  // then `now` below uses (localTime + offset) = serverTime → identical across
+  // browsers. Falls back to plain Date.now() if the offset fetch failed.
+  const now = (_serverTimeOffset !== null ? (Date.now() + _serverTimeOffset) : Date.now()) / 1000;
   const _riding = isRiding();
   // FEATURE: show/hide driving buttons based on riding state
   if (_vehControlsEl) _vehControlsEl.style.display = _riding ? "block" : "none";
@@ -3687,7 +3693,7 @@ function _frame() {
   const active = getActivePlace();
   // SAFETY: auto-dismount vehicle when entering a place (can't ride inside a shop)
   if (active && isRiding()) { despawnRideVehicle(); toast("🚶 Dismounted (entered building)"); }
-  if (!active && !isBusy()) collide(player.pos, world.colliders, isRiding() ? 1.7 : 0.55);
+  if (!active && !isBusy()) collide(player.pos, world.colliders);
   // If we're inside a place, also collide with the place's local colliders
   if (active?.handle?.colliders && !isBusy()) {
     for (const c of active.handle.colliders) {
@@ -3859,6 +3865,6 @@ Promise.all([loadPlayer(manager, scene, game.state.look), addCity(scene, world, 
   
   frame();
   $("loading").classList.add("done");
-  window.__dbg = { colliders: world.colliders, rain: (on) => on ? _startRain() : _stopRain(), player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig };
+  window.__dbg = { player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig };
   window.__ready = true;
 }).catch((e) => showError("Could not load the game: " + e.message));

@@ -2,25 +2,36 @@
 // Lightweight, time + location based. Designed to be ticked every frame
 // from main.js but checks itself throttled to ~1s to save CPU.
 //
+// SYNC (Oct 19): weather is now synced via Firebase under `weather/world`
+// so all clients in the same world see the same rain. First-writer-wins:
+// if `weather/<worldId>` is empty or stale, the first client to roll a
+// weather change writes it. Otherwise clients subscribe to the existing
+// value and apply it locally. Checkpoints + traffic jams are still local
+// per-player (they happen TO the player, not to the world).
+//
 // Wire-up (in main.js):
-//   import { initRoadEvents, tickRoadEvents, getCurrentWeather, isCheckpointAhead } from "./road_events.js";
-//   initRoadEvents({ scene, playerGetPos, toast, gameHourGet });
+//   import { initRoadEvents, tickRoadEvents, getCurrentWeather as getRoadWeather,
+//            resetRoadEvents, trafficSpeedMultiplierAt } from "./road_events.js";
+//   initRoadEvents({ scene, playerGetPos, gameHourGet, toast, db, worldId });
 //   tickRoadEvents(dt);                 // every frame
-//   const w = getCurrentWeather();      // { type: "rain"|"clear", intensity: 0..1 }
+//   const w = getRoadWeather();          // { type: "rain"|"clear", intensity: 0..1 }
 
 import { startRain, stopRain, isRaining } from "./particles.js";
 import { sfx } from "./sfx.js";
+import { ref, onValue, set, onDisconnect, get } from "firebase/database";
 
 let _scene = null;
 let _playerGetPos = () => ({ x: 0, z: 0 });
 let _gameHourGet = () => 12;
 let _toast = () => {};
+let _db = null;
+let _worldId = "kaduna";  // single shared world for now
+let _unsubWeather = null;
 
 // ---- weather state ----
 let _weather = "clear";        // "clear" | "rain"
 let _weatherTimer = 0;          // s until next weather decision
 let _rainIntensity = 0;        // 0..1, smooth lerp
-let _nextWeatherCheck = 0;     // throttle (s)
 
 // ---- checkpoint state ----
 let _checkpoint = null;         // { x, z, radius, label, fee, hit }
@@ -44,11 +55,44 @@ const CHECKPOINT_LABELS = [
   { label: "Road Safety", fee: 0, msg: "🛡️ FRSC check. You pass. Have a safe trip!" },
 ];
 
-export function initRoadEvents({ scene, playerGetPos, gameHourGet, toast }) {
+export function initRoadEvents({ scene, playerGetPos, gameHourGet, toast, db, worldId }) {
   _scene = scene;
   _playerGetPos = playerGetPos || _playerGetPos;
   _gameHourGet = gameHourGet || _gameHourGet;
   _toast = toast || _toast;
+  _db = db;
+  _worldId = worldId || "kaduna";
+
+  // ---- Subscribe to shared weather ----
+  if (_db) {
+    const wRef = ref(_db, "weather/" + _worldId);
+    _unsubWeather = onValue(wRef, (snap) => {
+      const v = snap.val();
+      if (!v) {
+        // No weather decided yet — I'll decide if I roll rain in my tick
+        return;
+      }
+      // Apply the shared weather locally
+      const sharedType = v.type || "clear";
+      if (sharedType !== _weather) {
+        _weather = sharedType;
+        if (_weather === "rain") {
+          if (_toast) _toast("🌧️ Rain don start. Drive careful!");
+          try { sfx.resume(); } catch (e) {}
+          startRain();
+          try { sfx.rain(true); } catch (e) {}
+        } else {
+          if (_toast) _toast("☀️ Rain don stop. Road don dry back.");
+          stopRain();
+          try { sfx.rain(false); } catch (e) {}
+        }
+      }
+      _weatherTimer = 100 + Math.random() * 80;
+    });
+    // Clear weather on disconnect — but only if I am the owner (we set the
+    // "owner" field). Otherwise leaving the page doesn't kill the rain.
+    onDisconnect(wRef).remove();
+  }
 }
 
 export function getCurrentWeather() {
@@ -65,25 +109,34 @@ function _nearbyRoadPoint() {
   return { x: p.x + Math.cos(ang) * r, z: p.z + Math.sin(ang) * r, base };
 }
 
-// ---- internal: decide weather (every ~120s of game-time, i.e. 2 game hours) ----
-function _decideWeather() {
-  const hour = _gameHourGet();
-  // Kaduna rainy season Apr-Oct ish — boost rain odds
-  // We don't have the real month, so use a flat 18% chance every check
-  const roll = Math.random();
-  if (_weather === "clear" && roll < 0.18) {
-    _weather = "rain";
-    if (_toast) _toast("🌧️ Rain don start. Drive careful!");
-    try { sfx.resume(); } catch (e) {}
-    startRain();
-    try { sfx.rain(true); } catch (e) {}
-  } else if (_weather === "rain" && roll > 0.55) {
-    _weather = "clear";
-    if (_toast) _toast("☀️ Rain don stop. Road don dry back.");
-    stopRain();
-    try { sfx.rain(false); } catch (e) {}
+// ---- internal: decide weather — now writes to Firebase so all clients agree ----
+async function _decideWeather() {
+  if (!_db) return;
+  try {
+    const wRef = ref(_db, "weather/" + _worldId);
+    const snap = await get(wRef);
+    const cur = snap.val();
+    const now = Date.now();
+
+    // If existing weather is fresh (< 60s old), don't touch it — someone
+    // else just decided, give it time to play out.
+    if (cur && (now - (cur.ts || 0)) < 60000) return;
+
+    const roll = Math.random();
+    if (!cur || cur.type === "clear") {
+      if (roll < 0.18) {
+        // START rain — write to Firebase; all subscribed clients apply it
+        await set(wRef, { type: "rain", ts: now, owner: "auto" });
+      }
+    } else if (cur.type === "rain" && roll > 0.55) {
+      // STOP rain
+      await set(wRef, { type: "clear", ts: now, owner: "auto" });
+    }
+  } catch (e) {
+    // permission denied or network error — silently fall back to local-only
+    console.warn("weather sync failed:", e.message);
   }
-  _weatherTimer = 100 + Math.random() * 80;  // next decision in ~100-180s
+  _weatherTimer = 100 + Math.random() * 80;
 }
 
 // ---- internal: maybe spawn a checkpoint ahead ----
