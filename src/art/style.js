@@ -203,3 +203,6 @@ export function styledMaterial(kind = "interior", extra = {}) {
   }
   return _shared[k];
 }
+
+// FEATURE: night window glow uniform (used by world.js building materials)
+export const NIGHT_GLOW = { value: 0 };
