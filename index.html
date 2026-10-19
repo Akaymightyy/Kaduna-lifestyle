@@ -387,12 +387,17 @@
 </div>
 
 <!-- Travel overlay -->
-<div id="travel-overlay" style="position:fixed;inset:0;z-index:44;display:none;flex-direction:column;align-items:center;justify-content:center;background:rgba(15,77,58,0.95);color:#fff;gap:14px;">
+<div id="travel-overlay" style="position:fixed;inset:0;z-index:44;display:none;flex-direction:column;align-items:center;justify-content:center;background:rgba(15,77,58,0.95);color:#fff;gap:14px;opacity:0;transition:opacity .3s ease;">
+  <div id="travel-icon" style="font-size:64px;line-height:1;animation:travel-bob 1.2s ease-in-out infinite;">🛺</div>
   <div id="travel-title" style="font-size:18px;font-weight:700;">Traveling...</div>
   <div id="travel-tip" style="font-size:13px;opacity:0.8;max-width:280px;text-align:center;"></div>
   <div style="width:min(260px,70vw);height:12px;border-radius:7px;background:rgba(255,255,255,.2);overflow:hidden;"><div id="travel-bar" style="height:100%;width:0%;background:var(--gold);border-radius:7px;transition:width .1s;"></div></div>
   <div id="travel-pct" style="font-weight:600;font-size:14px;">0%</div>
 </div>
+<style>
+  @keyframes travel-bob { 0%,100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-8px) rotate(3deg); } }
+  #travel-overlay.show { display: flex !important; opacity: 1; }
+</style>
 
 <!-- Admin dashboard -->
 <div id="admin-modal" style="position:fixed;inset:0;z-index:50;display:none;flex-direction:column;background:#0f172a;color:#fff;">
