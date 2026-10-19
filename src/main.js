@@ -29,7 +29,8 @@ import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpots
 import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
 import { celebrate } from "./celebrate.js";
 import { initSfx, sfx, setMuted as setSfxMuted, isMuted as isSfxMuted } from "./sfx.js";
-import { initParticles, emitConfetti, emitDust, tickParticles } from "./particles.js";
+import { tickWeatherFx } from "./weatherfx.js";
+import { initParticles, emitConfetti, emitDust, tickParticles, startRain as _startRain, stopRain as _stopRain } from "./particles.js";
 import { initRoadEvents, tickRoadEvents, getCurrentWeather as getRoadWeather, resetRoadEvents, trafficSpeedMultiplierAt } from "./road_events.js";
 import { addScenery, SCENERY_LABELS } from "./scenery.js";
 import { initLife, tickLife } from "./life.js";
@@ -439,6 +440,8 @@ addEventListener("resize", resize); resize();
 const world = buildWorld(scene);
 world.world.add(buildStreetDetail(scene, world.colliders, AREAS));
 const _pShadow = makeBlobShadows(scene, 1);
+let _wfxLast = performance.now();
+function _wfxDt() { const n = performance.now(), d = Math.min(0.1, (n - _wfxLast) / 1000); _wfxLast = n; return d; }
 addScenery(scene, world);
 initLife(scene);
 initActivity(scene);
@@ -557,6 +560,7 @@ function applyTime() {
   }
   // ---- Update sky + sun + clouds based on hour ----
   updateSky(hour);
+  tickWeatherFx(_wfxDt(), { scene, sun, hemi, asphalt: world.asphalt });
   if (traffic.setGlow) traffic.setGlow(nightAmount(hour));   // headlight + tail light glow, smooth at dusk/dawn
   _pShadow.set(0, player.pos.x, player.pos.z, 1.0, 1.0); _pShadow.done();
   const night = hour < 6.5 || hour > 19.5;
@@ -3844,6 +3848,6 @@ Promise.all([loadPlayer(manager, scene, game.state.look), addCity(scene, world, 
   
   frame();
   $("loading").classList.add("done");
-  window.__dbg = { player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig };
+  window.__dbg = { rain: (on) => on ? _startRain() : _stopRain(), player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig };
   window.__ready = true;
 }).catch((e) => showError("Could not load the game: " + e.message));

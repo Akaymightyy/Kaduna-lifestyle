@@ -53,7 +53,7 @@ export function initLife(scene) {
 
   // people: 6 per district — 4 walkers on the pavements + 2 neighbours standing to chat.
   // Every walker has swinging legs and arms, a different height, and one of 3 outfits (shirt & trousers, kaftan, gown & hijab).
-  const PP = personParts(), N = AREAS.length * 6;
+  const PP = personParts(), PER = 14, N = AREAS.length * PER;
   const SKINS = [0x3b2418, 0x5a3a26, 0x7a4e32, 0x2a1810, 0x9a6a46, 0x6b4429];
   const SHIRTS = [0xe8e2d0, 0x2f6fb5, 0xc0392b, 0x2e7d4f, 0xf2b134, 0x6b4a8a, 0x1f1f24, 0xd98e2b, 0x3aa6a0];
   const TROUS = [0x1f2a36, 0x2a2a2e, 0x4a3b2a, 0x3b4f72, 0x5a5a5e];
@@ -62,14 +62,14 @@ export function initLife(scene) {
   const pick = (arr, a, b) => arr[Math.floor(hash2(a, b) * arr.length) % arr.length];
   let pi = 0;
   for (const a of AREAS) {
-    const cx = a.x + (hash2(a.id, "chat") - 0.5) * 70;
-    for (let k = 0; k < 6; k++, pi++) {
+    for (let k = 0; k < PER; k++, pi++) {
+      const q = (k - 10) >> 1, cx = a.x + (hash2(a.id, "chat" + q) - 0.5) * 80;
       const side = k % 2 ? 1 : -1, id = a.id + k, r = hash2(id, "type");
       const type = r < 0.5 ? 0 : r < 0.72 ? 1 : 2, kid = type === 0 && hash2(id, "kid") < 0.14;
       const p = { type, sc: kid ? 0.62 : 0.93 + hash2(id, "h") * 0.14, skin: pick(SKINS, id, "s"), az: a.z + side * (3.6 + hash2(a.id, "pz" + k) * 0.6), ax: a.x,
-        span: 40 + hash2(a.id, "ps" + k) * 22, ph: hash2(a.id, "pp" + k) * 100, sp: (kid ? 1.8 : 1.1) + hash2(a.id, "pv" + k) * 0.7, chat: k >= 4 };
+        span: 40 + hash2(a.id, "ps" + k) * 22, ph: hash2(a.id, "pp" + k) * 100, sp: (kid ? 1.8 : 1.1) + hash2(a.id, "pv" + k) * 0.7, chat: k >= 10 };
       p.top = type === 0 ? pick(SHIRTS, id, "t") : type === 1 ? pick(ROBES, id, "r") : pick(GOWNS, id, "g"); p.bot = pick(TROUS, id, "b");
-      if (p.chat) { p.az = a.z + (k === 4 ? -1 : 1) * 3.9; p.cx = cx + (k === 4 ? -0.6 : 0.6); p.face = k === 4 ? Math.PI / 2 : -Math.PI / 2; }
+      if (p.chat) { const lead = k % 2 === 0; p.az = a.z + (lead ? -1 : 1) * 3.9; p.cx = cx + (lead ? -0.6 : 0.6); p.face = lead ? Math.PI / 2 : -Math.PI / 2; }
       people.push(p);
     }
   }

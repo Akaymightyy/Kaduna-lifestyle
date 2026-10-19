@@ -505,5 +505,5 @@ export function buildWorld(scene) {
     }
   } catch (e) { console.warn("Could not add place markers", e); }
 
-  return { world, colliders, mapShapes, lamps: heads, lampLights, ground, buildingsMesh: buildings };
+  return { world, asphalt, colliders, mapShapes, lamps: heads, lampLights, ground, buildingsMesh: buildings };
 }
