@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { auth, db } from "./firebase.js";
 import { ref, onValue, set, update, onDisconnect, push, serverTimestamp } from "firebase/database";
 import { onAuthStateChanged } from "firebase/auth";
+import { buildRemoteVehicleMesh } from "./vehicles.js";
 import { createCharacter } from "./characters.js";
 
 
@@ -176,7 +177,8 @@ async function _buildAvatar(uid, d) {
     sp.position.y = 2.0; sp.scale.set(1.6, 0.4, 1);
     // FEATURE: tag the sprite with userData so the main.js tap-raycaster can
     // detect when the player taps another user's name → open a DM with them.
-    sp.userData = { isRemotePlayer: true, playerUid: uid, playerName: d.name || "Player" };
+    // isNameTag is used by _swapRidingMesh to find + lift the tag above the vehicle.
+    sp.userData = { isRemotePlayer: true, playerUid: uid, playerName: d.name || "Player", isNameTag: true };
     group.userData = { isRemotePlayer: true, playerUid: uid, playerName: d.name || "Player" };
     group.add(sp);
     _scene.add(group);
@@ -196,7 +198,7 @@ async function _buildAvatar(uid, d) {
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
     sp.position.y = 1.8; sp.scale.set(1.5, 0.4, 1); g.add(sp);
     // FEATURE: tag for tap-raycaster (same as the model-loaded branch above)
-    sp.userData = { isRemotePlayer: true, playerUid: uid, playerName: d.name || "Player" };
+    sp.userData = { isRemotePlayer: true, playerUid: uid, playerName: d.name || "Player", isNameTag: true };
     g.userData = { isRemotePlayer: true, playerUid: uid, playerName: d.name || "Player" };
     _scene.add(g);
     if (_meshes[uid]) return;
@@ -258,11 +260,14 @@ function updateAvatars() {
     m.group.visible = true;
     m.group.position.set(px, 0, pz);
     m.group.rotation.y = d.heading||0;
-    // SYNC (Oct 19): update the riding badge above the name tag
-    // (null = on foot, "okada"/"keke"/etc = show vehicle emoji badge)
+    // SYNC (Oct 19): if this remote player is riding, swap their walking
+    // avatar for the ACTUAL VEHICLE 3D mesh. We keep their name tag
+    // floating above the vehicle so you can still tell who's inside.
+    // If they switch vehicles or dismount, dispose the old mesh first.
     if (m.riding !== (d.riding || null)) {
+      const oldRiding = m.riding;
       m.riding = d.riding || null;
-      _updateRidingBadge(m);
+      _swapRidingMesh(m, oldRiding);
     }
     // Determine if moving (compare to last pos)
     const dx = px - m.lastX, dz = pz - m.lastZ;
@@ -278,38 +283,69 @@ function updateAvatars() {
   }
 }
 
-// SYNC (Oct 19): show a small vehicle emoji badge above a remote player's
-// name tag so you can tell they're riding, not walking. Updated whenever
-// their `riding` field changes.
-const RIDING_EMOJI = {
-  okada: "🏍️", keke: "🛺", bicycle: "🚲", car: "🚗", suv: "🚙",
-  bus: "🚌", taxi: "🚕", sedan: "🚗", hatch: "🚗", sports: "🏎️", truck: "🚚",
-};
-function _updateRidingBadge(m) {
-  // dispose old badge if it exists
-  if (m.ridingBadge) {
-    if (m.ridingBadge.parent) m.ridingBadge.parent.remove(m.ridingBadge);
-    if (m.ridingBadge.material) {
-      if (m.ridingBadge.material.map) m.ridingBadge.material.map.dispose();
-      m.ridingBadge.material.dispose();
-    }
-    m.ridingBadge = null;
+// SYNC (Oct 19, v2): swap the walking-avatar for an ACTUAL VEHICLE 3D
+// mesh when a remote player is riding. The avatar's character body is
+// hidden (player is sitting inside the vehicle), but the name tag stays
+// visible above the vehicle so you know who's driving.
+//
+// Why the change: the first version showed a 🏍️ emoji badge above the
+// walking avatar — looked cheap and didn't actually represent the
+// vehicle. User (rightly) complained. Now we build the real 3D vehicle
+// model using the same code path as the local player's ride.
+const _ridingBuildInFlight = new Set();
+function _swapRidingMesh(m, oldRiding) {
+  // dispose old vehicle mesh if any
+  if (m.vehicleMesh) {
+    if (m.vehicleMesh.parent) m.vehicleMesh.parent.remove(m.vehicleMesh);
+    m.vehicleMesh.traverse((o) => {
+      if (o.geometry) o.geometry.dispose();
+      if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); }
+    });
+    m.vehicleMesh = null;
   }
+  // Restore the character body visibility (in case we hid it before)
+  if (m.ch && m.ch.model) m.ch.model.visible = true;
+  // If the player is no longer riding, we're done — they walk again
   if (!m.riding) return;
-  const emoji = RIDING_EMOJI[m.riding] || "🛵";
-  // draw emoji on a small canvas + sprite
-  const c = document.createElement("canvas");
-  c.width = 64; c.height = 32;
-  const ctx = c.getContext("2d");
-  ctx.fillStyle = "rgba(15,77,58,0.85)";
-  ctx.fillRect(0, 0, 64, 32);
-  ctx.font = "20px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText(emoji, 32, 16);
-  const tex = new THREE.CanvasTexture(c);
-  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
-  sp.position.y = 2.7; sp.scale.set(1.0, 0.5, 1);
-  m.group.add(sp);
-  m.ridingBadge = sp;
+  // Don't fire duplicate builds
+  const uid = m.playerUid;
+  if (uid && _ridingBuildInFlight.has(uid)) return;
+  if (uid) _ridingBuildInFlight.add(uid);
+  // Hide the character body — the player is sitting inside the vehicle,
+  // we don't want their legs sticking out of the car body
+  if (m.ch && m.ch.model) m.ch.model.visible = false;
+  // Lift the name tag so it floats above the vehicle roof (not the head)
+  for (const child of m.group.children) {
+    if (child.isSprite && child.userData.isNameTag) {
+      child.position.y = 2.6;  // was 2.0 (head level), now roof level
+    }
+  }
+  // Build the actual vehicle mesh async (GLB load or box-geometry)
+  buildRemoteVehicleMesh(m.riding).then((mesh) => {
+    if (uid) _ridingBuildInFlight.delete(uid);
+    if (!mesh) {
+      console.warn("[multiplayer] vehicle mesh build failed for", m.riding);
+      // restore avatar as fallback
+      if (m.ch && m.ch.model) m.ch.model.visible = true;
+      return;
+    }
+    // Bail if the player dismounted while we were loading
+    if (!m.riding) {
+      mesh.traverse && mesh.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+      return;
+    }
+    m.vehicleMesh = mesh;
+    // Vehicle is a child of the avatar group so it inherits position +
+    // rotation from the group. The character body is hidden above.
+    m.group.add(mesh);
+    // Center the vehicle at the player's feet
+    mesh.position.set(0, 0, 0);
+    mesh.rotation.y = 0;
+  }).catch((e) => {
+    if (uid) _ridingBuildInFlight.delete(uid);
+    console.warn("[multiplayer] vehicle build error:", e.message);
+    if (m.ch && m.ch.model) m.ch.model.visible = true;
+  });
 }
 
 export function getMyUid(){return _uid;}
