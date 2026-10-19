@@ -8,10 +8,11 @@ import { WIDE_AVENUES_X, WIDE_CROSS_Z, MAP_HALF_X, MAP_HALF_Z } from "./config.j
 import { AREAS } from "./areas.js";
 import { LAKE, AIRPORT } from "./scenery.js";
 import { makeBlobShadows } from "./street.js";
+import { NIGHT_GLOW } from "./art/style.js";
 import { carShape, busShape, personParts, hash2, paint, flatten, B, done } from "./town.js";
 
 let _scene = null, _on = false, _t = 0, _last = 0;
-let SH = null, carMesh = null, busMesh = null, pm = null, boats = [], plane = null;
+let BEAM = null, SH = null, carMesh = null, busMesh = null, pm = null, boats = [], plane = null;
 const cars = [], buses = [], people = [];
 const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(1, 1, 1);
 const _up = new THREE.Vector3(0, 1, 0), _col = new THREE.Color(), _mb = new THREE.Matrix4(), _m2 = new THREE.Matrix4(), _m3 = new THREE.Matrix4(), _Z = new THREE.Matrix4().makeScale(0, 0, 0), _s2 = new THREE.Vector3();
@@ -98,6 +99,11 @@ export function initLife(scene) {
   put(new THREE.BoxGeometry(0.5, 7, 5).translate(0, 6.8, -14), 0x0f7a4a);
   put(new THREE.BoxGeometry(12, 0.4, 3.5).translate(0, 4.2, -14.5), 0xe8eef2);
   plane = new THREE.Mesh(done(P), mat); plane.frustumCulled = false; plane.rotation.order = "YXZ"; scene.add(plane);
+  { const bg = new THREE.BufferGeometry(), v = [2.3, 0.07, -0.7, 2.3, 0.07, 0.7, 11, 0.07, 2.6, 11, 0.07, -2.6], a = [0, 1, 2, 0, 2, 3, 2.3, 0.07, -0.7];
+    bg.setAttribute("position", new THREE.BufferAttribute(new Float32Array([v[0],v[1],v[2], v[3],v[4],v[5], v[6],v[7],v[8], v[0],v[1],v[2], v[6],v[7],v[8], v[9],v[10],v[11]]), 3));
+    bg.setAttribute("color", new THREE.BufferAttribute(new Float32Array([1,1,1, 1,1,1, 0,0,0, 1,1,1, 0,0,0, 0,0,0]), 3));
+    const bm = new THREE.MeshBasicMaterial({ vertexColors: true, color: 0xffe2a0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -7, polygonOffsetUnits: -7 });
+    BEAM = new THREE.InstancedMesh(bg, bm, cars.length + buses.length); BEAM.frustumCulled = false; BEAM.visible = false; scene.add(BEAM); }
   SH = makeBlobShadows(scene, cars.length + buses.length + people.length);
   _on = true;
 }
@@ -110,6 +116,7 @@ export function tickLife(px, pz, show = true) {
   for (const b of boats) b.m.visible = show;
   plane.visible = show;
   if (SH) SH.mesh.visible = show;
+  if (BEAM) { BEAM.visible = show && NIGHT_GLOW.value > 0.05; BEAM.material.opacity = NIGHT_GLOW.value * 0.5; }
   if (!show) return;
 
   // cars + buses
@@ -119,7 +126,7 @@ export function tickLife(px, pz, show = true) {
     const lt = ((c.s % c.ln.len) + c.ln.len) % c.ln.len, ek = Math.max(0.001, Math.min(1, Math.min(lt, c.ln.len - lt) / 30));   // shrink at the lane ends: no popping out of walls
     _s2.setScalar(ek);
     const yaw = Math.atan2(-(nx.z - _p.z), nx.x - _p.x);
-    _q.setFromAxisAngle(_up, yaw); _m.compose(_p, _q, _s2); mesh.setMatrixAt(i, _m);
+    _q.setFromAxisAngle(_up, yaw); _m.compose(_p, _q, _s2); mesh.setMatrixAt(i, _m); BEAM.setMatrixAt(mesh === carMesh ? i : cars.length + i, _m);
     SH.set(mesh === carMesh ? i : cars.length + i, _p.x, _p.z, (mesh === carMesh ? 2.6 : 3.4) * ek, (mesh === carMesh ? 5.4 : 12) * ek, yaw + Math.PI / 2);
   };
   cars.forEach((c, i) => place(carMesh, i, c)); buses.forEach((c, i) => place(busMesh, i, c));
@@ -144,7 +151,7 @@ export function tickLife(px, pz, show = true) {
     part(pm.armL, -0.28, 1.5, moving ? -sw * 0.8 : -0.5 + g); part(pm.armR, 0.28, 1.5, moving ? sw * 0.8 : -0.9 - g);
   });
   for (const k in pm) pm[k].instanceMatrix.needsUpdate = true;
-  SH.done();
+  SH.done(); BEAM.instanceMatrix.needsUpdate = true;
 
   // boats drift in slow ovals
   boats.forEach((b) => {
