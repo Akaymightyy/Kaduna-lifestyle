@@ -26,6 +26,8 @@ import { listPlaces, getPlace, updateHomeEntrance } from "./places/registry.js";
 import { initMissions, getActiveMission, getAllChapters, getDailyMissions, getWeeklyMissions, checkStep, createMissionState, claimDailyReward, claimWeeklyReward, setCelebrateCallback } from "./missions.js";
 import { FURNITURE_CATALOG, CATEGORIES, getItem, calcComfort } from "./furniture.js";
 import { ORIGINS, HOUSE_TIERS, upgradeCost, getRentInfo, payRent, checkRentDue, applyOrigin, getOriginUI } from "./origins.js";
+import { extendHouseTiers, getLuxuryTiers, isLuxuryTier } from "./housing_upgrade.js";
+import { initPhotoMode, enterPhotoMode, exitPhotoMode, isPhotoMode } from "./photo_mode.js";
 import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
 import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
 import { celebrate } from "./celebrate.js";
@@ -807,6 +809,13 @@ function _renderPlaceActions(def) {
   bar.style.display = "none";
 }
 window.placeAction = (eventId) => {
+  // PHOTO MODE (Oct 20): handle here so it works from any place that
+  // declares the photo_mode activity (currently just home, but could be
+  // added to dealership / arena / etc later).
+  if (eventId === "photo_mode") {
+    enterPhotoMode();
+    return;
+  }
   const ap = getActivePlace();
   const spec = ap && rig ? placeSpec(ap.id, eventId, ap.handle, player, (ok) => { if (ok) sendUIEvent(eventId, {}); }) : null;
   if (!spec) { sendUIEvent(eventId, {}); return; }
@@ -3252,6 +3261,28 @@ initAuth((user) => {
     console.log("[dealership] catalog extended with luxury cars");
   } catch (e) {
     console.warn("[dealership] extendCatalog failed:", e.message);
+  }
+  // HOUSING UPGRADE (Oct 20): extend HOUSE_TIERS with luxury tiers
+  // (Tier 7: 5-Bedroom Villa ₦150M, Tier 8: Mega-Mansion ₦500M,
+  // Tier 9: Presidential Estate ₦1.5B). upgradeCost() and the realestate
+  // app pick them up automatically since they use HOUSE_TIERS.find().
+  try {
+    extendHouseTiers(HOUSE_TIERS);
+    console.log("[housing] extended with", getLuxuryTiers().length, "luxury tiers");
+  } catch (e) {
+    console.warn("[housing] extendHouseTiers failed:", e.message);
+  }
+  // PHOTO MODE (Oct 20): let players capture their house / ride / fits for
+  // flexing. Activated by pressing 'P' or via the 📸 button inside homes.
+  // See src/photo_mode.js for full UI.
+  try {
+    initPhotoMode({ canvas: document.getElementById("game") });
+    window.enterPhotoMode = enterPhotoMode;
+    window.exitPhotoMode = exitPhotoMode;
+    window.isPhotoMode = isPhotoMode;
+    console.log("[photo] photo mode ready (press P or call window.enterPhotoMode)");
+  } catch (e) {
+    console.warn("[photo] initPhotoMode failed:", e.message);
   }
   // FEATURE: init billboard/ad system (10 billboards in every district + 10 on the main roads)
   initBillboards(scene);
