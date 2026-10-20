@@ -55,6 +55,7 @@ import { initAreaWorld, tickAreaWorld, setAreaLampsNight, disposeAreaWorld, getR
 // Way is filtered out (already rendered by world.js) to avoid double-render.
 import { fetchKadunaData, buildRealMap } from "./realmap.js";
 import { getSeat, VEHICLE_CATALOG, getVehicle, initVehicles, buyVehicle, getOwned, ownsVehicle, isRiding, getRideSpeed, getRideId, spawnRideVehicle, despawnRideVehicle, tickRideVehicle } from "./vehicles.js";
+import { extendCatalog } from "./dealership_catalog.js";
 import { buildStreetDetail, makeBlobShadows } from "./street.js";
 import { initActivity, startActivity, tickActivity, isBusy, cancelActivity, eatSpec, toiletSpec, sitSpec, funSpec, placeSpec } from "./activity.js";
 import { initWorldChat, toggleWorldChat, closeWorldChat, setChatBlocked, setChatOnline } from "./worldchat.js";
@@ -3241,6 +3242,17 @@ initAuth((user) => {
   initSocial(user.uid, () => {});
   // FEATURE: init the vehicles system (subscribes to owned vehicles from Firebase)
   initVehicles(scene, user.uid, () => {});
+  // KADUNA MOTORS (Oct 20): extend VEHICLE_CATALOG with dealership-only luxury
+  // cars (Lexus RX, Tesla, G-Wagon, Range Rover, etc). This MUST run after
+  // initVehicles so the existing catalog is in place. Idempotent (uses a Set
+  // internally) so safe to call multiple times. buyVehicle / spawnRideVehicle
+  // will then find these cars by id when the player taps Buy in the showroom.
+  try {
+    extendCatalog(VEHICLE_CATALOG, getVehicle);
+    console.log("[dealership] catalog extended with luxury cars");
+  } catch (e) {
+    console.warn("[dealership] extendCatalog failed:", e.message);
+  }
   // FEATURE: init billboard/ad system (10 billboards in every district + 10 on the main roads)
   initBillboards(scene);
   // ---- Init Messages app ----
