@@ -185,6 +185,19 @@
         ".read": "auth != null",
         ".write": "auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'"
       }
+    },
+    "challenges": {
+      ".read": "auth != null",
+      "$challengeId": {
+        ".read": "auth != null",
+        ".write": "auth != null && (!data.exists() || data.child('hostUid').val() === auth.uid || (data.child('status').val() === 'open' && newData.child('status').val() === 'accepted'))"
+      }
+    },
+    "matches": {
+      "$matchId": {
+        ".read": "auth != null && data.child('players/' + auth.uid).val() != null",
+        ".write": "auth != null && (!data.exists() || data.child('players/' + auth.uid).val() != null)"
+      }
     }
   }
 }
