@@ -348,6 +348,7 @@ const PLACE_DEFS = [
       { id: "tv", label: "Watch TV (fun +20)", desc: "Relax and watch TV" },
       { id: "shower", label: "Shower (hygiene +30)", desc: "Freshen up" },
       { id: "toilet", label: "Use toilet (bladder +40)", desc: "Relieve yourself" },
+      { id: "photo_mode", label: "📸 Photo Mode", desc: "Hide UI + capture a screenshot for flexing" },
     ],
   },
   {
