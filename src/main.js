@@ -28,6 +28,8 @@ import { FURNITURE_CATALOG, CATEGORIES, getItem, calcComfort } from "./furniture
 import { ORIGINS, HOUSE_TIERS, upgradeCost, getRentInfo, payRent, checkRentDue, applyOrigin, getOriginUI } from "./origins.js";
 import { extendHouseTiers, getLuxuryTiers, isLuxuryTier } from "./housing_upgrade.js";
 import { initPhotoMode, enterPhotoMode, exitPhotoMode, isPhotoMode } from "./photo_mode.js";
+import { initChallengeSystem, subscribeToMyChallenges, getMyActiveMatches } from "./challenge_system.js";
+import { initChallengeUI, openMatchForChallenge } from "./challenge_ui.js";
 import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
 import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
 import { celebrate } from "./celebrate.js";
@@ -3283,6 +3285,42 @@ initAuth((user) => {
     console.log("[photo] photo mode ready (press P or call window.enterPhotoMode)");
   } catch (e) {
     console.warn("[photo] initPhotoMode failed:", e.message);
+  }
+  // CHALLENGE ANYONE / WAGER SYSTEM (Oct 20): lets a player open a wager
+  // challenge that any online player can accept. Stakes go into escrow,
+  // winner takes 95% of the pot. Start with Capital Dice (first to 100).
+  // See src/challenge_system.js (Firebase data layer) +
+  //     src/capital_dice.js (game logic) +
+  //     src/challenge_ui.js (HUD button + creator + match screen).
+  let _activeMatchId = null;
+  try {
+    initChallengeSystem({
+      db, auth,
+      getUserId: () => getMyUid(),
+      getUserName: () => getMyName() || "Player",
+      getGameState: () => game,
+      toast,
+    });
+    initChallengeUI({
+      game, toast,
+      getMyUid: () => getMyUid(),
+      getMyName: () => getMyName() || "Player",
+    });
+    // Subscribe to MY challenges so when an opponent accepts, the match
+    // screen auto-opens for me too.
+    subscribeToMyChallenges((mine) => {
+      for (const ch of mine) {
+        if (ch.status === "accepted" && ch.matchId && !_activeMatchId) {
+          // Open the match screen — this fires for both the host and the
+          // accepter when the challenge transitions to "accepted".
+          _activeMatchId = ch.matchId;
+          openMatchForChallenge(ch);
+        }
+      }
+    });
+    console.log("[challenge] challenge system ready (🎲 button visible in HUD)");
+  } catch (e) {
+    console.warn("[challenge] initChallengeSystem failed:", e.message);
   }
   // FEATURE: init billboard/ad system (10 billboards in every district + 10 on the main roads)
   initBillboards(scene);

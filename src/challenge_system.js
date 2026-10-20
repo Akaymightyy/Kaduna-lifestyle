@@ -1,0 +1,320 @@
+// src/challenge_system.js — Challenge Anyone / Wager system (MyAbujaLife-style).
+//
+// Lets a player OPEN a wager challenge that any online player can ACCEPT.
+// Both stakes go into escrow. Winner takes the pot minus a 5% fee.
+//
+// Firebase data model:
+//   challenges/{challengeId} = {
+//     hostUid, hostName, game, stake,
+//     status: "open" | "accepted" | "cancelled" | "completed",
+//     opponentUid, opponentName,
+//     matchId,                // set when accepted → match starts
+//     winnerUid,              // set when completed
+//     createdAt, acceptedAt, completedAt,
+//   }
+//   matches/{matchId} = {
+//     challengeId, game,
+//     players: { uid1: { name, score }, uid2: { name, score } },
+//     currentPlayer: uid,        // whose turn
+//     turnScore: number,         // current turn's accumulated points
+//     lastRoll: number,
+//     target: 100,
+//     winnerUid: null,
+//     createdAt, updatedAt,
+//   }
+//
+// Wire-up (in main.js):
+//   import { initChallengeSystem, getOpenChallenges, openChallenge,
+//            acceptChallenge, cancelChallenge, subscribeToChallenges,
+//            subscribeToMatch, pushMatchUpdate, resignMatch } from "./challenge_system.js";
+//   initChallengeSystem({ db, auth, getUserId, getUserName, getGameState, toast });
+
+import { ref, push, set, update, get, onValue, remove, serverTimestamp, onChildAdded, onChildRemoved } from "firebase/database";
+
+let _db = null, _auth = null;
+let _getUserId = () => null;
+let _getUserName = () => "Player";
+let _getGameState = () => null;
+let _toast = () => {};
+
+export function initChallengeSystem({ db, auth, getUserId, getUserName, getGameState, toast }) {
+  _db = db;
+  _auth = auth;
+  _getUserId = getUserId;
+  _getUserName = getUserName;
+  _getGameState = getGameState;
+  _toast = toast;
+}
+
+export const HOST_FEE_PCT = 0.05;   // 5% house cut
+
+// ---- Open a challenge ----
+// Player A picks a game + stake. Their stake is deducted immediately
+// (escrow). If they cancel before anyone accepts, they get refunded.
+// Returns the challengeId on success, null on failure.
+export async function openChallenge({ game, stake, hostName }) {
+  if (!_db) { _toast("Challenge system not ready"); return null; }
+  const uid = _getUserId();
+  if (!uid) { _toast("Sign in first"); return null; }
+  const gs = _getGameState();
+  if (!gs) { _toast("Game state not ready"); return null; }
+  if (!stake || stake < 1000) { _toast("Stake must be at least ₦1,000"); return null; }
+  if (gs.state.money < stake) { _toast("Not enough money — need ₦" + stake.toLocaleString()); return null; }
+  // Escrow: deduct the stake from the host now
+  gs.state.money -= stake;
+  try {
+    await update(ref(_db, "economy/" + uid), { balance: gs.state.money });
+  } catch (e) {
+    gs.state.money += stake;  // rollback
+    _toast("Escrow failed: " + e.message);
+    return null;
+  }
+  // Push the challenge
+  const challengeRef = push(ref(_db, "challenges"));
+  const challengeId = challengeRef.key;
+  const challenge = {
+    hostUid: uid,
+    hostName: String(hostName || _getUserName() || "Player").slice(0, 30),
+    game,
+    stake,
+    status: "open",
+    opponentUid: null,
+    opponentName: null,
+    matchId: null,
+    winnerUid: null,
+    createdAt: Date.now(),
+    acceptedAt: null,
+    completedAt: null,
+  };
+  try {
+    await set(challengeRef, challenge);
+    _toast("🎲 Challenge open — waiting for an opponent...");
+    return challengeId;
+  } catch (e) {
+    // Rollback escrow if push failed
+    gs.state.money += stake;
+    await update(ref(_db, "economy/" + uid), { balance: gs.state.money });
+    _toast("Could not open challenge: " + e.message);
+    return null;
+  }
+}
+
+// ---- Accept a challenge ----
+// Player B accepts. Their stake is deducted (escrow). The match starts
+// immediately for both players. Returns matchId on success.
+export async function acceptChallenge(challengeId) {
+  if (!_db) { _toast("Challenge system not ready"); return null; }
+  const uid = _getUserId();
+  if (!uid) { _toast("Sign in first"); return null; }
+  // Read the challenge first
+  const snap = await get(ref(_db, "challenges/" + challengeId));
+  const ch = snap.val();
+  if (!ch) { _toast("Challenge not found"); return null; }
+  if (ch.status !== "open") { _toast("Challenge no longer open"); return null; }
+  if (ch.hostUid === uid) { _toast("Can't accept your own challenge"); return null; }
+  const gs = _getGameState();
+  if (gs.state.money < ch.stake) { _toast("Not enough money — need ₦" + ch.stake.toLocaleString()); return null; }
+  // Escrow: deduct stake from accepter
+  gs.state.money -= ch.stake;
+  try {
+    await update(ref(_db, "economy/" + uid), { balance: gs.state.money });
+  } catch (e) {
+    gs.state.money += ch.stake;
+    _toast("Escrow failed: " + e.message);
+    return null;
+  }
+  // Try to atomically claim the challenge (only one accepter wins)
+  try {
+    const updates = {
+      status: "accepted",
+      opponentUid: uid,
+      opponentName: String(_getUserName() || "Player").slice(0, 30),
+      acceptedAt: Date.now(),
+    };
+    await update(ref(_db, "challenges/" + challengeId), updates);
+  } catch (e) {
+    // Couldn't claim — refund
+    gs.state.money += ch.stake;
+    await update(ref(_db, "economy/" + uid), { balance: gs.state.money });
+    _toast("Could not accept: " + e.message);
+    return null;
+  }
+  // Create the match
+  const matchRef = push(ref(_db, "matches"));
+  const matchId = matchRef.key;
+  const match = {
+    challengeId,
+    game: ch.game,
+    players: {
+      [ch.hostUid]: { name: ch.hostName, score: 0 },
+      [uid]: { name: _getUserName() || "Player", score: 0 },
+    },
+    currentPlayer: ch.hostUid,   // host starts
+    turnScore: 0,
+    lastRoll: 0,
+    target: 100,
+    winnerUid: null,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  try {
+    await set(matchRef, match);
+    // Link the match back to the challenge
+    await update(ref(_db, "challenges/" + challengeId), { matchId });
+    _toast("🎲 Match starting! Good luck.");
+    return matchId;
+  } catch (e) {
+    _toast("Could not create match: " + e.message);
+    return null;
+  }
+}
+
+// ---- Cancel an open challenge (host only) ----
+// Refunds the host's stake. Only works if status === "open" (no opponent yet).
+export async function cancelChallenge(challengeId) {
+  if (!_db) return false;
+  const uid = _getUserId();
+  const snap = await get(ref(_db, "challenges/" + challengeId));
+  const ch = snap.val();
+  if (!ch) { _toast("Challenge not found"); return false; }
+  if (ch.hostUid !== uid) { _toast("Only the host can cancel"); return false; }
+  if (ch.status !== "open") { _toast("Challenge already accepted — play or resign instead"); return false; }
+  // Refund the host
+  const gs = _getGameState();
+  gs.state.money += ch.stake;
+  try {
+    await update(ref(_db, "economy/" + uid), { balance: gs.state.money });
+    await update(ref(_db, "challenges/" + challengeId), { status: "cancelled", completedAt: Date.now() });
+    _toast("Challenge cancelled — ₦" + ch.stake.toLocaleString() + " refunded");
+    return true;
+  } catch (e) {
+    gs.state.money -= ch.stake;  // rollback refund
+    _toast("Cancel failed: " + e.message);
+    return false;
+  }
+}
+
+// ---- Resign from an active match (the opponent wins) ----
+export async function resignMatch(matchId) {
+  if (!_db) return false;
+  const uid = _getUserId();
+  const snap = await get(ref(_db, "matches/" + matchId));
+  const m = snap.val();
+  if (!m) { _toast("Match not found"); return false; }
+  if (m.winnerUid) { _toast("Match already over"); return false; }
+  if (!m.players[uid]) { _toast("You're not in this match"); return false; }
+  // Find the other player → they win
+  const otherUid = Object.keys(m.players).find(k => k !== uid);
+  if (!otherUid) { _toast("Can't determine winner"); return false; }
+  return _resolveMatch(matchId, otherUid);
+}
+
+// ---- Resolve a match (internal) ----
+// Pays out the pot (minus 5% fee) to the winner. Both players' stakes
+// were already in escrow. The loser gets nothing.
+async function _resolveMatch(matchId, winnerUid) {
+  const matchSnap = await get(ref(_db, "matches/" + matchId));
+  const m = matchSnap.val();
+  if (!m || m.winnerUid) return false;  // already resolved
+  // Get the challenge to find the stake
+  const chSnap = await get(ref(_db, "challenges/" + m.challengeId));
+  const ch = chSnap.val();
+  if (!ch) return false;
+  const pot = ch.stake * 2;
+  const fee = Math.round(pot * HOST_FEE_PCT);
+  const payout = pot - fee;
+  // Credit the winner
+  const gs = _getGameState();
+  if (winnerUid === _getUserId()) {
+    gs.state.money += payout;
+    try {
+      await update(ref(_db, "economy/" + winnerUid), { balance: gs.state.money });
+    } catch (e) { /* still mark match complete */ }
+    _toast("🏆 You won ₦" + payout.toLocaleString() + "!");
+  }
+  // Mark match + challenge as completed
+  try {
+    await update(ref(_db, "matches/" + matchId), {
+      winnerUid,
+      completedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    await update(ref(_db, "challenges/" + m.challengeId), {
+      status: "completed",
+      winnerUid,
+      completedAt: Date.now(),
+    });
+  } catch (e) { /* ignore */ }
+  return true;
+}
+
+// Public wrapper for game logic to call when a winner is determined
+// (e.g. when a player's score reaches 100 in Capital Dice).
+export async function declareWinner(matchId, winnerUid) {
+  return _resolveMatch(matchId, winnerUid);
+}
+
+// ---- Push a match update (e.g. roll dice, bank score, switch turn) ----
+// The caller (capital_dice.js logic) computes the new state, then this
+// pushes it atomically.
+export async function pushMatchUpdate(matchId, patch) {
+  if (!_db) return false;
+  try {
+    await update(ref(_db, "matches/" + matchId), { ...patch, updatedAt: Date.now() });
+    return true;
+  } catch (e) {
+    _toast("Update failed: " + e.message);
+    return false;
+  }
+}
+
+// ---- Subscribe to ALL open challenges ----
+// Used by main.js to show a toast when a new challenge appears.
+// Returns an unsubscribe function.
+export function subscribeToChallenges(callback) {
+  if (!_db) return () => {};
+  // Listen for new challenges (onChildAdded fires for each existing + new ones)
+  const unsub = onChildAdded(ref(_db, "challenges"), (snap) => {
+    const ch = snap.val();
+    if (!ch) return;
+    if (ch.status === "open" && ch.hostUid !== _getUserId()) {
+      callback(ch, snap.key);
+    }
+  });
+  return unsub;
+}
+
+// ---- Subscribe to a specific match (live updates) ----
+// Used by challenge_ui.js to update the match screen as the opponent plays.
+export function subscribeToMatch(matchId, callback) {
+  if (!_db) return () => {};
+  const unsub = onValue(ref(_db, "matches/" + matchId), (snap) => {
+    callback(snap.val());
+  });
+  return unsub;
+}
+
+// ---- Subscribe to challenges that I hosted (for accept/cancel notifications) ----
+// Used to know when MY challenge gets accepted → switch to match screen.
+export function subscribeToMyChallenges(callback) {
+  if (!_db) return () => {};
+  // Listen to all challenges, filter to mine client-side
+  const unsub = onValue(ref(_db, "challenges"), (snap) => {
+    const all = snap.val() || {};
+    const mine = Object.entries(all)
+      .filter(([id, ch]) => ch.hostUid === _getUserId() || ch.opponentUid === _getUserId())
+      .map(([id, ch]) => ({ id, ...ch }));
+    callback(mine);
+  });
+  return unsub;
+}
+
+// ---- Get active matches for the current player ----
+export async function getMyActiveMatches() {
+  if (!_db) return [];
+  const snap = await get(ref(_db, "matches"));
+  const all = snap.val() || {};
+  return Object.entries(all)
+    .filter(([id, m]) => m.players[_getUserId()] && !m.winnerUid)
+    .map(([id, m]) => ({ id, ...m }));
+}
