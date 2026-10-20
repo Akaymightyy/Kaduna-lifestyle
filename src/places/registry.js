@@ -24,6 +24,7 @@ import * as church_mod from "./church.js";
 import * as barber_mod from "./barber.js";
 import * as nightclub_mod from "./nightclub.js";
 import * as home_mod from "./home.js";
+import * as dealership_mod from "./dealership.js";
 
 const MODULES = {
   central_market: central_market_mod,
@@ -40,6 +41,7 @@ const MODULES = {
   barber: barber_mod,
   nightclub: nightclub_mod,
   home: home_mod,
+  dealership: dealership_mod,
 };
 
 const PLACE_DEFS = [
@@ -346,6 +348,22 @@ const PLACE_DEFS = [
       { id: "tv", label: "Watch TV (fun +20)", desc: "Relax and watch TV" },
       { id: "shower", label: "Shower (hygiene +30)", desc: "Freshen up" },
       { id: "toilet", label: "Use toilet (bladder +40)", desc: "Relieve yourself" },
+    ],
+  },
+  {
+    id: "dealership",
+    name: "Kaduna Motors",
+    type: "interior",
+    worldX: 60, worldZ: 38,
+    entranceX: 60, entranceZ: 35,
+    entranceFacing: Math.PI,
+    minimapIcon: "🚗",
+    minimapColor: 0xf2b134,
+    hours: { open: 8, close: 20 },
+    ambientSound: null,
+    npcList: [],
+    activities: [
+      { id: "browse_cars", label: "Browse cars", desc: "Walk the showroom floor and tap any car to view" },
     ],
   },
 ];
