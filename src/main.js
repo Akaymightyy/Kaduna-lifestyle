@@ -32,6 +32,8 @@ import { initChallengeSystem, subscribeToMyChallenges, getMyActiveMatches } from
 import { initChallengeUI, openMatchForChallenge } from "./challenge_ui.js";
 import { initTennisUI } from "./tennis_ui.js";
 import { initPenaltyUI } from "./penalty_shootout_ui.js";
+import { initSpyMissions, getSpyMissions, getMyUnlockTag } from "./spy_missions.js";
+import { initSpyMissionsUI, renderSpyMissionsApp, openMission as openSpyMission } from "./spy_mission_ui.js";
 import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
 import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
 import { celebrate } from "./celebrate.js";
@@ -884,10 +886,11 @@ function _showPhoneApp(appId) {
       {id:"invest",icon:"📈",label:"Invest"},
       {id:"nepa",icon:"⚡",label:"NEPA"},
       {id:"company",icon:"🏢",label:"Company"},
+      {id:"spymissions",icon:"🕵️",label:"Spy Ops"},
       {id:"settings",icon:"⚙️",label:"Settings"}
     ];
     if(isAdmin()) apps.push({id:"admin",icon:"🔐",label:"Admin"});
-    const COL={food:["#f59e0b","#f97316"],jobs:["#8b5cf6","#6366f1"],bank:["#3b82f6","#2563eb"],ride:["#10b981","#059669"],cars:["#6366f1","#4f46e5"],map:["#06b6d4","#0891b2"],daily:["#ec4899","#db2777"],health:["#ef4444","#dc2626"],richlist:["#f59e0b","#d97706"],profile:["#6366f1","#4f46e5"],events:["#d946ef","#c026d3"],news:["#64748b","#475569"],boutique:["#d946ef","#a855f7"],myoutfits:["#f97316","#ea580c"],wardrobe:["#14b8a6","#0d9488"],contacts:["#6366f1","#818cf8"],wallet:["#f59e0b","#d97706"],tunes:["#a855f7","#9333ea"],gallery:["#06b6d4","#0891b2"],invest:["#10b981","#059669"],settings:["#64748b","#475569"],admin:["#ef4444","#b91c1c"],hunt:["#f2b134","#d97706"],missions:["#dc2626","#b91c1c"],realestate:["#16a34a","#15803d"],homestore:["#ea580c","#c2410c"],storage:["#0891b2","#0e7490"],messages:["#22c55e","#16a34a"],nepa:["#facc15","#ca8a04"],company:["#1e40af","#1e3a8a"]};
+    const COL={food:["#f59e0b","#f97316"],jobs:["#8b5cf6","#6366f1"],bank:["#3b82f6","#2563eb"],ride:["#10b981","#059669"],cars:["#6366f1","#4f46e5"],map:["#06b6d4","#0891b2"],daily:["#ec4899","#db2777"],health:["#ef4444","#dc2626"],richlist:["#f59e0b","#d97706"],profile:["#6366f1","#4f46e5"],events:["#d946ef","#c026d3"],news:["#64748b","#475569"],boutique:["#d946ef","#a855f7"],myoutfits:["#f97316","#ea580c"],wardrobe:["#14b8a6","#0d9488"],contacts:["#6366f1","#818cf8"],wallet:["#f59e0b","#d97706"],tunes:["#a855f7","#9333ea"],gallery:["#06b6d4","#0891b2"],invest:["#10b981","#059669"],settings:["#64748b","#475569"],admin:["#ef4444","#b91c1c"],hunt:["#f2b134","#d97706"],missions:["#dc2626","#b91c1c"],realestate:["#16a34a","#15803d"],homestore:["#ea580c","#c2410c"],storage:["#0891b2","#0e7490"],messages:["#22c55e","#16a34a"],nepa:["#facc15","#ca8a04"],company:["#1e40af","#1e3a8a"],spymissions:["#0a0a0a","#f2b134"]};
     const now=new Date(), hh=String(now.getHours()).padStart(2,"0"), mm=String(now.getMinutes()).padStart(2,"0");
     const dateTxt=now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})+" · Kaduna";
     c.innerHTML='<div class="ph-home-clock">'+hh+':'+mm+'</div><div class="ph-home-date">'+dateTxt+'</div><div class="ph-home-bal"><span>₦'+(game.state.money||0).toLocaleString()+'</span></div>'+
@@ -1890,6 +1893,15 @@ function _showPhoneApp(appId) {
         '</div>'+
         '<button onclick="window._sellCompany()" style="width:100%;background:#e11d48;color:#fff;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:12px;font-weight:600;">Sell company (recover 50% of start cost)</button>'+backBtn;
     }
+    return;
+  }
+  if(appId==="spymissions"){
+    // 🕵️ Spy Missions phone app — calls into spy_mission_ui.js
+    c.innerHTML = renderSpyMissionsApp(c);
+    window._spyOpenMission = (id) => {
+      closePhone();
+      openSpyMission(id);
+    };
     return;
   }
   if(appId==="admin"){
@@ -3322,6 +3334,27 @@ initAuth((user) => {
       getMyUid: () => getMyUid(),
       getMyName: () => getMyName() || "Player",
     });
+    // SPY MISSIONS (Oct 20): Capital Heat-style story-driven missions with
+    // 6 chapters, cutscenes, code-breaking minigame, star ratings, big
+    // money rewards (₦500k → ₦10M per mission). Total payout: ~₦27M.
+    // See src/spy_missions.js (data + Firebase progress) +
+    //     src/spy_minigame.js (Code Breaker Simon-Says) +
+    //     src/spy_mission_ui.js (phone app + cutscene + briefing + minigame + results).
+    try {
+      initSpyMissions({
+        db, getUserId: () => getMyUid(),
+        getGameState: () => game, toast,
+        onUpdate: () => {
+          // Re-render the spymissions app if it's currently open
+          if (_showingApp === "spymissions") showPhoneApp("spymissions");
+        },
+      });
+      initSpyMissionsUI({ game, toast });
+      window._spyOpenMission = (id) => openSpyMission(id);
+      console.log("[spy] initialised with", getSpyMissions().length, "missions");
+    } catch (e) {
+      console.warn("[spy] initSpyMissions failed:", e.message);
+    }
     // Subscribe to MY challenges so when an opponent accepts, the match
     // screen auto-opens for me too.
     subscribeToMyChallenges((mine) => {
