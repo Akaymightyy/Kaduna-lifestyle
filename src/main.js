@@ -10,6 +10,7 @@ import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAIL
 import { createGameState } from "./needs.js";
 import { auth, db } from "./firebase.js";
 import { initAuth, showAuthModal, wireAuthUI, logout, isAuthed } from "./auth.js";
+import { driveStep } from "./drive.js";
 import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition, getRemotePlayers, setMyPlace, setMyLook, setBlockedUids, setMyRiding, setMyPassengerOf, getPassengerUids, getRemotePlayerData } from "./multiplayer.js";
 import { startRide, travelToZone, travelToPlace, getDestinations } from "./travel.js";
 import { subscribeRichList } from "./economy.js";
@@ -32,7 +33,7 @@ import { initSfx, sfx, setMuted as setSfxMuted, isMuted as isSfxMuted } from "./
 import { initParticles, emitConfetti, emitDust, tickParticles } from "./particles.js";
 import { initRoadEvents, tickRoadEvents, getCurrentWeather as getRoadWeather, resetRoadEvents, trafficSpeedMultiplierAt } from "./road_events.js";
 import { addScenery, SCENERY_LABELS } from "./scenery.js";
-import { initLife, tickLife } from "./life.js";
+import { initLife, tickLife , setLifePlayerVehicle } from "./life.js";
 import { initLiveMap, openLiveMap, closeLiveMap, isLiveMapOn, liveMapFrame } from "./livemap.js";
 import { perfFrameStart, perfBeforeRender, perfAfterRender } from "./perf.js";
 import { initGraphics, updateSky, nightAmount, tickGraphics, tickShadows, applyQuality, autoDetectQuality, getQuality, QUALITY_PRESETS } from "./graphics.js";
@@ -53,7 +54,7 @@ import { initAreaWorld, tickAreaWorld, setAreaLampsNight, disposeAreaWorld, getR
 // (a static OSM-derived file shipped in public/data/). The main Ahmadu Bello
 // Way is filtered out (already rendered by world.js) to avoid double-render.
 import { fetchKadunaData, buildRealMap } from "./realmap.js";
-import { VEHICLE_CATALOG, getVehicle, initVehicles, buyVehicle, getOwned, ownsVehicle, isRiding, getRideSpeed, getRideId, spawnRideVehicle, despawnRideVehicle, tickRideVehicle } from "./vehicles.js";
+import { getSeat, VEHICLE_CATALOG, getVehicle, initVehicles, buyVehicle, getOwned, ownsVehicle, isRiding, getRideSpeed, getRideId, spawnRideVehicle, despawnRideVehicle, tickRideVehicle } from "./vehicles.js";
 import { buildStreetDetail, makeBlobShadows } from "./street.js";
 import { initActivity, startActivity, tickActivity, isBusy, cancelActivity, eatSpec, toiletSpec, sitSpec, funSpec, placeSpec } from "./activity.js";
 import { initWorldChat, toggleWorldChat, closeWorldChat, setChatBlocked, setChatOnline } from "./worldchat.js";
@@ -167,30 +168,30 @@ function _ensureVehicleControls() {
     "position:fixed;inset:0;z-index:28;pointer-events:none;display:none;";
   // Accelerate (big green button, bottom-right)
   const accelBtn = document.createElement("button");
-  accelBtn.innerHTML = "▲";
+  accelBtn.innerHTML = '<div style="line-height:1">▲</div><div style="font:800 10px Poppins,sans-serif;margin-top:2px">GAS</div>';
   accelBtn.style.cssText = "position:absolute;right:20px;bottom:calc(130px + env(safe-area-inset-bottom));" +
-    "width:72px;height:72px;border-radius:50%;background:#4ade80;color:#000;border:3px solid #fff;" +
+    "width:72px;height:72px;border-radius:50%;background:#4ade80;color:#000;border:3px solid #fff;display:flex;flex-direction:column;align-items:center;justify-content:center;" +
     "font-size:32px;font-weight:700;cursor:pointer;pointer-events:auto;touch-action:none;" +
     "box-shadow:0 4px 12px rgba(0,0,0,.4);user-select:none;-webkit-user-select:none;";
   // Brake/reverse (red button, left of accelerate)
   const brakeBtn = document.createElement("button");
-  brakeBtn.innerHTML = "▼";
-  brakeBtn.style.cssText = "position:absolute;right:100px;bottom:calc(130px + env(safe-area-inset-bottom));" +
-    "width:56px;height:56px;border-radius:50%;background:#e11d48;color:#fff;border:3px solid #fff;" +
+  brakeBtn.innerHTML = '<div style="line-height:1">▼</div><div style="font:800 9px Poppins,sans-serif">BRAKE</div>';
+  brakeBtn.style.cssText = "position:absolute;right:104px;bottom:calc(130px + env(safe-area-inset-bottom));" +
+    "width:56px;height:56px;border-radius:50%;background:#e11d48;color:#fff;border:3px solid #fff;display:flex;flex-direction:column;align-items:center;justify-content:center;" +
     "font-size:24px;font-weight:700;cursor:pointer;pointer-events:auto;touch-action:none;" +
     "box-shadow:0 4px 12px rgba(0,0,0,.4);user-select:none;-webkit-user-select:none;";
   // Steer left (bottom-center-left)
   const leftBtn = document.createElement("button");
-  leftBtn.innerHTML = "◀";
-  leftBtn.style.cssText = "position:absolute;left:50%;transform:translateX(-80px);bottom:calc(130px + env(safe-area-inset-bottom));" +
-    "width:56px;height:56px;border-radius:50%;background:rgba(15,77,58,.92);color:#fff;border:2px solid rgba(255,255,255,.3);" +
+  leftBtn.innerHTML = '<div style="line-height:1">◀</div><div style="font:800 9px Poppins,sans-serif">LEFT</div>';
+  leftBtn.style.cssText = "position:absolute;left:112px;bottom:calc(130px + env(safe-area-inset-bottom));" +
+    "width:56px;height:56px;border-radius:50%;background:rgba(15,77,58,.92);color:#fff;border:2px solid rgba(255,255,255,.3);display:flex;flex-direction:column;align-items:center;justify-content:center;" +
     "font-size:22px;font-weight:700;cursor:pointer;pointer-events:auto;touch-action:none;" +
     "box-shadow:0 4px 12px rgba(0,0,0,.4);user-select:none;-webkit-user-select:none;";
   // Steer right (bottom-center-right)
   const rightBtn = document.createElement("button");
-  rightBtn.innerHTML = "▶";
-  rightBtn.style.cssText = "position:absolute;left:50%;transform:translateX(24px);bottom:calc(130px + env(safe-area-inset-bottom));" +
-    "width:56px;height:56px;border-radius:50%;background:rgba(15,77,58,.92);color:#fff;border:2px solid rgba(255,255,255,.3);" +
+  rightBtn.innerHTML = '<div style="line-height:1">▶</div><div style="font:800 9px Poppins,sans-serif">RIGHT</div>';
+  rightBtn.style.cssText = "position:absolute;left:176px;bottom:calc(130px + env(safe-area-inset-bottom));" +
+    "width:56px;height:56px;border-radius:50%;background:rgba(15,77,58,.92);color:#fff;border:2px solid rgba(255,255,255,.3);display:flex;flex-direction:column;align-items:center;justify-content:center;" +
     "font-size:22px;font-weight:700;cursor:pointer;pointer-events:auto;touch-action:none;" +
     "box-shadow:0 4px 12px rgba(0,0,0,.4);user-select:none;-webkit-user-select:none;";
   // Wire up pointer events for each button
@@ -3830,32 +3831,13 @@ function _frame() {
     if (k["s"] || k["arrowdown"]) throttle -= 1;
     if (k["a"] || k["arrowleft"]) steer -= 1;
     if (k["d"] || k["arrowright"]) steer += 1;
-    steer = Math.max(-1, Math.min(1, steer));
-    throttle = Math.max(-1, Math.min(1, throttle));
-    // Acceleration: throttle sets target speed, ramp is gradual (vehicle feel)
-    const target = throttle * maxVehSpd;
-    player.speed += (target - player.speed) * (1 - Math.exp(-dt * 3));
-    // BUGFIX: steering rate was 2.8 (too high — car "swung" instead of drove).
-    // Now 1.2 rad/s, scaled by speed factor so turns are wider at high speed
-    // (like a real car) and tighter at low speed. Feels like DRIVING not swinging.
-    if (Math.abs(player.speed) > 0.3) {
-      const speedFactor = Math.min(1, Math.abs(player.speed) / maxVehSpd);
-      const steerRate = 1.2;
-      // FIX (Oct 19): user reported "control buttons for vehicles are just
-      // like opposites of the direction" — pressing right made the car turn
-      // left. Root cause: with our forward vector `(-sin(h), -cos(h))`,
-      // increasing `h` rotates COUNTER-clockwise (west), so steer=+1 (right
-      // button) was actually turning left. Flipped the sign so:
-      //   - right button / 'd' / joy-stick-right  → heading decreases → turns east (right) ✓
-      //   - left button / 'a' / joystick-left    → heading increases → turns west (left)  ✓
-      // Reverse gear keeps the same wheel → front swings opposite direction
-      // (just like a real car).
-      player.heading -= steer * steerRate * dt * (player.speed > 0 ? 1 : -1) * (0.4 + speedFactor * 0.6);
+    // ONE driving rule for car, model and camera (drive.js): forward = (sin h, cos h), right button turns right.
+    driveStep(player, { steer, throttle }, dt, maxVehSpd);
+    // camera swings round behind the vehicle while it moves (like a real driving game)
+    if (player.speed > 0.8) {
+      let dy = (player.heading + Math.PI) - ctl.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      ctl.yaw += dy * (1 - Math.exp(-dt * 1.8));
     }
-    // Move forward along heading (not camera-relative)
-    const fx = -Math.sin(player.heading), fz = -Math.cos(player.heading);
-    player.pos.x += fx * player.speed * dt;
-    player.pos.z += fz * player.speed * dt;
   } else {
     // NORMAL WALKING (existing camera-relative control scheme)
     const it = ctl.intent();
@@ -3896,6 +3878,8 @@ function _frame() {
 
   // Hide traffic when inside a place (fixes "cars inside buildings" bug)
   traffic.setVisible?.(!active);
+  if (traffic.setPlayerVehicle) traffic.setPlayerVehicle(player.pos.x, player.pos.z, isRiding());
+  setLifePlayerVehicle(player.pos.x, player.pos.z, isRiding());
   if (!active) traffic.update(now);
   if (!active) npcs.update(dt, now, player.pos.x, player.pos.z);
   hitCool -= dt;
@@ -3914,7 +3898,15 @@ function _frame() {
     // FEATURE: hide the player's character model when riding a vehicle.
     // The vehicle mesh IS the visual representation — without this, the
     // player's feet + legs clip through the vehicle body.
-    rig.group.visible = !isRiding();
+    const _seat = isRiding() ? (window.__dbgSeat || getSeat(getRideId())) : null;
+    rig.group.visible = !isRiding() || !!_seat;       // open vehicles (keke, okada, bicycle): the driver sits inside and is seen
+    if (_seat && !active) {
+      const sh = Math.sin(player.heading), ch = Math.cos(player.heading);
+      rig.group.position.x = player.pos.x + sh * _seat.f + ch * _seat.s;
+      rig.group.position.z = player.pos.z + ch * _seat.f - sh * _seat.s;
+      rig.group.position.y = _seat.y - 0.55;
+      if (!rig.animate.isEmoting || !rig.animate.isEmoting()) rig.animate.emote("sit", 30);
+    }
     // ---- Footstep dust + sound (Oct 19) ----
     if (player.speed > 0.05 && !isRiding() && !active) {
       _stepT = (_stepT || 0) - dt;
@@ -4105,6 +4097,6 @@ Promise.all([loadPlayer(manager, scene, game.state.look), addCity(scene, world, 
   
   frame();
   $("loading").classList.add("done");
-  window.__dbg = { player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig };
+  window.__dbg = { ride: (id) => { initVehicles(scene, null, () => {}); return spawnRideVehicle(id, player.pos, player.heading, toast); }, player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig };
   window.__ready = true;
 }).catch((e) => showError("Could not load the game: " + e.message));

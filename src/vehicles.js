@@ -14,27 +14,31 @@ import { ref, get, set, update, onValue } from "firebase/database";
 
 // ---- Catalog ----
 // glbPath = path to a real 3D model (loaded lazily via GLTFLoader on first ride)
-// glbScale = uniform scale multiplier (some models are too big/small)
-// glbRotY = Y-axis rotation offset (some models face a different direction)
-// glbY = Y-axis position offset (some models have origin at feet, others at center)
+// fit = how to stand the model on the ground, centred, facing +X (the way every built-in car faces):
+//   s = scale, cx/cz = where the model's centre is, minY = lowest point, rotY = turn needed so its FRONT points to +X,
+//   hide = junk parts to hide. Measured from the real files (the bus was 2 m long and half under the road, the keke had
+//   a big flat disc under it, the jeep's pivot was 0.3 m off-centre, the Ferrari's nose points to -Z).
 export const VEHICLE_CATALOG = [
-  { id: "okada",   name: "Okada (Motorcycle)",  emoji: "🏍️",  price: 15000,  speed: 5.5, desc: "Fast + cheap. Zips through traffic." },
-  { id: "keke",    name: "Keke Napep",           emoji: "🛺",   price: 25000,  speed: 4.0, desc: "The Kaduna classic. Steady + reliable.",
-    glbPath: "/models/vehicles/keke_napep.glb", glbScale: 1.0, glbRotY: 0, glbY: 0 },
-  { id: "bicycle", name: "Bicycle",              emoji: "🚲",   price: 8000,   speed: 3.0, desc: "Eco-friendly. No fuel needed." },
+  { id: "okada", seat: { f: 0.1, y: 0.45, s: 0 },   name: "Okada (Motorcycle)",  emoji: "🏍️",  price: 15000,  speed: 5.5, desc: "Fast + cheap. Zips through traffic." },
+  { id: "keke", seat: { f: 0.65, y: 0.5, s: 0 },    name: "Keke Napep",           emoji: "🛺",   price: 25000,  speed: 4.0, desc: "The Kaduna classic. Steady + reliable.",
+    glbPath: "/models/vehicles/keke_napep.glb", fit: { s: 1.0, cx: 0.15, cz: 0.01, minY: 0.11, rotY: 0, hide: ["Object_89"] } },
+  { id: "bicycle", seat: { f: 0, y: 0.55, s: 0 }, name: "Bicycle",              emoji: "🚲",   price: 8000,   speed: 3.0, desc: "Eco-friendly. No fuel needed." },
   { id: "sedan",   name: "Sedan",                emoji: "🚗",   price: 80000,  speed: 5.5, desc: "Comfortable daily driver. AC + stereo." },
   { id: "hatch",   name: "Hatchback",           emoji: "🚙",   price: 55000,  speed: 5.0, desc: "Compact + nimble. Easy to park." },
-  { id: "jeep",    name: "Jeep Wrangler",       emoji: "🚙",   price: 300000, speed: 5.2, desc: "Rugged + bold. Conquers any terrain.",
-    glbPath: "/models/vehicles/jeep.glb", glbScale: 1.0, glbRotY: 0, glbY: 0 },
+  { id: "jeep", seat: { f: 0.3, y: 0.5, s: 0.4 },    name: "Jeep Wrangler",       emoji: "🚙",   price: 300000, speed: 5.2, desc: "Rugged + bold. Conquers any terrain.",
+    glbPath: "/models/vehicles/jeep.glb", fit: { s: 0.8, cx: -0.31, cz: 0, minY: -0.41, rotY: 0 } },
   { id: "suv",     name: "SUV",                  emoji: "🚐",   price: 150000, speed: 4.8, desc: "Big + bold. Handles any road." },
   { id: "bus",     name: "Lagos Danfo Bus",      emoji: "🚌",   price: 120000, speed: 3.5, desc: "The iconic yellow bus. Carry passengers.",
-    glbPath: "/models/vehicles/lagos_danfo_bus.glb", glbScale: 1.0, glbRotY: 0, glbY: 0 },
+    glbPath: "/models/vehicles/lagos_danfo_bus.glb", fit: { s: 2.9, cx: 0, cz: 0, minY: -0.45, rotY: 0 } },
   { id: "sports",  name: "Sports Car",           emoji: "🏎️",   price: 500000, speed: 7.0, desc: "Flashy + fast. The ultimate flex." },
-  { id: "ferrari", name: "Ferrari",              emoji: "🏎️",   price: 2000000,speed: 8.5, desc: "Italian Stallion. The peak of Kaduna flex.",
-    glbPath: "/models/vehicles/ferrari.glb", glbScale: 1.0, glbRotY: 0, glbY: 0 },
+  { id: "ferrari", seat: { f: 0.2, y: 0.3, s: 0.35 }, name: "Ferrari",              emoji: "🏎️",   price: 2000000,speed: 8.5, desc: "Italian Stallion. The peak of Kaduna flex.",
+    glbPath: "/models/vehicles/ferrari.glb", fit: { s: 1.0, cx: 0, cz: 0.02, minY: 0, rotY: -Math.PI / 2 } },
   { id: "luxury",  name: "Luxury Sedan",         emoji: "🚘",   price: 1000000,speed: 6.5, desc: "VIP ride. Big oga energy." },
 ];
 
+// Where the driver sits (metres from the middle): f = forward, y = height of the hips, s = towards the driver's side (left)
+export const DEFAULT_SEAT = { f: 0.3, y: 0.4, s: 0.4 };
+export function getSeat(id) { const v = getVehicle(id); return (v && v.seat) || null; }   // null = closed vehicle: driver stays hidden
 export function getVehicle(id) { return VEHICLE_CATALOG.find(v => v.id === id); }
 
 // ---- State ----
@@ -208,10 +212,6 @@ async function _loadGlbModel(vehicleId, vehicle) {
       vehicle.glbPath,
       (gltf) => {
         const model = gltf.scene;
-        // Apply scale + rotation + Y offset from the catalog
-        model.scale.setScalar(vehicle.glbScale || 1.0);
-        model.rotation.y = vehicle.glbRotY || 0;
-        model.position.y = vehicle.glbY || 0;
         // Perf: disable shadows on the model (only player character casts)
         model.traverse((o) => {
           if (o.isMesh) { o.castShadow = false; o.frustumCulled = false; }
@@ -229,25 +229,36 @@ async function _loadGlbModel(vehicleId, vehicle) {
   });
 }
 
+// Stand a loaded model inside a pivot group: centred on the pivot, wheels on the ground, front pointing +X.
+export function fitModel(model, fit) {
+  const f = Object.assign({ s: 1, cx: 0, cz: 0, minY: 0, rotY: 0 }, fit || {});
+  const holder = new THREE.Group();
+  model.scale.setScalar(f.s);
+  model.rotation.set(0, f.rotY, 0);
+  const c = Math.cos(f.rotY), sn = Math.sin(f.rotY);
+  const rx = f.cx * c + f.cz * sn, rz = -f.cx * sn + f.cz * c;     // the model's centre after it is turned
+  model.position.set(-rx * f.s, -f.minY * f.s, -rz * f.s);
+  if (f.hide) model.traverse((o) => { if (f.hide.includes(o.name)) o.visible = false; });
+  holder.add(model);
+  return holder;
+}
+// Where the pivot must point: the car's front (+X) goes along the player's forward (sin h, cos h) — the same
+// "forward" the walking code and the driving code use.
+export const pivotRotY = (heading) => heading - Math.PI / 2;
+
 // ---- Spawn a ride vehicle at the player's position ----
 export async function spawnRideVehicle(vehicleId, playerPos, playerHeading, toastFn) {
   if (_riding) despawnRideVehicle();
   const v = getVehicle(vehicleId);
   if (!v) return false;
 
-  let mesh = null;
+  let mesh = null, own = null;
 
   // Try GLB model first (if the vehicle has one)
   if (v.glbPath) {
     if (toastFn) toastFn("Loading " + v.name + " model...");
     const glbModel = await _loadGlbModel(vehicleId, v);
-    if (glbModel) {
-      // Clone the cached model so we can position it without affecting the original
-      mesh = glbModel.clone(true);
-      // Reset the clone's world transform (the cache has scale/rot/y baked in)
-      mesh.position.set(playerPos.x, 0, playerPos.z);
-      mesh.rotation.y = playerHeading + (v.glbRotY || 0);
-    }
+    if (glbModel) mesh = fitModel(glbModel.clone(true), v.fit);
   }
 
   // Fall back to simplified box-geometry mesh if no GLB or GLB failed
@@ -264,15 +275,18 @@ export async function spawnRideVehicle(vehicleId, playerPos, playerHeading, toas
     const merged = mergeGeometries(parts, true);
     parts.forEach(g => g.dispose());
     const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
-    mesh = new THREE.Mesh(merged, mat);
-    mesh.castShadow = false;
-    mesh.frustumCulled = false;
-    mesh.position.set(playerPos.x, 0, playerPos.z);
-    mesh.rotation.y = playerHeading;
+    const body = new THREE.Mesh(merged, mat);
+    body.castShadow = false;
+    body.frustumCulled = false;
+    mesh = new THREE.Group();
+    mesh.add(body);                       // built-in cars are modelled front = +X, centred, wheels on the ground
+    own = [merged, mat];
   }
 
+  mesh.position.set(playerPos.x, 0, playerPos.z);
+  mesh.rotation.y = pivotRotY(playerHeading);
   _scene.add(mesh);
-  _riding = { vehicleId, speed: v.speed, mesh };
+  _riding = { vehicleId, speed: v.speed, mesh, own };
   console.log("[vehicles] Riding " + v.name + " (speed boost +" + v.speed + ")");
   return true;
 }
@@ -281,8 +295,8 @@ export async function spawnRideVehicle(vehicleId, playerPos, playerHeading, toas
 export function despawnRideVehicle() {
   if (!_riding) return;
   _scene.remove(_riding.mesh);
-  _riding.mesh.geometry?.dispose();
-  _riding.mesh.material?.dispose();
+  // only free what we built ourselves: GLB geometry is shared with the cache and the next ride
+  if (_riding.own) _riding.own.forEach((o) => o.dispose());
   _riding = null;
 }
 
@@ -290,7 +304,7 @@ export function despawnRideVehicle() {
 export function tickRideVehicle(playerPos, playerHeading) {
   if (!_riding) return;
   _riding.mesh.position.set(playerPos.x, 0, playerPos.z);
-  _riding.mesh.rotation.y = playerHeading;
+  _riding.mesh.rotation.y = pivotRotY(playerHeading);
 }
 
 // ---- Build a vehicle mesh for a REMOTE player (Oct 19) ----
@@ -310,8 +324,8 @@ export async function buildRemoteVehicleMesh(vehicleId) {
     try {
       const glbModel = await _loadGlbModel(vehicleId, v);
       if (glbModel) {
-        mesh = glbModel.clone(true);
-        mesh.rotation.y = (v.glbRotY || 0);
+        mesh = fitModel(glbModel.clone(true), v.fit);      // same stand-up + facing as the one you ride (nose = +X)
+        mesh.userData.shared = true;                       // geometry belongs to the cache: never dispose it
       }
     } catch (e) { console.warn("[vehicles] remote GLB failed:", e.message); }
   }
@@ -326,11 +340,20 @@ export async function buildRemoteVehicleMesh(vehicleId) {
         const merged = mergeGeometries(parts, true);
         parts.forEach(g => g.dispose());
         const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
-        mesh = new THREE.Mesh(merged, mat);
-        mesh.castShadow = false;
-        mesh.frustumCulled = false;
+        const body = new THREE.Mesh(merged, mat);
+        body.castShadow = false;
+        body.frustumCulled = false;
+        mesh = new THREE.Group(); mesh.add(body);
       }
     } catch (e) { console.warn("[vehicles] remote box-geometry failed:", e.message); }
   }
   return mesh;
+}
+
+// A fitted, ready-to-use copy of a vehicle's 3D model (wheels on the ground, nose = +X). Used for traffic too.
+export async function loadFittedModel(vehicleId) {
+  const veh = getVehicle(vehicleId);
+  if (!veh || !veh.glbPath) return null;
+  const glb = await _loadGlbModel(vehicleId, veh);
+  return glb ? fitModel(glb.clone(true), veh.fit) : null;
 }

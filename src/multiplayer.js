@@ -297,7 +297,7 @@ function _swapRidingMesh(m, oldRiding) {
   // dispose old vehicle mesh if any
   if (m.vehicleMesh) {
     if (m.vehicleMesh.parent) m.vehicleMesh.parent.remove(m.vehicleMesh);
-    m.vehicleMesh.traverse((o) => {
+    if (!m.vehicleMesh.userData.shared) m.vehicleMesh.traverse((o) => {
       if (o.geometry) o.geometry.dispose();
       if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); }
     });
@@ -340,7 +340,7 @@ function _swapRidingMesh(m, oldRiding) {
     m.group.add(mesh);
     // Center the vehicle at the player's feet
     mesh.position.set(0, 0, 0);
-    mesh.rotation.y = 0;
+    mesh.rotation.y = -Math.PI / 2;      // the model's nose is +X, the avatar group's forward is (sin h, cos h)
   }).catch((e) => {
     if (uid) _ridingBuildInFlight.delete(uid);
     console.warn("[multiplayer] vehicle build error:", e.message);

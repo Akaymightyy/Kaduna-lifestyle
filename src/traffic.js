@@ -223,16 +223,53 @@ export function createTraffic(scene) {
     scene.add(glow);
     meshes[name] = { body, lights, glow, i: 0, count };
   }
+  // Real 3D keke napep + danfo bus models replace the box ones in traffic as soon as they have loaded
+  const swapInGlb = async (type, vehicleId) => {
+    const mm = meshes[type]; if (!mm) return;
+    try {
+      const { loadFittedModel } = await import("./vehicles.js");
+      const holder = await loadFittedModel(vehicleId); if (!holder) return;
+      holder.updateMatrixWorld(true);
+      const buckets = new Map();
+      holder.traverse((o) => {
+        if (!o.isMesh || !o.visible || !o.geometry) return;
+        let g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld);
+        for (const k of Object.keys(g.attributes)) if (!["position", "normal", "uv"].includes(k)) g.deleteAttribute(k);
+        if (!g.attributes.uv) g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+        if (!g.attributes.normal) g.computeVertexNormals();
+        if (g.index) g = g.toNonIndexed();
+        const mt = o.material; if (!buckets.has(mt)) buckets.set(mt, []); buckets.get(mt).push(g);
+      });
+      if (!buckets.size) return;
+      const mats = [], geos = [];
+      for (const [mt, list] of buckets) {
+        geos.push(mergeGeometries(list, false));
+        const lm = new THREE.MeshLambertMaterial({ color: mt.color ? mt.color.clone() : 0xffffff, map: mt.map || null, transparent: !!mt.transparent, opacity: mt.opacity == null ? 1 : mt.opacity, side: mt.side });
+        if (mt.map) lm.map.colorSpace = THREE.SRGBColorSpace;
+        mats.push(lm);
+      }
+      const geo = mergeGeometries(geos, true);
+      const im = new THREE.InstancedMesh(geo, mats, mm.count);
+      im.frustumCulled = false; im.castShadow = false;
+      for (let i = 0; i < mm.count; i++) im.setMatrixAt(i, new THREE.Matrix4().makeScale(0, 0, 0));
+      scene.add(im); mm.glb = im; mm.body.visible = false; mm.lights.visible = false;
+    } catch (e) { console.warn("[traffic] glb swap failed", type, e); }
+  };
+  swapInGlb("keke", "keke"); swapInGlb("bus", "bus");
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
   const white = new THREE.Color(1, 1, 1), sc = new THREE.Vector3(1, 1, 1);
   const positions = [];
 
   // ---- FIX: Per-car speed modifiers for yielding at crossings ----
   const carSpeedMods = cars.map(() => 1.0); // 1.0 = full speed, 0.0 = stopped
+  const pv = { x: 0, z: 0, on: false };       // the vehicle the player is driving: traffic waits for it, never drives through it
+  let prev = [];                               // last frame's car positions (to keep a gap to the car in front)
+  const YIELD_GAP = 9, STOP_GAP = 4.8;
 
   function update(tSeconds) {
     for (const k in meshes) meshes[k].i = 0;
     positions.length = 0;
+    const prevNext = [];
     for (let ci = 0; ci < cars.length; ci++) {
       const c = cars[ci];
       const mm = meshes[c.type];
@@ -254,6 +291,14 @@ export function createTraffic(scene) {
         // Smoothly return to full speed
         carSpeedMods[ci] = Math.min(1.0, carSpeedMods[ci] + 0.05);
       }
+      // ---- patience: wait for the player's vehicle or any car ahead in the same lane ----
+      {
+        const L0 = c.lane, dirc = L0.dir;
+        let gap = 1e9;
+        if (pv.on && Math.abs(pv.z - L0.z) < 2.6) { const d = (pv.x - x) * dirc; if (d > -1.5 && d < gap) gap = d; }
+        for (let j = 0; j < prev.length; j++) { const o = prev[j]; if (o.lane === L0 && o.ci !== ci) { const d = (o.x - x) * dirc - (o.hl + TYPES[c.type].L / 2); if (d > -0.5 && d < gap) gap = d; } }
+        if (gap < YIELD_GAP) carSpeedMods[ci] = Math.min(carSpeedMods[ci], gap < STOP_GAP ? 0 : (gap - STOP_GAP) / (YIELD_GAP - STOP_GAP));
+      }
 
       // Apply speed modifier to this car's movement
       // We simulate the slowdown by adjusting the effective offset
@@ -274,12 +319,16 @@ export function createTraffic(scene) {
       m.compose(p, q, sc);
       mm.body.setMatrixAt(mm.i, m); mm.body.setColorAt(mm.i, c.color);
       mm.lights.setMatrixAt(mm.i, m); mm.lights.setColorAt(mm.i, white);
+      if (mm.glb) mm.glb.setMatrixAt(mm.i, m);
       if (glowOn) mm.glow.setMatrixAt(mm.i, m);
       mm.i++;
+      prevNext.push({ x: xAdjusted, lane: c.lane, ci, hl: TYPES[c.type].L / 2 });
       positions.push({ x: xAdjusted, z: c.lane.z, hl: TYPES[c.type].L / 2, hw: TYPES[c.type].W / 2, dir: c.lane.dir, speed: c.lane.speed });
     }
+    prev = prevNext;
     for (const k in meshes) {
       const mm = meshes[k];
+      if (mm.glb) mm.glb.instanceMatrix.needsUpdate = true;
       mm.body.instanceMatrix.needsUpdate = mm.lights.instanceMatrix.needsUpdate = true;
       if (glowOn) mm.glow.instanceMatrix.needsUpdate = true;
       if (mm.body.instanceColor) mm.body.instanceColor.needsUpdate = true;
@@ -295,5 +344,5 @@ export function createTraffic(scene) {
     const on = v > 0.02;
     if (on !== glowOn) { glowOn = on; for (const k in meshes) meshes[k].glow.visible = on && meshes[k].body.visible; }
   }
-  return { update, setNight, setGlow, positions, cars, meshes, setVisible(v) { for (const k in meshes) { meshes[k].body.visible = v; meshes[k].lights.visible = v; meshes[k].glow.visible = v && glowOn; } } };
+  return { update, setNight, setGlow, positions, cars, meshes, setPlayerVehicle(x, z, on) { pv.x = x; pv.z = z; pv.on = !!on; }, setVisible(v) { for (const k in meshes) { if (meshes[k].glb) meshes[k].glb.visible = v; meshes[k].body.visible = v && !meshes[k].glb; meshes[k].lights.visible = v && !meshes[k].glb; meshes[k].glow.visible = v && glowOn; } } };
 }

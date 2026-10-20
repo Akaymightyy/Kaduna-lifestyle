@@ -14,6 +14,8 @@ import { carShape, busShape, personParts, hash2, paint, flatten, B, done } from 
 let _scene = null, _on = false, _t = 0, _last = 0;
 let BEAM = null, SH = null, carMesh = null, busMesh = null, pm = null, boats = [], plane = null;
 const cars = [], buses = [], people = [];
+const _pv = { x: 0, z: 0, on: false };             // the player's own vehicle: cars wait for it
+export function setLifePlayerVehicle(x, z, on) { _pv.x = x; _pv.z = z; _pv.on = !!on; }
 const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(1, 1, 1);
 const _up = new THREE.Vector3(0, 1, 0), _col = new THREE.Color(), _mb = new THREE.Matrix4(), _m2 = new THREE.Matrix4(), _m3 = new THREE.Matrix4(), _Z = new THREE.Matrix4().makeScale(0, 0, 0), _s2 = new THREE.Vector3();
 const RB = [];                                       // roundabout centres
@@ -122,7 +124,10 @@ export function tickLife(px, pz, show = true) {
   // cars + buses
   const dir = new THREE.Vector3(), nx = new THREE.Vector3();
   const place = (mesh, i, c) => {
-    c.s += c.v * dt; lanePos(c.ln, c.s, _p); lanePos(c.ln, c.s + 1.5, nx);
+    lanePos(c.ln, c.s, _p);
+    let go = 1;
+    if (_pv.on) { const fx = c.ln.axis === "x" ? c.ln.dir : 0, fz = c.ln.axis === "z" ? c.ln.dir : 0, ddx = _pv.x - _p.x, ddz = _pv.z - _p.z, along = ddx * fx + ddz * fz, lat = Math.abs(ddx * fz - ddz * fx); if (along > -1.5 && along < 9 && lat < 2.8) go = along < 5 ? 0 : (along - 5) / 4; }
+    c.s += c.v * dt * go; lanePos(c.ln, c.s, _p); lanePos(c.ln, c.s + 1.5, nx);
     const lt = ((c.s % c.ln.len) + c.ln.len) % c.ln.len, ek = Math.max(0.001, Math.min(1, Math.min(lt, c.ln.len - lt) / 30));   // shrink at the lane ends: no popping out of walls
     _s2.setScalar(ek);
     const yaw = Math.atan2(-(nx.z - _p.z), nx.x - _p.x);
