@@ -30,6 +30,8 @@ import { extendHouseTiers, getLuxuryTiers, isLuxuryTier } from "./housing_upgrad
 import { initPhotoMode, enterPhotoMode, exitPhotoMode, isPhotoMode } from "./photo_mode.js";
 import { initChallengeSystem, subscribeToMyChallenges, getMyActiveMatches } from "./challenge_system.js";
 import { initChallengeUI, openMatchForChallenge } from "./challenge_ui.js";
+import { initTennisUI } from "./tennis_ui.js";
+import { initPenaltyUI } from "./penalty_shootout_ui.js";
 import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
 import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
 import { celebrate } from "./celebrate.js";
@@ -3302,6 +3304,20 @@ initAuth((user) => {
       toast,
     });
     initChallengeUI({
+      game, toast,
+      getMyUid: () => getMyUid(),
+      getMyName: () => getMyName() || "Player",
+    });
+    // Initialise the game-specific UIs for Tennis + Penalty Shoot-out.
+    // These plug into the challenge_ui.js match dispatcher — when a match
+    // has game === "tennis", openTennisMatchScreen() is called instead of
+    // the default Capital Dice UI.
+    initTennisUI({
+      game, toast,
+      getMyUid: () => getMyUid(),
+      getMyName: () => getMyName() || "Player",
+    });
+    initPenaltyUI({
       game, toast,
       getMyUid: () => getMyUid(),
       getMyName: () => getMyName() || "Player",

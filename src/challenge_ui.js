@@ -16,6 +16,10 @@ import {
   applyRoll, applyBank, applyResign, isMyTurn, getWinnerName, getPlayerScore,
   TARGET_SCORE,
 } from "./capital_dice.js";
+import { openTennisMatchScreen, initTennisUI } from "./tennis_ui.js";
+import { openPenaltyMatchScreen, initPenaltyUI } from "./penalty_shootout_ui.js";
+import { db } from "./firebase.js";
+import { ref, get as fbGet } from "firebase/database";
 
 let _ctx = null;
 let _hudBtn = null;
@@ -112,6 +116,16 @@ function _openCreator() {
           <div class="emoji">🎲</div>
           <div class="name">Capital Dice</div>
           <div class="desc">First to 100 wins</div>
+        </div>
+        <div class="cc-game" data-game="tennis">
+          <div class="emoji">🎾</div>
+          <div class="name">Tennis</div>
+          <div class="desc">First to 11 (win by 2)</div>
+        </div>
+        <div class="cc-game" data-game="penalty_shootout">
+          <div class="emoji">⚽</div>
+          <div class="name">Penalty Shoot-out</div>
+          <div class="desc">5 kicks each, most goals wins</div>
         </div>
       </div>
       <div class="cc-section">Stake (winner takes 95% of pot)</div>
@@ -247,8 +261,28 @@ async function _openMatchScreen(matchId) {
       "font-family:Poppins,system-ui,sans-serif;overflow-y:auto;";
     document.body.appendChild(_matchEl);
   }
+  // First peek at the match state to know which game's UI to render.
+  // Default to Capital Dice (the original game).
+  try {
+    const snap = await fbGet(ref(db, "matches/" + matchId));
+    const m = snap.val();
+    if (m && m.game === "tennis") {
+      // Hide the capital_dice match element + delegate to tennis_ui
+      _matchEl.style.display = "none";
+      openTennisMatchScreen(matchId);
+      return;
+    }
+    if (m && m.game === "penalty_shootout") {
+      _matchEl.style.display = "none";
+      openPenaltyMatchScreen(matchId);
+      return;
+    }
+  } catch (e) {
+    // Peek failed — fall through to capital_dice default
+    console.warn("[challenge_ui] peek match failed:", e.message);
+  }
   _matchEl.style.display = "flex";
-  // Subscribe to match state updates
+  // Subscribe to match state updates (Capital Dice default)
   if (_unsubMatch) _unsubMatch();
   _unsubMatch = subscribeToMatch(matchId, (state) => {
     _currentMatchState = state;
