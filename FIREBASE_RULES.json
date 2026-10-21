@@ -134,6 +134,12 @@
         ".write": "auth != null && (!data.exists() || data.child('ownerId').val() === auth.uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1')"
       }
     },
+    "billboardReports": {
+      ".read": "auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
+      "$reportId": {
+        ".write": "auth != null && !data.exists()"
+      }
+    },
     "worldchat": {
       ".read": "auth != null",
       "$msgId": {
