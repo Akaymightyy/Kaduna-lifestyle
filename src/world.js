@@ -466,6 +466,7 @@ export function buildWorld(scene) {
       { id: "nightclub", x: 0, z: -37, name: "NIGHTCLUB", icon: "🪩", color: 0x6b21a8 },
       { id: "home", x: -150, z: 37, name: "MY HOME", icon: "🏠", color: 0x2e7d4f },
       { id: "dealership", x: 60, z: 38, name: "KADUNA MOTORS", icon: "🚗", color: 0xf2b134 },
+      { id: "arena", x: -60, z: -80, name: "ARENA", icon: "🎮", color: 0xf2b134 },
     ];
     for (const m of _placeMarkers) {
       // Entrance pad (glowing circle on the ground)

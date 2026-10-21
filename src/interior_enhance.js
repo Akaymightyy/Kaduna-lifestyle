@@ -121,6 +121,8 @@ export function enhanceInterior(group, placeDef) {
   if (placeDef.id === "home") return;
   // Don't enhance dealership (already has custom props)
   if (placeDef.id === "dealership") return;
+  // Don't enhance arena (has its own custom props: bowling, pool, arcade)
+  if (placeDef.id === "arena") return;
 
   // Add 2 potted plants near the entrance (south side)
   group.add(_plant(-3, 12));
