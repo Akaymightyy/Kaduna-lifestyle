@@ -36,30 +36,50 @@ export async function build(scene, ctx) {
   const floorMesh = floor(40, 30, 0x1a1a1a, 1);
   group.add(floorMesh);
 
-  // ---- Walls: glass on the south side (entrance), concrete elsewhere ----
+  // ---- Walls: opaque on all 4 sides so outside doesn't bleed through ----
+  // (Oct 20 fix per user feedback: "anytime I enter any building I shouldn't
+  // be seeing any building outside" — the original glass walls let outside
+  // geometry bleed through, which broke immersion. Switched to opaque walls
+  // with a small entrance gap on the south side.)
   // Concrete back wall (north)
   group.add(mergedMesh([
     box(40, 4, 0.3, 0, 2, -15, 0x0a3b2a),
   ]));
-  // Side walls (east + west)
+  // Side walls (east + west) — full height
   group.add(mergedMesh([
     box(0.3, 4, 30, -20, 2, 0, 0x0a3b2a),
     box(0.3, 4, 30, 20, 2, 0, 0x0a3b2a),
   ]));
-  // Glass front wall (south) — transparent so you can see in from outside
-  const glassMat = new THREE.MeshPhysicalMaterial({
-    color: 0x88c0d0, transparent: true, opacity: 0.25,
-    roughness: 0.05, metalness: 0.1, transmission: 0.7,
-  });
-  const glassFront = new THREE.Mesh(
-    new THREE.BoxGeometry(36, 3.5, 0.05),
-    glassMat
+  // South wall (entrance side) — split into 2 segments with a 4m gap in the middle for the door
+  group.add(mergedMesh([
+    box(18, 4, 0.3, -11, 2, 15, 0x0a3b2a),
+    box(18, 4, 0.3, 11, 2, 15, 0x0a3b2a),
+  ]));
+  // Door frame (gold accent around the entrance gap)
+  group.add(mergedMesh([
+    box(0.2, 4, 0.2, -2, 2, 15, 0xf2b134),
+    box(0.2, 4, 0.2, 2, 2, 15, 0xf2b134),
+    box(4, 0.2, 0.2, 0, 4, 15, 0xf2b134),
+  ]));
+  // ---- Roof: opaque dark ceiling so outside sky doesn't bleed through ----
+  // (Oct 20 fix: originally the dealership had no roof, so the sky was
+  // visible from inside. Now we have a closed box — only the entrance gap
+  // lets light in, which is what real showrooms feel like.)
+  const roofMat = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
+  const roof = new THREE.Mesh(
+    new THREE.BoxGeometry(40, 0.2, 30),
+    roofMat
   );
-  glassFront.position.set(0, 1.75, 15);
-  group.add(glassFront);
-  // Glass door gap (in the middle of the south wall) — just visual gap
-  // (no actual door mesh needed since the player enters from outside the
-  // showroom and is teleported to the entrance position)
+  roof.position.set(0, 4.1, 0);
+  group.add(roof);
+  // Roof trim (gold strip around the edge)
+  const trimMat = new THREE.MeshBasicMaterial({ color: 0xf2b134 });
+  const trimGeo = new THREE.BoxGeometry(40.2, 0.1, 0.2);
+  const trimN = new THREE.Mesh(trimGeo, trimMat); trimN.position.set(0, 4.05, -15); group.add(trimN);
+  const trimS = new THREE.Mesh(trimGeo, trimMat); trimS.position.set(0, 4.05, 15); group.add(trimS);
+  const trimGeo2 = new THREE.BoxGeometry(0.2, 0.1, 30);
+  const trimE = new THREE.Mesh(trimGeo2, trimMat); trimE.position.set(20, 4.05, 0); group.add(trimE);
+  const trimW = new THREE.Mesh(trimGeo2, trimMat); trimW.position.set(-20, 4.05, 0); group.add(trimW);
 
   // ---- Neon sign above entrance ----
   const sign = signMesh("KADUNA MOTORS", 14, 1.8, {
