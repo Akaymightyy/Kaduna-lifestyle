@@ -195,6 +195,19 @@ export async function acceptChallenge(challengeId) {
     const mapIds = ["maize", "rooftops", "river"];
     match.mapId = mapIds[Math.floor(Math.random() * mapIds.length)];
     match.maxHp = 100;
+  } else if (ch.game === "bowling") {
+    // Bowling: 10 frames, turn-based, score-based
+    match.bowler = ch.hostUid;
+    match.phase = "bowl_pick";
+    match.frame = 0;
+    match.roll = 0;
+    match.pinsStanding = 10;
+    match.framePins = 0;
+    match.bowlerPick = null;
+    match.lastResult = null;
+    match.target = 10;
+    match.players[ch.hostUid].frames = [];
+    match.players[uid].frames = [];
   }
   try {
     await set(matchRef, match);

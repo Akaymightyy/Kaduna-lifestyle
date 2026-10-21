@@ -33,6 +33,7 @@ import { initChallengeUI, openMatchForChallenge } from "./challenge_ui.js";
 import { initTennisUI } from "./tennis_ui.js";
 import { initPenaltyUI } from "./penalty_shootout_ui.js";
 import { initSniperUI } from "./sniper_ui.js";
+import { initBowlingUI } from "./bowling_ui.js";
 import { initSpyMissions, getSpyMissions, getMyUnlockTag } from "./spy_missions.js";
 import { initSpyMissionsUI, renderSpyMissionsApp, openMission as openSpyMission } from "./spy_mission_ui.js";
 import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
@@ -3378,6 +3379,18 @@ initAuth((user) => {
       console.log("[sniper] sniper UI initialised");
     } catch (e) {
       console.warn("[sniper] initSniperUI failed:", e.message);
+    }
+    // BOWLING (Oct 21): turn-based bowling — 10 frames, pick angle + power,
+    // strike/spare scoring. Plugs into challenge_system like tennis/sniper.
+    try {
+      initBowlingUI({
+        game, toast,
+        getMyUid: () => getMyUid(),
+        getMyName: () => getMyName() || "Player",
+      });
+      console.log("[bowling] bowling UI initialised");
+    } catch (e) {
+      console.warn("[bowling] initBowlingUI failed:", e.message);
     }
     // SPY MISSIONS (Oct 20): Capital Heat-style story-driven missions with
     // 6 chapters, cutscenes, code-breaking minigame, star ratings, big

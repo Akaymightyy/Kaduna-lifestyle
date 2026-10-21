@@ -29,7 +29,20 @@ function css() {
   #livemap .lm-tag{position:absolute;left:0;top:0;white-space:nowrap;background:rgba(255,255,255,.93);color:#16352a;border-radius:12px;padding:3px 8px;font:600 11px Poppins,sans-serif;box-shadow:0 1px 5px rgba(0,0,0,.3);pointer-events:auto;will-change:transform;transform:translate(-9999px,-9999px)}
   #livemap .lm-tag.area{background:rgba(15,77,58,.92);color:#fff}
   #livemap .lm-tag.me{background:#ff6a3d;color:#fff}
-  #livemap .lm-hint{position:absolute;left:0;right:0;bottom:calc(24px + env(safe-area-inset-bottom));text-align:center;color:#fff;font:600 12px Poppins,sans-serif;text-shadow:0 1px 4px #000;pointer-events:none}`;
+  #livemap .lm-hint{position:absolute;left:0;right:0;bottom:calc(24px + env(safe-area-inset-bottom));text-align:center;color:#fff;font:600 12px Poppins,sans-serif;text-shadow:0 1px 4px #000;pointer-events:none}
+  #livemap .lm-card{position:absolute;left:50%;bottom:calc(80px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(20px);width:min(360px,92vw);background:#fff;border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,.35);overflow:hidden;opacity:0;transition:opacity .25s,transform .25s;pointer-events:auto}
+  #livemap .lm-card.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  #livemap .lm-card-head{display:flex;align-items:center;gap:8px;padding:12px 14px;background:linear-gradient(135deg,#0f4d3a,#1a6a4a);color:#fff}
+  #livemap .lm-card-icon{font-size:24px}
+  #livemap .lm-card-name{font-size:14px;font-weight:700}
+  #livemap .lm-card-type{font-size:10px;opacity:.8;text-transform:uppercase}
+  #livemap .lm-card-body{padding:10px 14px}
+  #livemap .lm-card-services{font-size:11px;color:#666;line-height:1.6}
+  #livemap .lm-card-services b{color:#0f4d3a}
+  #livemap .lm-card-actions{display:flex;gap:8px;padding:0 14px 12px}
+  #livemap .lm-card-btn{flex:1;border:none;border-radius:10px;padding:11px;font:700 13px Poppins,sans-serif;cursor:pointer}
+  #livemap .lm-card-enter{background:#f2b134;color:#1a1a1a}
+  #livemap .lm-card-close{background:#e8e8e8;color:#666}`;
   document.head.appendChild(s);
 }
 
@@ -73,10 +86,18 @@ function makeLabels() {
     const el = document.createElement("div"); el.className = "lm-tag " + kind; el.textContent = txt; labelBox.appendChild(el);
     el.addEventListener("click", () => {
       if (root._moved() > 8) return;                                    // it was a drag, not a tap
-      if (kind === "place") S.travelPlace(id);
-      else if (kind === "area" && id && /^(spot|fun):/.test(id)) S.rideTo(id);   // landmarks + fun spots
-      else if (kind === "area" && id) S.travelArea(id);
-      else if (kind === "home" && id) S.rideTo(id);                    // your own houses
+      // PLACE DETAIL CARD (Oct 21): instead of travelling directly, show
+      // a card with the place's services + an "Enter" button. Like
+      // MyAbujaLife's place cards on the city map.
+      if (kind === "place" && id) {
+        _showPlaceCard(id);
+      } else if (kind === "area" && id && /^(spot|fun):/.test(id)) {
+        S.rideTo(id);
+      } else if (kind === "area" && id) {
+        S.travelArea(id);
+      } else if (kind === "home" && id) {
+        S.rideTo(id);
+      }
     });
     labels.push({ el, x, y, z, kind });
   };
@@ -104,12 +125,43 @@ export function openLiveMap() {
 export function closeLiveMap() {
   if (!on) return;
   on = false;
+  _hidePlaceCard();
   S.camera.far = saved.far; S.camera.near = saved.near; S.camera.updateProjectionMatrix();
   if (S.scene.fog) { S.scene.fog.near = saved.fogNear; S.scene.fog.far = saved.fogFar; }
   document.body.classList.remove("live-map");
   root.style.display = "none";
   if (S.onClose) S.onClose();
   document.querySelectorAll("#bottom-nav .nav-btn").forEach(b => b.classList.toggle("active", b.dataset.nav === "home"));
+}
+
+// ---- PLACE DETAIL CARD (Oct 21) ----
+// Shows when you tap a place pin on the 3D city map. Like MyAbujaLife:
+// place icon + name + services list + "Enter" button.
+let _cardEl = null;
+function _showPlaceCard(placeId) {
+  const place = S.listPlaces().find(p => p.id === placeId);
+  if (!place) { S.travelPlace?.(placeId); return; }  // fallback: direct travel
+  if (!_cardEl) {
+    _cardEl = document.createElement("div");
+    _cardEl.className = "lm-card";
+    _cardEl.innerHTML = '<div class="lm-card-head"><span class="lm-card-icon"></span><div><div class="lm-card-name"></div><div class="lm-card-type"></div></div></div><div class="lm-card-body"><div class="lm-card-services"></div></div><div class="lm-card-actions"><button class="lm-card-btn lm-card-close">Close</button><button class="lm-card-btn lm-card-enter">Enter</button></div>';
+    root.appendChild(_cardEl);
+    _cardEl.querySelector(".lm-card-close").onclick = _hidePlaceCard;
+  }
+  // Fill card content
+  _cardEl.querySelector(".lm-card-icon").textContent = place.minimapIcon || "📍";
+  _cardEl.querySelector(".lm-card-name").textContent = place.name;
+  _cardEl.querySelector(".lm-card-type").textContent = place.type === "interior" ? "Indoor · Open " + (place.hours ? place.hours.open + "–" + place.hours.close : "24h") : "Outdoor";
+  const services = (place.activities || []).map(a => "<b>" + a.label + "</b> — " + a.desc).join("<br>");
+  _cardEl.querySelector(".lm-card-services").innerHTML = services || "Explore this location.";
+  _cardEl.querySelector(".lm-card-enter").onclick = () => {
+    _hidePlaceCard();
+    S.travelPlace?.(placeId);
+  };
+  _cardEl.classList.add("show");
+}
+function _hidePlaceCard() {
+  if (_cardEl) _cardEl.classList.remove("show");
 }
 
 /** Called every frame while the map is open (instead of the normal gameplay update). */
