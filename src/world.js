@@ -4,6 +4,8 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import { ROAD_HALF, WORLD_HALF_X, CROSSINGS, SIDE_STREETS, WIDE_AVENUES_X, WIDE_CROSS_Z, MAP_HALF_X, MAP_HALF_Z, rng } from "./config.js";
 
 import { stylize, NIGHT_GLOW } from "./art/style.js";
+import { getPlace } from "./places/registry.js";
+import { buildPlaceExteriors } from "./places/exteriors.js";
 const OL = (o) => stylize(new THREE.MeshLambertMaterial(o), { pat: false, ao: true, fake: false });
 const C = (hex) => new THREE.Color(hex);
 
@@ -468,7 +470,9 @@ export function buildWorld(scene) {
       { id: "dealership", x: 60, z: 38, name: "KADUNA MOTORS", icon: "🚗", color: 0xf2b134 },
       { id: "arena", x: -60, z: -80, name: "ARENA", icon: "🎮", color: 0xf2b134 },
     ];
+    // markers must sit at the REAL entrance (registry), otherwise the pad points at nothing
     for (const m of _placeMarkers) {
+      const _rp = getPlace(m.id); if (_rp && _rp.entranceX != null) { m.x = _rp.entranceX; m.z = _rp.entranceZ; }
       // Entrance pad (glowing circle on the ground)
       const pad = new THREE.Mesh(
         new THREE.CircleGeometry(2.5, 24),
@@ -485,26 +489,10 @@ export function buildWorld(scene) {
       ring.rotation.x = -Math.PI / 2;
       ring.position.set(m.x, 0.06, m.z);
       world.add(ring);
-      // Floating sign with place name
-      const sign = new THREE.Mesh(
-        new THREE.PlaneGeometry(6, 1.2),
-        new THREE.MeshBasicMaterial({
-          map: labelTexture(m.name, 320, 64, "#" + m.color.toString(16).padStart(6, "0"), "#ffffff", 30),
-          side: THREE.DoubleSide,
-        })
-      );
-      sign.position.set(m.x, 4, m.z);
-      world.add(sign);
-      // Post for the sign
-      const post = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.08, 0.1, 4, 6),
-        OL({ color: 0x4a4f55 })
-      );
-      post.position.set(m.x, 2, m.z);
-      world.add(post);
       // Add to map shapes so minimap shows them
       mapShapes.buildings.push({ x: m.x, z: m.z, w: 4, d: 4, place: true, placeId: m.id, placeColor: m.color, placeIcon: m.icon });
     }
+    buildPlaceExteriors(world, colliders);
   } catch (e) { console.warn("Could not add place markers", e); }
 
   return { world, asphalt, colliders, mapShapes, lamps: heads, lampLights, ground, buildingsMesh: buildings };
