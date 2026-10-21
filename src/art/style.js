@@ -148,7 +148,7 @@ vec3 artPattern(float code, vec2 uv, vec3 base){
     return base * (0.88 + 0.16 * vn(uv * 1.3) + 0.08 * h21(floor(uv * 22.0)));
   }
   if (code < 13.5) {                                  // asphalt
-    float grit = 0.82 + 0.3 * h21(floor(uv * 140.0)) * h21(floor(uv * 55.0) + 9.1);
+    float grit = 0.92 + 0.26 * h21(floor(uv * 140.0)) * h21(floor(uv * 55.0) + 9.1);
     float wornA = 0.9 + 0.2 * vn(uv * 0.45) - 0.07 * vn(uv * 3.1);
     return base * grit * wornA;
   }
@@ -176,6 +176,9 @@ const FRAG_BODY = `
     float kf = dot(normalize(vWN), normalize(vec3(0.45, 0.78, 0.38))) * 0.5 + 0.5;
     col *= mix(1.0, mix(0.68, 1.16, kf), uArt.w);
   #endif
+  { float lum = dot(col, vec3(0.299, 0.587, 0.114));
+    float mx = max(col.r, max(col.g, col.b)); float mn = min(col.r, min(col.g, col.b));
+    col = mix(vec3(lum), col, 1.14 + 0.2 * (1.0 - (mx - mn))); }
   diffuseColor.rgb = col;
 }
 `;
