@@ -87,7 +87,12 @@ vec3 artPattern(float code, vec2 uv, vec3 base){
     return mix(base * v * grain, base * 0.5, clamp(seam, 0.0, 1.0));
   }
   if (code < 3.5) {                                   // plaster: soft stains
-    return base * (0.95 + 0.08 * vn(uv * 2.5) - 0.03 * vn(uv * 9.0));
+    float st = 0.93 + 0.12 * vn(uv * 1.3) - 0.05 * vn(uv * 7.0);           // big weathered patches
+    float streak = 1.0 - 0.14 * smoothstep(0.55, 0.9, vn(vec2(uv.x * 5.5, uv.y * 0.35))); // rain runs from the top
+    float grain = 0.97 + 0.05 * h21(floor(uv * 160.0));                       // fine render grain
+    float cr = abs(vn(uv * vec2(3.0, 1.2) + 4.0) - 0.5);                      // hairline cracks
+    float crack = 1.0 - 0.22 * (1.0 - smoothstep(0.0, 0.012, cr)) * step(0.62, vn(uv * 0.8 + 9.0));
+    return base * st * streak * grain * crack;
   }
   if (code < 4.5) {                                   // corrugated zinc roof
     float r = 0.84 + 0.16 * sin(uv.x * 26.0);
@@ -98,7 +103,7 @@ vec3 artPattern(float code, vec2 uv, vec3 base){
     float row = floor(uv.y / 0.2); float off = mod(row, 2.0) * 0.225;
     vec2 f = vec2(fract((uv.x + off) / 0.45), fract(uv.y / 0.2));
     float mortar = step(f.x, 0.04) + step(f.y, 0.08);
-    return mix(base * (0.94 + 0.08 * h21(vec2(floor((uv.x + off) / 0.45), row))), base * 0.72, clamp(mortar, 0.0, 1.0));
+    return mix(base * (0.88 + 0.16 * h21(vec2(floor((uv.x + off) / 0.45), row))) * (0.92 + 0.12 * vn(uv * 1.1)), base * 0.6, clamp(mortar, 0.0, 1.0));
   }
   if (code < 6.5) {                                   // ankara / wax print
     vec2 f = fract(uv / 0.45) - 0.5; vec2 id = floor(uv / 0.45);
