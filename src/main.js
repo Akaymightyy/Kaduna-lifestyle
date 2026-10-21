@@ -291,6 +291,8 @@ renderer.shadowMap.type = THREE.PCFShadowMap;  // cheaper than PCFSoft on phones
 // >4m or the sun noticeably shifts. This is the #1 lag fix for Medium/High.
 renderer.shadowMap.autoUpdate = false;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+// vivid colour grade for EVERY city, district, vehicle, character and sky (one place, nothing missed)
+try { renderer.domElement.style.filter = 'saturate(1.28) contrast(1.06) brightness(1.03)'; } catch (e) {}
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0xa9d6f2, Q.fogNear, Q.fogFar);
 
