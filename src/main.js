@@ -294,20 +294,8 @@ renderer.shadowMap.type = THREE.PCFShadowMap;  // cheaper than PCFSoft on phones
 renderer.shadowMap.autoUpdate = false;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 // vivid colour grade for EVERY city, district, vehicle, character and sky (one place, nothing missed)
-// BLOOM (Oct 21): enhanced CSS filter for a bloom-like glow effect on
-// Medium/High. Low = minimal filter (just saturation). The "drop-shadow"
-// creates a subtle glow around bright objects (lights, neon signs, car
-// headlights) without needing EffectComposer (which is too heavy for mobile).
-try {
-  const q = localStorage.getItem("kaduna-graphics") || "medium";
-  if (q === "high") {
-    renderer.domElement.style.filter = 'saturate(1.2) contrast(1.1) brightness(1.05) drop-shadow(0 0 1px rgba(255,240,200,.15))';
-  } else if (q === "medium") {
-    renderer.domElement.style.filter = 'saturate(1.16) contrast(1.08) brightness(1.02)';
-  } else {
-    renderer.domElement.style.filter = 'saturate(1.08) contrast(1.04) brightness(1.0)';
-  }
-} catch (e) {}
+// NOTE: no CSS filter / drop-shadow on the WebGL canvas — it forces a full-screen GPU re-composite every frame, which tanks FPS
+// and makes the adaptive governor drop the resolution (= blurry on High). Colour grade lives in the shaders instead.
 // cinematic vignette (cheap CSS overlay) — frames the scene like a real camera lens
 try { const v = document.createElement('div'); v.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2;background:radial-gradient(ellipse at 50% 45%,rgba(0,0,0,0) 55%,rgba(0,0,0,.34) 100%)'; document.body.appendChild(v); } catch (e) {}
 const scene = new THREE.Scene();
