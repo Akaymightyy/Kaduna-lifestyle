@@ -4074,7 +4074,7 @@ function _frame() {
       }
     }
   } else if (_outHid) { for (const c of _outHid) c.visible = true; _outHid = null; }
-  if (active) { scene.background = INTERIOR_BG; scene.fog.color.copy(INTERIOR_BG); sun.intensity = 0; hemi.intensity = 0.8; }
+  if (active) { scene.background = INTERIOR_BG; scene.fog.color.copy(INTERIOR_BG); sun.intensity = 0; hemi.intensity = 1.0; }
   // FIX: shadow map is updated by tickShadows() (in graphics.js) — only when
   // the player moves >4m OR the sun noticeably shifts. This is what makes
   // Medium/High quality not lag. Inside buildings, skip the shadow update

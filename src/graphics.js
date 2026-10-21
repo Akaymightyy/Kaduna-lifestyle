@@ -190,7 +190,7 @@ export function updateSky(hour) {
   if (_renderer) {
     const na = nightAmount(hour); // 0 = full day, 1 = full night
     // dawn/dusk boost is the middle hump — 1.15 at na=0.5, 1.4 at na=1, 1.0 at na=0
-    const expo = 1.0 + na * 0.4;
+    const expo = 1.12 + na * 0.3;
     _renderer.toneMappingExposure += (expo - _renderer.toneMappingExposure) * 0.05;
   }
 
@@ -229,8 +229,8 @@ export function updateSky(hour) {
       if (_sky.material.uniforms["rayleigh"]) _sky.material.uniforms["rayleigh"].value = 3;
       if (_sky.material.uniforms["turbidity"]) _sky.material.uniforms["turbidity"].value = 12;
     } else {
-      if (_sky.material.uniforms["rayleigh"]) _sky.material.uniforms["rayleigh"].value = 2;
-      if (_sky.material.uniforms["turbidity"]) _sky.material.uniforms["turbidity"].value = 8;
+      if (_sky.material.uniforms["rayleigh"]) _sky.material.uniforms["rayleigh"].value = 2.6;
+      if (_sky.material.uniforms["turbidity"]) _sky.material.uniforms["turbidity"].value = 4;
     }
     } catch (e) { /* Sky uniforms not available — sky won't update, no crash */ }
   }
@@ -256,8 +256,8 @@ export function updateSky(hour) {
       _sun.intensity = 1.2;
       _sun.color.setHex(0xff9a5a); // warm orange
     } else {
-      _sun.intensity = 1.8 + elevation;
-      _sun.color.setHex(0xfff2d6); // warm white
+      _sun.intensity = 2.1 + elevation;
+      _sun.color.setHex(0xffeccc); // warm white
     }
   }
 
@@ -279,9 +279,9 @@ export function updateSky(hour) {
       _hemi.color.setHex(0x6a7ab0);   // brighter sky-blue
       _hemi.groundColor.setHex(0x3a3a4a);  // less black ground tint
     } else {
-      _hemi.intensity = 0.6 + elevation * 0.5;
-      _hemi.color.setHex(0xdfeeff);
-      _hemi.groundColor.setHex(0x8a7a55);
+      _hemi.intensity = 0.75 + elevation * 0.5;
+      _hemi.color.setHex(0xcfe6ff);
+      _hemi.groundColor.setHex(0xa88f5a);
     }
   }
 
