@@ -121,7 +121,15 @@ vec3 artPattern(float code, vec2 uv, vec3 base){
     return base * s * (0.92 + 0.1 * smoothstep(0.0, 2.0, uv.y));
   }
   if (code < 9.5) {                                   // concrete
-    return base * (0.9 + 0.14 * h21(floor(uv * 36.0))) * (0.94 + 0.08 * vn(uv * 1.7));
+    // interlocking paver bricks: staggered courses, per-brick tone, dark joints, grit + weathering
+    vec2 q = uv / vec2(0.22, 0.11);
+    float prow = floor(q.y); q.x += mod(prow, 2.0) * 0.5;
+    vec2 bi = floor(q); vec2 bf = fract(q);
+    float joint = step(bf.x, 0.06) + step(bf.y, 0.1);
+    float tone = 0.8 + 0.34 * h21(bi + 3.7);
+    vec3 pc = base * tone * (0.92 + 0.12 * h21(floor(uv * 90.0))) * (0.9 + 0.16 * vn(uv * 0.9));
+    pc = mix(pc, base * 0.42, clamp(joint, 0.0, 1.0));
+    return pc;
   }
   if (code < 10.5) {                                  // glass with diagonal shine
     float sh = smoothstep(0.0, 0.25, fract((uv.x + uv.y) * 0.8)) * 0.25;
@@ -135,7 +143,9 @@ vec3 artPattern(float code, vec2 uv, vec3 base){
     return base * (0.88 + 0.16 * vn(uv * 1.3) + 0.08 * h21(floor(uv * 22.0)));
   }
   if (code < 13.5) {                                  // asphalt
-    return base * (0.88 + 0.2 * h21(floor(uv * 60.0))) * (0.95 + 0.08 * vn(uv * 0.8));
+    float grit = 0.82 + 0.3 * h21(floor(uv * 140.0)) * h21(floor(uv * 55.0) + 9.1);
+    float patch = 0.9 + 0.2 * vn(uv * 0.45) - 0.07 * vn(uv * 3.1);
+    return base * grit * patch;
   }
   return base;                                        // 14 = plain glow
 }
@@ -161,12 +171,6 @@ const FRAG_BODY = `
     float kf = dot(normalize(vWN), normalize(vec3(0.45, 0.78, 0.38))) * 0.5 + 0.5;
     col *= mix(1.0, mix(0.68, 1.16, kf), uArt.w);
   #endif
-  // vivid colour grade: lift saturation + a touch of vibrance so the world feels rich and sunny
-  { float lum = dot(col, vec3(0.299, 0.587, 0.114));
-    float mx = max(col.r, max(col.g, col.b)); float mn = min(col.r, min(col.g, col.b));
-    float vib = 1.0 - (mx - mn);                       // dull colours get lifted more
-    col = mix(vec3(lum), col, 1.22 + 0.25 * vib);
-    col = clamp(col * 1.04, 0.0, 1.0); }
   diffuseColor.rgb = col;
 }
 `;
