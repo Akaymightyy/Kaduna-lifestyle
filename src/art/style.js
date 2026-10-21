@@ -149,8 +149,8 @@ vec3 artPattern(float code, vec2 uv, vec3 base){
   }
   if (code < 13.5) {                                  // asphalt
     float grit = 0.82 + 0.3 * h21(floor(uv * 140.0)) * h21(floor(uv * 55.0) + 9.1);
-    float patch = 0.9 + 0.2 * vn(uv * 0.45) - 0.07 * vn(uv * 3.1);
-    return base * grit * patch;
+    float wornA = 0.9 + 0.2 * vn(uv * 0.45) - 0.07 * vn(uv * 3.1);
+    return base * grit * wornA;
   }
   return base;                                        // 14 = plain glow
 }
