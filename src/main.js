@@ -2160,7 +2160,13 @@ window._sellCompany = () => {
 };
 window._setGraphicsQuality = (q) => {
   applyQuality(q, { renderer, sun, scene });
-  toast("🎨 Graphics set to " + q.toUpperCase() + ". Reload to see full effect.");
+  // FIX (Oct 21): reset the auto-governor when the user manually changes
+  // quality. The governor auto-downgrades pixelRatio when FPS drops, but
+  // it was staying stuck at level 4 (pixelRatio 0.75 → blurry) even
+  // after the user toggled Low→High in settings. Resetting _gLevel here
+  // means: every time you change quality, the governor starts fresh.
+  _gLevel = 0; _gAcc = 0; _gN = 0; _gWarm = 0;
+  toast("🎨 Graphics set to " + q.toUpperCase() + ". Governor reset.");
   showPhoneApp("settings");
 };
 // ---- HomeStore: buy furniture + category filter ----
@@ -3888,11 +3894,15 @@ onValue(ref(db, "events"), (snap) => {
 // ---- Main loop ----
 const clock = new THREE.Clock();
 let mmT=0, hitCool=0, hudT=0, _missionCheckT=0, _stepT=0;
-// ---- Automatic speed governor: if the phone is slow, lower quality step by step ----
+// ---- Automatic speed governor: if the phone is REALLY slow, lower quality step by step ----
+// FIX (Oct 21): the old governor triggered at FPS < 42, which is too
+// aggressive — most phones briefly dip below 42 while warming up, and the
+// governor would downgrade pixelRatio from 2.0 → 0.75 (blurry) within
+// minutes. User reported: "high graphics dey go blurry oo". Now:
+//   - Only downgrade at FPS < 25 (REALLY bad, not just a warm-up dip)
+//   - Level 4 never goes below pixelRatio 1.0 (no more 0.75 blurry)
+//   - Reset _gLevel when applyQuality is called (see _setGraphicsQuality)
 let _gAcc = 0, _gN = 0, _gLevel = 0, _gWarm = 0;
-// SYNC (Oct 19): offset between Firebase server time and local browser time.
-// Used by the main loop so NPC traffic is at the same x-position across
-// all browsers. Fetched once after auth.
 let _serverTimeOffset = null;
 function governor(raw) {
   if (raw > 0.25) return;                 // tab was hidden / big hitch: ignore
@@ -3900,13 +3910,13 @@ function governor(raw) {
   _gAcc += raw; _gN++;
   if (_gAcc < 2.5) return;
   const fps = _gN / _gAcc; _gAcc = 0; _gN = 0;
-  if (fps >= 42 || _gLevel >= 4) return;
+  if (fps >= 25 || _gLevel >= 4) return;  // FIX: was 42, now 25 — only downgrade if REALLY bad
   _gLevel++;
   const pr = renderer.getPixelRatio();
-  if (_gLevel === 1) renderer.setPixelRatio(Math.max(1, pr * 0.8));
-  else if (_gLevel === 2) renderer.setPixelRatio(1);
+  if (_gLevel === 1) renderer.setPixelRatio(Math.max(1, pr * 0.85));
+  else if (_gLevel === 2) renderer.setPixelRatio(Math.max(1, pr * 0.7));
   else if (_gLevel === 3) { renderer.shadowMap.enabled = false; sun.castShadow = false; scene.traverse((o) => { if (o.material) { const m = Array.isArray(o.material) ? o.material : [o.material]; m.forEach((x) => { x.needsUpdate = true; }); } }); }
-  else if (_gLevel === 4) { renderer.setPixelRatio(0.75); scene.fog.near = 30; scene.fog.far = 90; }
+  else if (_gLevel === 4) { renderer.setPixelRatio(1); scene.fog.near = 30; scene.fog.far = 90; }  // FIX: was 0.75 (blurry), now 1.0 (still sharp)
   console.log("[quality] fps", fps.toFixed(0), "-> level", _gLevel);
 }
 
