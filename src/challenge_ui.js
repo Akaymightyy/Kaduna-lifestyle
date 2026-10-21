@@ -18,6 +18,7 @@ import {
 } from "./capital_dice.js";
 import { openTennisMatchScreen, initTennisUI } from "./tennis_ui.js";
 import { openPenaltyMatchScreen, initPenaltyUI } from "./penalty_shootout_ui.js";
+import { openSniperMatchScreen, initSniperUI } from "./sniper_ui.js";
 import { db } from "./firebase.js";
 import { ref, get as fbGet } from "firebase/database";
 
@@ -126,6 +127,11 @@ function _openCreator() {
           <div class="emoji">⚽</div>
           <div class="name">Penalty Shoot-out</div>
           <div class="desc">5 kicks each, most goals wins</div>
+        </div>
+        <div class="cc-game" data-game="sniper">
+          <div class="emoji">🎯</div>
+          <div class="name">Sniper Duel</div>
+          <div class="desc">1v1 aim + dodge, reduce HP to 0</div>
         </div>
       </div>
       <div class="cc-section">Stake (winner takes 95% of pot)</div>
@@ -275,6 +281,11 @@ async function _openMatchScreen(matchId) {
     if (m && m.game === "penalty_shootout") {
       _matchEl.style.display = "none";
       openPenaltyMatchScreen(matchId);
+      return;
+    }
+    if (m && m.game === "sniper") {
+      _matchEl.style.display = "none";
+      openSniperMatchScreen(matchId);
       return;
     }
   } catch (e) {

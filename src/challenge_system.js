@@ -139,9 +139,10 @@ export async function acceptChallenge(challengeId) {
     _toast("Could not accept: " + e.message);
     return null;
   }
-  // Create the match
+  // Create the match — game-specific initial state
   const matchRef = push(ref(_db, "matches"));
   const matchId = matchRef.key;
+  // Default state (for capital_dice + tennis + penalty_shootout):
   const match = {
     challengeId,
     game: ch.game,
@@ -157,6 +158,44 @@ export async function acceptChallenge(challengeId) {
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
+  // Game-specific overrides:
+  if (ch.game === "tennis") {
+    // Tennis uses hitter/runner roles + rallyCount instead of turnScore
+    match.hitter = ch.hostUid;
+    match.runner = uid;
+    match.phase = "hitter_pick";
+    match.hitterPick = null;
+    match.runnerGuess = null;
+    match.rallyCount = 0;
+    match.target = 11;
+    match.win_by = 2;
+  } else if (ch.game === "penalty_shootout") {
+    // Penalty uses kicker/goalie roles + round counter
+    match.kicker = ch.hostUid;
+    match.goalie = uid;
+    match.phase = "kicker_pick";
+    match.kickerPick = null;
+    match.goaliePick = null;
+    match.round = 0;
+    match.suddenDeath = false;
+    match.target = 5;
+    // Score = goals scored (only kicker can score on their turn)
+  } else if (ch.game === "sniper") {
+    // Sniper uses shooter/target roles + HP + mapId
+    match.shooter = ch.hostUid;
+    match.target = uid;
+    match.phase = "shooter_pick";
+    match.shooterPick = null;
+    match.targetPick = null;
+    match.round = 0;
+    // Override player state to use HP instead of score
+    match.players[ch.hostUid].hp = 100;
+    match.players[uid].hp = 100;
+    // Pick a random map (3 options)
+    const mapIds = ["maize", "rooftops", "river"];
+    match.mapId = mapIds[Math.floor(Math.random() * mapIds.length)];
+    match.maxHp = 100;
+  }
   try {
     await set(matchRef, match);
     // Link the match back to the challenge

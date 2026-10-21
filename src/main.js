@@ -32,6 +32,7 @@ import { initChallengeSystem, subscribeToMyChallenges, getMyActiveMatches } from
 import { initChallengeUI, openMatchForChallenge } from "./challenge_ui.js";
 import { initTennisUI } from "./tennis_ui.js";
 import { initPenaltyUI } from "./penalty_shootout_ui.js";
+import { initSniperUI } from "./sniper_ui.js";
 import { initSpyMissions, getSpyMissions, getMyUnlockTag } from "./spy_missions.js";
 import { initSpyMissionsUI, renderSpyMissionsApp, openMission as openSpyMission } from "./spy_mission_ui.js";
 import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
@@ -3334,18 +3335,28 @@ initAuth((user) => {
       getMyUid: () => getMyUid(),
       getMyName: () => getMyName() || "Player",
     });
+    // SNIPER DUEL (Oct 20): turn-based sniper match — pick aim position +
+    // side, opponent picks dodge + posture. Damage based on hit/miss +
+    // headshot bonus. 3 maps: Kawo Maize Farm, Barnawa Rooftops, River
+    // Kaduna Banks. Reuses the challenge_system flow.
+    try {
+      initSniperUI({
+        game, toast,
+        getMyUid: () => getMyUid(),
+        getMyName: () => getMyName() || "Player",
+      });
+      console.log("[sniper] sniper UI initialised");
+    } catch (e) {
+      console.warn("[sniper] initSniperUI failed:", e.message);
+    }
     // SPY MISSIONS (Oct 20): Capital Heat-style story-driven missions with
     // 6 chapters, cutscenes, code-breaking minigame, star ratings, big
     // money rewards (₦500k → ₦10M per mission). Total payout: ~₦27M.
-    // See src/spy_missions.js (data + Firebase progress) +
-    //     src/spy_minigame.js (Code Breaker Simon-Says) +
-    //     src/spy_mission_ui.js (phone app + cutscene + briefing + minigame + results).
     try {
       initSpyMissions({
         db, getUserId: () => getMyUid(),
         getGameState: () => game, toast,
         onUpdate: () => {
-          // Re-render the spymissions app if it's currently open
           if (_showingApp === "spymissions") showPhoneApp("spymissions");
         },
       });
