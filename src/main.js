@@ -586,6 +586,7 @@ const qs = new URLSearchParams(location.search);
 const fixedHour = qs.has("t") ? parseFloat(qs.get("t")) : FIXED_HOUR;  // FEATURE: default = evening (17.5) per config
 const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const INTERIOR_BG = new THREE.Color(0x1a1510);
+let _outHid = null;
 let lastClock = "";
 let _graphicsInited = false;
 
@@ -4062,6 +4063,17 @@ function _frame() {
   tickRideVehicle(player.pos, player.heading);
   updateCamera(camera, ctl, player.pos, active ? (active.handle.colliders || []) : world.colliders, dt);
   applyTime();
+  // Inside a place: hide EVERYTHING outdoors (scene-root districts, traffic, sky, people...) so no silhouettes show.
+  if (active) {
+    if (!_outHid) {
+      _outHid = [];
+      const keep = active.handle && active.handle.group;
+      for (const c of scene.children) {
+        if (c.isLight || c === keep || c === world.world || (rig && c === rig.group) || !c.visible) continue;
+        c.visible = false; _outHid.push(c);
+      }
+    }
+  } else if (_outHid) { for (const c of _outHid) c.visible = true; _outHid = null; }
   if (active) { scene.background = INTERIOR_BG; scene.fog.color.copy(INTERIOR_BG); sun.intensity = 0; hemi.intensity = 0.8; }
   // FIX: shadow map is updated by tickShadows() (in graphics.js) — only when
   // the player moves >4m OR the sun noticeably shifts. This is what makes
