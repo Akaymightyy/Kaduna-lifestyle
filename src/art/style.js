@@ -161,6 +161,12 @@ const FRAG_BODY = `
     float kf = dot(normalize(vWN), normalize(vec3(0.45, 0.78, 0.38))) * 0.5 + 0.5;
     col *= mix(1.0, mix(0.68, 1.16, kf), uArt.w);
   #endif
+  // vivid colour grade: lift saturation + a touch of vibrance so the world feels rich and sunny
+  { float lum = dot(col, vec3(0.299, 0.587, 0.114));
+    float mx = max(col.r, max(col.g, col.b)); float mn = min(col.r, min(col.g, col.b));
+    float vib = 1.0 - (mx - mn);                       // dull colours get lifted more
+    col = mix(vec3(lum), col, 1.22 + 0.25 * vib);
+    col = clamp(col * 1.04, 0.0, 1.0); }
   diffuseColor.rgb = col;
 }
 `;
