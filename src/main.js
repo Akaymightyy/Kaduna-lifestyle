@@ -292,7 +292,9 @@ renderer.shadowMap.type = THREE.PCFShadowMap;  // cheaper than PCFSoft on phones
 renderer.shadowMap.autoUpdate = false;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 // vivid colour grade for EVERY city, district, vehicle, character and sky (one place, nothing missed)
-try { renderer.domElement.style.filter = 'saturate(1.28) contrast(1.06) brightness(1.03)'; } catch (e) {}
+try { renderer.domElement.style.filter = 'saturate(1.16) contrast(1.08) brightness(1.02)'; } catch (e) {}
+// cinematic vignette (cheap CSS overlay) — frames the scene like a real camera lens
+try { const v = document.createElement('div'); v.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2;background:radial-gradient(ellipse at 50% 45%,rgba(0,0,0,0) 55%,rgba(0,0,0,.34) 100%)'; document.body.appendChild(v); } catch (e) {}
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0xa9d6f2, Q.fogNear, Q.fogFar);
 

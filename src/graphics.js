@@ -356,6 +356,7 @@ export function applyQuality(q, { renderer, sun, scene }) {
       sun.shadow.map = null;
     }
     sun.castShadow = true;
+    try { renderer.shadowMap.type = THREE.PCFSoftShadowMap; sun.shadow.radius = 3; sun.shadow.normalBias = 0.04; } catch (e) {}
     sun.shadow.mapSize.set(preset.shadowMap, preset.shadowMap);
     // After recreating the shadow map, force a fresh render on the next frame
     // so the player doesn't see a black shadow for ~30 seconds.
