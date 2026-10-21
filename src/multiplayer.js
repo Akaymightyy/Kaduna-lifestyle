@@ -224,7 +224,7 @@ function updateAvatars() {
   if(!_scene) return;
   const seen=new Set();
   const _dt = 0.016; // approx
-  const FAR = 200 * 200; // hide + skip animation beyond 200m (Oct 19: bumped from 80m — users said players vanished too easily)
+  const FAR = 500 * 500; // hide + skip animation beyond 500m (Oct 21: was 200m — players in outer districts couldn't see each other. Map is 580m wide so 500m covers most of it.)
   for(const [uid,d] of Object.entries(_players)) {
     seen.add(uid);
     if(!_meshes[uid]) {

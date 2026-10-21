@@ -34,6 +34,7 @@ import { initTennisUI } from "./tennis_ui.js";
 import { initPenaltyUI } from "./penalty_shootout_ui.js";
 import { initSniperUI } from "./sniper_ui.js";
 import { initBowlingUI } from "./bowling_ui.js";
+import { initPoolUI } from "./pool_ui.js";
 import { initSpyMissions, getSpyMissions, getMyUnlockTag } from "./spy_missions.js";
 import { initSpyMissionsUI, renderSpyMissionsApp, openMission as openSpyMission } from "./spy_mission_ui.js";
 import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
@@ -3379,6 +3380,18 @@ initAuth((user) => {
       console.log("[bowling] bowling UI initialised");
     } catch (e) {
       console.warn("[bowling] initBowlingUI failed:", e.message);
+    }
+    // POOL (Oct 21): turn-based pool — 7 rounds, pick angle + power, pot
+    // balls. Plugs into challenge_system like bowling/sniper.
+    try {
+      initPoolUI({
+        game, toast,
+        getMyUid: () => getMyUid(),
+        getMyName: () => getMyName() || "Player",
+      });
+      console.log("[pool] pool UI initialised");
+    } catch (e) {
+      console.warn("[pool] initPoolUI failed:", e.message);
     }
     // SPY MISSIONS (Oct 20): Capital Heat-style story-driven missions with
     // 6 chapters, cutscenes, code-breaking minigame, star ratings, big

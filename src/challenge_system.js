@@ -208,6 +208,16 @@ export async function acceptChallenge(challengeId) {
     match.target = 10;
     match.players[ch.hostUid].frames = [];
     match.players[uid].frames = [];
+  } else if (ch.game === "pool") {
+    // Pool: 7 rounds, turn-based, most balls potted wins
+    match.shooter = ch.hostUid;
+    match.phase = "shoot_pick";
+    match.round = 0;
+    match.shooterPick = null;
+    match.lastResult = null;
+    match.target = 7;
+    match.players[ch.hostUid].potted = 0;
+    match.players[uid].potted = 0;
   }
   try {
     await set(matchRef, match);

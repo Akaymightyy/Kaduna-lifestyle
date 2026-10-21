@@ -20,6 +20,7 @@ import { openTennisMatchScreen, initTennisUI } from "./tennis_ui.js";
 import { openPenaltyMatchScreen, initPenaltyUI } from "./penalty_shootout_ui.js";
 import { openSniperMatchScreen, initSniperUI } from "./sniper_ui.js";
 import { openBowlingMatchScreen, initBowlingUI } from "./bowling_ui.js";
+import { openPoolMatchScreen, initPoolUI } from "./pool_ui.js";
 import { db } from "./firebase.js";
 import { ref, get as fbGet } from "firebase/database";
 
@@ -138,6 +139,11 @@ function _openCreator() {
           <div class="emoji">🎳</div>
           <div class="name">Bowling</div>
           <div class="desc">10 frames, highest score wins</div>
+        </div>
+        <div class="cc-game" data-game="pool">
+          <div class="emoji">🎱</div>
+          <div class="name">Pool</div>
+          <div class="desc">7 rounds, most balls potted wins</div>
         </div>
       </div>
       <div class="cc-section">Stake (winner takes 95% of pot)</div>
@@ -297,6 +303,11 @@ async function _openMatchScreen(matchId) {
     if (m && m.game === "bowling") {
       _matchEl.style.display = "none";
       openBowlingMatchScreen(matchId);
+      return;
+    }
+    if (m && m.game === "pool") {
+      _matchEl.style.display = "none";
+      openPoolMatchScreen(matchId);
       return;
     }
   } catch (e) {
