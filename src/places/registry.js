@@ -25,6 +25,7 @@ import * as barber_mod from "./barber.js";
 import * as nightclub_mod from "./nightclub.js";
 import * as home_mod from "./home.js";
 import * as dealership_mod from "./dealership.js";
+import * as arena_mod from "./arena.js";
 import { enhanceInterior } from "../interior_enhance.js";
 
 const MODULES = {
@@ -43,6 +44,7 @@ const MODULES = {
   nightclub: nightclub_mod,
   home: home_mod,
   dealership: dealership_mod,
+  arena: arena_mod,
 };
 
 const PLACE_DEFS = [
@@ -366,6 +368,26 @@ const PLACE_DEFS = [
     npcList: [],
     activities: [
       { id: "browse_cars", label: "Browse cars", desc: "Walk the showroom floor and tap any car to view" },
+    ],
+  },
+  {
+    id: "arena",
+    name: "Kaduna Arena",
+    type: "interior",
+    worldX: -60, worldZ: -80,
+    entranceX: -60, entranceZ: -77,
+    entranceFacing: Math.PI / 2,
+    minimapIcon: "🎮",
+    minimapColor: 0xf2b134,
+    hours: { open: 10, close: 24 },
+    ambientSound: null,
+    npcList: [],
+    activities: [
+      { id: "bowling", label: "🎳 Bowling", desc: "Roll a strike — coming soon" },
+      { id: "pool", label: "🎱 Pool", desc: "Rack 'em up — coming soon" },
+      { id: "arcade", label: "🕹️ Arcade", desc: "Insert coin — coming soon" },
+      { id: "okada_dash", label: "🏍️ Okada Dash", desc: "Endless runner — coming soon" },
+      { id: "browse", label: "👀 Look around", desc: "Hang out + meet people" },
     ],
   },
 ];

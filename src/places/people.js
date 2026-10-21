@@ -33,6 +33,26 @@ export async function spawnPeople(group, specs) {
       ch.group.position.set(p.x, 0, p.z);
       ch.group.rotation.y = p.ry;
       ch.group.traverse((o) => { if (o.isMesh) { o.castShadow = false; o.frustumCulled = true; } });
+      // NAME TAG (Oct 21): floating name + role sprite above the NPC's head.
+      // Like MyAbujaLife's "Ebere [STAFF]" — green background, white text.
+      const tagText = p.name + (p.role ? " [" + p.role.toUpperCase() + "]" : "");
+      const tagCanvas = document.createElement("canvas");
+      tagCanvas.width = 256; tagCanvas.height = 48;
+      const tctx = tagCanvas.getContext("2d");
+      tctx.fillStyle = "rgba(15,77,58,0.88)";
+      tctx.fillRect(0, 0, 256, 48);
+      tctx.fillStyle = "#f2b134";
+      tctx.fillRect(0, 0, 4, 48);
+      tctx.fillStyle = "#fff";
+      tctx.font = "bold 18px Poppins,Arial,sans-serif";
+      tctx.textAlign = "center"; tctx.textBaseline = "middle";
+      tctx.fillText(tagText.slice(0, 24), 130, 25, 240);
+      const tagTex = new THREE.CanvasTexture(tagCanvas);
+      const tagSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tagTex, depthTest: false, transparent: true }));
+      tagSprite.position.y = 2.0;
+      tagSprite.scale.set(1.4, 0.28, 1);
+      tagSprite.userData = { isNameTag: true, npcId: p.id };
+      ch.group.add(tagSprite);
       group.add(ch.group);
       p.group = ch.group; p.animate = ch.animate; p.ready = true; p.loading = false;
     }).catch(() => { p.loading = false; p.ready = false; });
