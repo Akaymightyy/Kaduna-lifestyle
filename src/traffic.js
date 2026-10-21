@@ -314,7 +314,7 @@ export function createTraffic(scene) {
 
       p.set(xAdjusted, 0.02, c.lane.z);
       q.setFromAxisAngle(up, c.lane.dir > 0 ? 0 : Math.PI);
-      const ek = Math.min(1, Math.min(sAdjusted, len - sAdjusted) / 30);   // shrink to nothing at the ends so cars never pop in/out of walls
+      const ek = Math.min(1, Math.min(sAdjusted, len - sAdjusted) / 6);   // shrink to nothing at the ends so cars never pop in/out of walls
       sc.setScalar(Math.max(0.001, ek));
       m.compose(p, q, sc);
       mm.body.setMatrixAt(mm.i, m); mm.body.setColorAt(mm.i, c.color);

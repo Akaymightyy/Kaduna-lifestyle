@@ -128,7 +128,7 @@ export function tickLife(px, pz, show = true) {
     let go = 1;
     if (_pv.on) { const fx = c.ln.axis === "x" ? c.ln.dir : 0, fz = c.ln.axis === "z" ? c.ln.dir : 0, ddx = _pv.x - _p.x, ddz = _pv.z - _p.z, along = ddx * fx + ddz * fz, lat = Math.abs(ddx * fz - ddz * fx); if (along > -1.5 && along < 9 && lat < 2.8) go = along < 5 ? 0 : (along - 5) / 4; }
     c.s += c.v * dt * go; lanePos(c.ln, c.s, _p); lanePos(c.ln, c.s + 1.5, nx);
-    const lt = ((c.s % c.ln.len) + c.ln.len) % c.ln.len, ek = Math.max(0.001, Math.min(1, Math.min(lt, c.ln.len - lt) / 30));   // shrink at the lane ends: no popping out of walls
+    const lt = ((c.s % c.ln.len) + c.ln.len) % c.ln.len, ek = Math.max(0.001, Math.min(1, Math.min(lt, c.ln.len - lt) / 6));   // shrink at the lane ends: no popping out of walls
     _s2.setScalar(ek);
     const yaw = Math.atan2(-(nx.z - _p.z), nx.x - _p.x);
     _q.setFromAxisAngle(_up, yaw); _m.compose(_p, _q, _s2); mesh.setMatrixAt(i, _m); BEAM.setMatrixAt(mesh === carMesh ? i : cars.length + i, _m);
