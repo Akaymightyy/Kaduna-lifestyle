@@ -23,22 +23,27 @@ export const VEHICLE_CATALOG = [
   { id: "keke", seat: { f: 0.65, y: 0.5, s: 0 },    name: "Keke Napep",           emoji: "🛺",   price: 25000,  speed: 4.0, desc: "The Kaduna classic. Steady + reliable.",
     glbPath: "/models/vehicles/keke_napep.glb", fit: { s: 1.0, cx: 0.15, cz: 0.01, minY: 0.11, rotY: 0, hide: ["Object_89"] } },
   { id: "bicycle", seat: { f: 0, y: 0.55, s: 0 }, name: "Bicycle",              emoji: "🚲",   price: 8000,   speed: 3.0, desc: "Eco-friendly. No fuel needed." },
-  { id: "sedan",   name: "Sedan",                emoji: "🚗",   price: 80000,  speed: 5.5, desc: "Comfortable daily driver. AC + stereo." },
-  { id: "hatch",   name: "Hatchback",           emoji: "🚙",   price: 55000,  speed: 5.0, desc: "Compact + nimble. Easy to park." },
+  { id: "sedan",   seat: { f: 0.3, y: 0.5, s: 0.4 },  name: "Sedan",                emoji: "🚗",   price: 80000,  speed: 5.5, desc: "Comfortable daily driver. AC + stereo." },
+  { id: "hatch",   seat: { f: 0.2, y: 0.5, s: 0.35 }, name: "Hatchback",           emoji: "🚙",   price: 55000,  speed: 5.0, desc: "Compact + nimble. Easy to park." },
   { id: "jeep", seat: { f: 0.3, y: 0.5, s: 0.4 },    name: "Jeep Wrangler",       emoji: "🚙",   price: 300000, speed: 5.2, desc: "Rugged + bold. Conquers any terrain.",
     glbPath: "/models/vehicles/jeep.glb", fit: { s: 0.8, cx: -0.31, cz: 0, minY: -0.41, rotY: 0 } },
-  { id: "suv",     name: "SUV",                  emoji: "🚐",   price: 150000, speed: 4.8, desc: "Big + bold. Handles any road." },
-  { id: "bus",     name: "Lagos Danfo Bus",      emoji: "🚌",   price: 120000, speed: 3.5, desc: "The iconic yellow bus. Carry passengers.",
+  { id: "suv",     seat: { f: 0.3, y: 0.55, s: 0.4 }, name: "SUV",                  emoji: "🚐",   price: 150000, speed: 4.8, desc: "Big + bold. Handles any road." },
+  { id: "bus", seat: { f: 1.5, y: 0.5, s: 0.4 }, name: "Lagos Danfo Bus",      emoji: "🚌",   price: 120000, speed: 3.5, desc: "The iconic yellow bus. Carry passengers.",
     glbPath: "/models/vehicles/lagos_danfo_bus.glb", fit: { s: 2.9, cx: 0, cz: 0, minY: -0.45, rotY: 0 } },
-  { id: "sports",  name: "Sports Car",           emoji: "🏎️",   price: 500000, speed: 7.0, desc: "Flashy + fast. The ultimate flex." },
+  { id: "sports",  seat: { f: 0.2, y: 0.35, s: 0.3 }, name: "Sports Car",           emoji: "🏎️",   price: 500000, speed: 7.0, desc: "Flashy + fast. The ultimate flex." },
   { id: "ferrari", seat: { f: 0.2, y: 0.3, s: 0.35 }, name: "Ferrari",              emoji: "🏎️",   price: 2000000,speed: 8.5, desc: "Italian Stallion. The peak of Kaduna flex.",
     glbPath: "/models/vehicles/ferrari.glb", fit: { s: 1.0, cx: 0, cz: 0.02, minY: 0, rotY: -Math.PI / 2 } },
-  { id: "luxury",  name: "Luxury Sedan",         emoji: "🚘",   price: 1000000,speed: 6.5, desc: "VIP ride. Big oga energy." },
+  { id: "luxury",  seat: { f: 0.3, y: 0.5, s: 0.4 }, name: "Luxury Sedan",         emoji: "🚘",   price: 1000000,speed: 6.5, desc: "VIP ride. Big oga energy." },
 ];
 
-// Where the driver sits (metres from the middle): f = forward, y = height of the hips, s = towards the driver's side (left)
+// Where the driver sits (metres from the middle): f = forward (+X local), y = height of the seat above the ground,
+// s = towards the driver's side (left, -Z local). The character is positioned at (s, y, f) in avatar-group space
+// (the same -PI/2 rotation that aligns the vehicle's nose to +Z group maps vehicle-local (f, y, -s) → group (s, y, f)).
+// Closed vehicles (bus, jeep, ferrari) define a seat so the driver shows INSIDE the cabin, visible through the windows.
+// Open vehicles (okada, keke, bicycle) define a seat so the driver sits on top.
+// Vehicles with NO seat (sedan, hatch, suv, sports, luxury) keep the driver hidden — no clean place to put them.
 export const DEFAULT_SEAT = { f: 0.3, y: 0.4, s: 0.4 };
-export function getSeat(id) { const v = getVehicle(id); return (v && v.seat) || null; }   // null = closed vehicle: driver stays hidden
+export function getSeat(id) { const v = getVehicle(id); return (v && v.seat) || null; }
 export function getVehicle(id) { return VEHICLE_CATALOG.find(v => v.id === id); }
 
 // ---- State ----

@@ -274,3 +274,25 @@ export function disposeBillboards() {
   _billboards = [];
   _subscriptions = {};
 }
+
+// BILLBOARD MODERATION (Oct 21): report a billboard ad for inappropriate
+// content. Writes to Firebase at billboardReports/{reportId}. Admin can
+// review reports and remove offending ads.
+export async function reportBillboard(billboardId, reporterUid, reason, toastFn) {
+  if (!reporterUid || !billboardId) return false;
+  try {
+    const reportRef = push(ref(db, "billboardReports"));
+    await set(reportRef, {
+      billboardId,
+      reporterUid,
+      reason: (reason || "").slice(0, 300),
+      ts: Date.now(),
+      status: "pending",  // pending | reviewed | dismissed
+    });
+    toastFn?.("⚑ Report sent. Admin will review this billboard.");
+    return true;
+  } catch (e) {
+    toastFn?.("Could not send report — try again");
+    return false;
+  }
+}

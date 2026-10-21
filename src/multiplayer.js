@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { auth, db } from "./firebase.js";
 import { ref, onValue, set, update, onDisconnect, push, serverTimestamp } from "firebase/database";
 import { onAuthStateChanged } from "firebase/auth";
-import { buildRemoteVehicleMesh } from "./vehicles.js";
+import { buildRemoteVehicleMesh, getSeat } from "./vehicles.js";
 import { createCharacter } from "./characters.js";
 
 
@@ -260,6 +260,9 @@ function updateAvatars() {
     m.group.visible = true;
     m.group.position.set(px, 0, pz);
     m.group.rotation.y = d.heading||0;
+    // EMOTE BROADCAST (Oct 21): if this remote player has an active emote,
+    // show the emoji sprite above their name tag. Clears when expired.
+    _updateEmoteSprite(m, d);
     // SYNC (Oct 19): if this remote player is riding, swap their walking
     // avatar for the ACTUAL VEHICLE 3D mesh. We keep their name tag
     // floating above the vehicle so you can still tell who's inside.
@@ -285,13 +288,23 @@ function updateAvatars() {
 
 // SYNC (Oct 19, v2): swap the walking-avatar for an ACTUAL VEHICLE 3D
 // mesh when a remote player is riding. The avatar's character body is
-// hidden (player is sitting inside the vehicle), but the name tag stays
-// visible above the vehicle so you know who's driving.
+// moved to the SEAT OFFSET (so it shows INSIDE the cabin of closed
+// vehicles like danfo/jeep/ferrari, or sits ON TOP of open vehicles like
+// okada/keke/bicycle). The name tag is lifted to roof level so it floats
+// above the vehicle, telling viewers who's driving.
 //
-// Why the change: the first version showed a 🏍️ emoji badge above the
-// walking avatar — looked cheap and didn't actually represent the
-// vehicle. User (rightly) complained. Now we build the real 3D vehicle
-// model using the same code path as the local player's ride.
+// Why we show the driver instead of hiding them: the user complained
+// that the emoji-badge version was cheap and the hide-the-driver version
+// made it look like the vehicle was driving itself. Now the driver is
+// visible at the correct seat position. Test by viewing the vehicle
+// from the FRONT and from the SIDE — the driver should appear sitting
+// inside the cabin.
+//
+// Convention (matches vehicles.js):
+//   seat = { f: forward (+X local), y: height above ground, s: left (-Z local) }
+//   In avatar-group space (after the vehicle's -PI/2 rotation), vehicle-local
+//   (f, y, -s) maps to group-local (s, y, f). So the character is positioned
+//   at (s, y, f) in group space — same convention used by the local player.
 const _ridingBuildInFlight = new Set();
 function _swapRidingMesh(m, oldRiding) {
   // dispose old vehicle mesh if any
@@ -303,17 +316,30 @@ function _swapRidingMesh(m, oldRiding) {
     });
     m.vehicleMesh = null;
   }
-  // Restore the character body visibility (in case we hid it before)
-  if (m.ch && m.ch.model) m.ch.model.visible = true;
+  // Restore the character body visibility + reset its seat offset
+  if (m.ch && m.ch.model) {
+    m.ch.model.visible = true;
+    m.ch.model.position.set(0, 0, 0);
+  }
   // If the player is no longer riding, we're done — they walk again
   if (!m.riding) return;
   // Don't fire duplicate builds
   const uid = m.playerUid;
   if (uid && _ridingBuildInFlight.has(uid)) return;
   if (uid) _ridingBuildInFlight.add(uid);
-  // Hide the character body — the player is sitting inside the vehicle,
-  // we don't want their legs sticking out of the car body
-  if (m.ch && m.ch.model) m.ch.model.visible = false;
+  // Position the character body at the seat offset (if the vehicle has one).
+  // Vehicles without a seat keep the driver hidden (no clean place to sit).
+  const seat = getSeat(m.riding);
+  if (seat && m.ch && m.ch.model) {
+    // (s, y, f) in group space = (f, y, -s) in vehicle local space, which is
+    // exactly where the driver's hips/seat should be.
+    m.ch.model.position.set(seat.s, seat.y, seat.f);
+    m.ch.model.visible = true;
+  } else if (m.ch && m.ch.model) {
+    // No seat defined — hide the driver body to avoid clipping through the
+    // vehicle's bodywork.
+    m.ch.model.visible = false;
+  }
   // Lift the name tag so it floats above the vehicle roof (not the head)
   for (const child of m.group.children) {
     if (child.isSprite && child.userData.isNameTag) {
@@ -326,7 +352,10 @@ function _swapRidingMesh(m, oldRiding) {
     if (!mesh) {
       console.warn("[multiplayer] vehicle mesh build failed for", m.riding);
       // restore avatar as fallback
-      if (m.ch && m.ch.model) m.ch.model.visible = true;
+      if (m.ch && m.ch.model) {
+        m.ch.model.visible = true;
+        m.ch.model.position.set(0, 0, 0);
+      }
       return;
     }
     // Bail if the player dismounted while we were loading
@@ -336,15 +365,19 @@ function _swapRidingMesh(m, oldRiding) {
     }
     m.vehicleMesh = mesh;
     // Vehicle is a child of the avatar group so it inherits position +
-    // rotation from the group. The character body is hidden above.
+    // rotation from the group. The character body is positioned at the
+    // seat offset above (visible through the cabin windows).
     m.group.add(mesh);
-    // Center the vehicle at the player's feet
+    // Center the vehicle at the player's feet, nose pointing forward (+Z group)
     mesh.position.set(0, 0, 0);
     mesh.rotation.y = -Math.PI / 2;      // the model's nose is +X, the avatar group's forward is (sin h, cos h)
   }).catch((e) => {
     if (uid) _ridingBuildInFlight.delete(uid);
     console.warn("[multiplayer] vehicle build error:", e.message);
-    if (m.ch && m.ch.model) m.ch.model.visible = true;
+    if (m.ch && m.ch.model) {
+      m.ch.model.visible = true;
+      m.ch.model.position.set(0, 0, 0);
+    }
   });
 }
 
@@ -367,3 +400,63 @@ export function getPassengerUids(driverUid) {
 // main.js to check "is player X currently riding?" before sending them
 // a pickup invite).
 export function getRemotePlayerData(uid) { return _players[uid] || null; }
+
+// EMOTE BROADCAST (Oct 21): render an emote emoji sprite above a remote
+// player's name tag when they broadcast an emote. The emote data comes from
+// the live node: live/{uid} = { ..., emote, emoteDur, emoteTs }.
+// When the emote expires (based on emoteDur + emoteTs), the sprite is removed.
+const EMOTE_EMOJIS = {
+  wave: "👋", dance: "🕺", clap: "👏", sit: "🪑", laugh: "😂",
+  bow: "🙇", salute: "🫡", shrug: "🤷", thumbsup: "👍", peace: "✌️",
+};
+const EMOTE_DURATIONS = {
+  wave: 3, dance: 5, clap: 3, sit: 0, laugh: 3,
+  bow: 2, salute: 2, shrug: 2, thumbsup: 2, peace: 2,
+};
+function _updateEmoteSprite(m, d) {
+  const emoteType = d?.emote;
+  const emoteTs = d?.emoteTs;
+  const emoteDur = d?.emoteDur ?? EMOTE_DURATIONS[emoteType];
+  // Check if emote is active
+  let active = false;
+  if (emoteType && EMOTE_EMOJIS[emoteType]) {
+    if (emoteDur === 0 || emoteDur == null) {
+      // Persistent emote (like "sit") — stays until cleared
+      active = true;
+    } else if (emoteTs) {
+      // Timed emote — check if expired
+      const elapsed = (Date.now() - emoteTs) / 1000;
+      active = elapsed < emoteDur;
+    }
+  }
+  // Remove old emote sprite if no longer active or type changed
+  if (m.emoteSprite) {
+    const curType = m.emoteSprite.userData?.emoteType;
+    if (!active || curType !== emoteType) {
+      if (m.emoteSprite.parent) m.emoteSprite.parent.remove(m.emoteSprite);
+      if (m.emoteSprite.material) {
+        if (m.emoteSprite.material.map) m.emoteSprite.material.map.dispose();
+        m.emoteSprite.material.dispose();
+      }
+      m.emoteSprite = null;
+    }
+  }
+  // Add new emote sprite if active and not already shown
+  if (active && !m.emoteSprite) {
+    const emoji = EMOTE_EMOJIS[emoteType];
+    const c = document.createElement("canvas");
+    c.width = 64; c.height = 64;
+    const ctx = c.getContext("2d");
+    ctx.font = "44px Arial";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(emoji, 32, 34);
+    const tex = new THREE.CanvasTexture(c);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+    sp.position.y = 3.2;  // above the name tag (which is at 2.6)
+    sp.scale.set(0.8, 0.8, 1);
+    sp.userData = { emoteType };
+    m.group.add(sp);
+    m.emoteSprite = sp;
+  }
+}

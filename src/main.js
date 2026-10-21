@@ -68,7 +68,8 @@ import { extendCatalog } from "./dealership_catalog.js";
 import { buildStreetDetail, makeBlobShadows } from "./street.js";
 import { initActivity, startActivity, tickActivity, isBusy, cancelActivity, eatSpec, toiletSpec, sitSpec, funSpec, placeSpec } from "./activity.js";
 import { initWorldChat, toggleWorldChat, closeWorldChat, setChatBlocked, setChatOnline } from "./worldchat.js";
-import { initBillboards, getBillboards, getBillboardPositions, getBillboardAdInfo, buyBillboardAd } from "./billboards.js";
+import { initBillboards, getBillboards, getBillboardPositions, getBillboardAdInfo, buyBillboardAd, reportBillboard } from "./billboards.js";
+import { initEmoteBroadcast, sendEmote, clearEmote, EMOTES } from "./emote_broadcast.js";
 import { initMessages, searchUsers, openDM, sendMessage, sendHouseInvite, openChat, closeChat, getChatList, sendMoney, createGroup, leaveGroup, blockUser, reportUser, getChatMeta, cleanupMessages, getPresence, listenToPresence, getProfile } from "./messages.js";
 import { initEvents, tickNepa, isNepaCut, getNepaStatus, hasPowerBackup, getModifiedDrain, tickMoodlets, addMoodlet, getActiveMoodlets, getConsequences, getWalkSpeedMultiplier, MOODLET_DEFS } from "./events.js";
 import { SKILLS, CAREERS, SHIFT_TONES, initCareers, getSkills, getCareer, getCareerDef, canJoinCareer, canPromote, joinCareer, promote, doShift, trainSkill } from "./careers.js";
@@ -292,7 +293,20 @@ renderer.shadowMap.type = THREE.PCFShadowMap;  // cheaper than PCFSoft on phones
 renderer.shadowMap.autoUpdate = false;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 // vivid colour grade for EVERY city, district, vehicle, character and sky (one place, nothing missed)
-try { renderer.domElement.style.filter = 'saturate(1.16) contrast(1.08) brightness(1.02)'; } catch (e) {}
+// BLOOM (Oct 21): enhanced CSS filter for a bloom-like glow effect on
+// Medium/High. Low = minimal filter (just saturation). The "drop-shadow"
+// creates a subtle glow around bright objects (lights, neon signs, car
+// headlights) without needing EffectComposer (which is too heavy for mobile).
+try {
+  const q = localStorage.getItem("kaduna-graphics") || "medium";
+  if (q === "high") {
+    renderer.domElement.style.filter = 'saturate(1.2) contrast(1.1) brightness(1.05) drop-shadow(0 0 1px rgba(255,240,200,.15))';
+  } else if (q === "medium") {
+    renderer.domElement.style.filter = 'saturate(1.16) contrast(1.08) brightness(1.02)';
+  } else {
+    renderer.domElement.style.filter = 'saturate(1.08) contrast(1.04) brightness(1.0)';
+  }
+} catch (e) {}
 // cinematic vignette (cheap CSS overlay) — frames the scene like a real camera lens
 try { const v = document.createElement('div'); v.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2;background:radial-gradient(ellipse at 50% 45%,rgba(0,0,0,0) 55%,rgba(0,0,0,.34) 100%)'; document.body.appendChild(v); } catch (e) {}
 const scene = new THREE.Scene();
@@ -2160,12 +2174,17 @@ window._sellCompany = () => {
 };
 window._setGraphicsQuality = (q) => {
   applyQuality(q, { renderer, sun, scene });
-  // FIX (Oct 21): reset the auto-governor when the user manually changes
-  // quality. The governor auto-downgrades pixelRatio when FPS drops, but
-  // it was staying stuck at level 4 (pixelRatio 0.75 → blurry) even
-  // after the user toggled Low→High in settings. Resetting _gLevel here
-  // means: every time you change quality, the governor starts fresh.
   _gLevel = 0; _gAcc = 0; _gN = 0; _gWarm = 0;
+  // BLOOM (Oct 21): re-apply the CSS bloom filter when quality changes
+  try {
+    if (q === "high") {
+      renderer.domElement.style.filter = 'saturate(1.2) contrast(1.1) brightness(1.05) drop-shadow(0 0 1px rgba(255,240,200,.15))';
+    } else if (q === "medium") {
+      renderer.domElement.style.filter = 'saturate(1.16) contrast(1.08) brightness(1.02)';
+    } else {
+      renderer.domElement.style.filter = 'saturate(1.08) contrast(1.04) brightness(1.0)';
+    }
+  } catch (e) {}
   toast("🎨 Graphics set to " + q.toUpperCase() + ". Governor reset.");
   showPhoneApp("settings");
 };
@@ -3395,6 +3414,21 @@ initAuth((user) => {
   }
   // FEATURE: init billboard/ad system (10 billboards in every district + 10 on the main roads)
   initBillboards(scene);
+  // EMOTE BROADCAST (Oct 21): lets players send emotes (wave, dance, clap,
+  // etc) that all nearby players see on their remote avatar. Writes to
+  // live/{uid} = { emote, emoteDur, emoteTs }. Remote avatars render the
+  // emote emoji above their name tag (handled in multiplayer.js _updateEmoteSprite).
+  initEmoteBroadcast({ db, getUserId: () => getMyUid() });
+  window._emote = (type) => sendEmote(type);
+  window._clearEmote = () => clearEmote();
+  // BILLBOARD REPORT (Oct 21): lets players report inappropriate billboard
+  // ads. Writes to billboardReports/{reportId} for admin review.
+  window._reportBillboard = (billboardId) => {
+    const reason = prompt("Why are you reporting this billboard?");
+    if (!reason) return;
+    reportBillboard(billboardId, getMyUid(), reason, toast);
+  };
+  console.log("[emote+billboard] emote broadcast + billboard report initialised");
   // ---- Init Messages app ----
   const myName = user.displayName || user.email?.split("@")[0] || "Player";
   initMessages(user.uid, myName, toast, () => { _updateUnreadBadge(); if (_showingApp === "messages" && !window._openChatId) window._msgRefreshList?.(); });
