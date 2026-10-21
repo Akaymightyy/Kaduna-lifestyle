@@ -25,6 +25,7 @@ import * as barber_mod from "./barber.js";
 import * as nightclub_mod from "./nightclub.js";
 import * as home_mod from "./home.js";
 import * as dealership_mod from "./dealership.js";
+import { enhanceInterior } from "../interior_enhance.js";
 
 const MODULES = {
   central_market: central_market_mod,
@@ -422,6 +423,10 @@ export async function buildPlace(id, scene, ctx) {
     throw new Error("Place module for " + id + " not found or has no build()");
   }
   const instance = await mod.build(scene, ctx);
+  // INTERIOR ENHANCEMENT (Oct 21): add common props (plants, ceiling lights,
+  // bench, wall paintings) to interior places after they're built. Safe —
+  // enhanceInterior returns early for outdoor places + home + dealership.
+  try { if (instance?.group) enhanceInterior(instance.group, def); } catch (e) {}
   _loaded.set(id, { def, moduleExports: mod, instance });
   _notify("built", id);
   return instance;
