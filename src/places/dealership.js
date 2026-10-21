@@ -33,7 +33,7 @@ export async function build(scene, ctx) {
   group.visible = false;
 
   // ---- Floor: polished dark tile ----
-  const floorMesh = floor(40, 30, 0x1a1a1a, 1);
+  const floorMesh = floor(40, 30, 0xd9d4c8, 1);
   group.add(floorMesh);
 
   // ---- Walls: opaque on all 4 sides so outside doesn't bleed through ----
@@ -43,17 +43,17 @@ export async function build(scene, ctx) {
   // with a small entrance gap on the south side.)
   // Concrete back wall (north)
   group.add(mergedMesh([
-    box(40, 4, 0.3, 0, 2, -15, 0x0a3b2a),
+    box(40, 4, 0.3, 0, 2, -15, 0xe8e2d2),
   ]));
   // Side walls (east + west) — full height
   group.add(mergedMesh([
-    box(0.3, 4, 30, -20, 2, 0, 0x0a3b2a),
-    box(0.3, 4, 30, 20, 2, 0, 0x0a3b2a),
+    box(0.3, 4, 30, -20, 2, 0, 0xe8e2d2),
+    box(0.3, 4, 30, 20, 2, 0, 0xe8e2d2),
   ]));
   // South wall (entrance side) — split into 2 segments with a 4m gap in the middle for the door
   group.add(mergedMesh([
-    box(18, 4, 0.3, -11, 2, 15, 0x0a3b2a),
-    box(18, 4, 0.3, 11, 2, 15, 0x0a3b2a),
+    box(18, 4, 0.3, -11, 2, 15, 0xe8e2d2),
+    box(18, 4, 0.3, 11, 2, 15, 0xe8e2d2),
   ]));
   // Door frame (gold accent around the entrance gap)
   group.add(mergedMesh([
@@ -65,7 +65,7 @@ export async function build(scene, ctx) {
   // (Oct 20 fix: originally the dealership had no roof, so the sky was
   // visible from inside. Now we have a closed box — only the entrance gap
   // lets light in, which is what real showrooms feel like.)
-  const roofMat = new THREE.MeshLambertMaterial({ color: 0x1a1a1a });
+  const roofMat = new THREE.MeshLambertMaterial({ color: 0xf1eee6 });
   const roof = new THREE.Mesh(
     new THREE.BoxGeometry(40, 0.2, 30),
     roofMat
@@ -97,7 +97,7 @@ export async function build(scene, ctx) {
   group.add(subSign);
 
   // ---- Lighting rig ----
-  group.add(interiorLights({ ambient: 0.95 }));
+  group.add(interiorLights({ ambient: 1.3 }));
   // Strip lights overhead (gold + green — Nigerian flag colours)
   for (let i = -15; i <= 15; i += 10) {
     const stripGeo = new THREE.BoxGeometry(8, 0.1, 0.4);
@@ -208,8 +208,8 @@ export async function build(scene, ctx) {
   );
   cap.position.y = 2.05;
   salesman.add(cap);
-  salesman.position.set(0, 0, 12);
-  salesman.rotation.y = Math.PI; // face the entrance
+  salesman.position.set(7, 0, 5);
+  salesman.rotation.y = Math.PI * 0.75; // face the door
   salesman.userData = { isSalesman: true };
   group.add(salesman);
 
@@ -217,7 +217,7 @@ export async function build(scene, ctx) {
   const salesmanSign = signMesh("Alhaji Manga — Salesman", 3, 0.4, {
     bg: "#0a3b2a", fg: "#f2b134", size: 16, border: false,
   });
-  salesmanSign.position.set(0, 2.4, 12);
+  salesmanSign.position.set(7, 2.4, 5);
   salesmanSign.material.side = THREE.DoubleSide;
   group.add(salesmanSign);
 
