@@ -255,7 +255,7 @@ export function createTraffic(scene) {
       scene.add(im); mm.glb = im; mm.body.visible = false; mm.lights.visible = false;
     } catch (e) { console.warn("[traffic] glb swap failed", type, e); }
   };
-  swapInGlb("keke", "keke"); swapInGlb("bus", "bus");
+  swapInGlb("bus", "bus");   // keke GLB is 126k triangles per copy — far too heavy to instance dozens of times (that made the game slow); keke traffic stays light boxes
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
   const white = new THREE.Color(1, 1, 1), sc = new THREE.Vector3(1, 1, 1);
   const positions = [];

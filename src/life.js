@@ -44,7 +44,7 @@ async function glbInstanced(vehicleId, count) {
 }
 
 // ---- real people: a small pool of full character models is lent to the walkers nearest the player ----
-const POOL = 16, RIGS = [];                 // { ch, who:-1 }
+const POOL = 10, RIGS = [];                 // { ch, who:-1 }
 const SHOW_R = 55;
 
 let _scene = null, _on = false, _t = 0, _last = 0;
@@ -90,10 +90,10 @@ export function initLife(scene) {
   scene.add(carMesh, busMesh);
   (async () => {
     try {
-      const kinds = ["jeep", "ferrari", "keke"];
-      const list = await Promise.all(kinds.map((k, ki) => glbInstanced(k, Math.ceil(cars.length / 3))));
+      const kinds = ["jeep"];   // light model only (jeep ~11k tris, danfo ~20k). Ferrari (311k) and keke (126k) per instance would freeze phones
+      const list = await Promise.all(kinds.map((k, ki) => glbInstanced(k, cars.length)));
       const bus = await glbInstanced("bus", buses.length);
-      if (list.every(Boolean)) { carG = list; carG.forEach((m) => scene.add(m)); }
+      if (list.every(Boolean)) { carG = list; carG.forEach((m) => { cars.forEach((c, i) => m.setColorAt(i, _col.setHSL(c.hue, 0.55, 0.62))); m.instanceColor.needsUpdate = true; scene.add(m); }); }
       if (bus) { busG = bus; scene.add(bus); }
       glbReady = true;
     } catch (e) { console.warn("[life] glb vehicles failed", e); }
@@ -188,7 +188,7 @@ export function tickLife(px, pz, show = true) {
     const lt = ((c.s % c.ln.len) + c.ln.len) % c.ln.len, ek = Math.max(0.001, Math.min(1, Math.min(lt, c.ln.len - lt) / 6));   // shrink at the lane ends: no popping out of walls
     _s2.setScalar(ek);
     const yaw = Math.atan2(-(nx.z - _p.z), nx.x - _p.x);
-    _q.setFromAxisAngle(_up, yaw); _m.compose(_p, _q, _s2); mesh.setMatrixAt(i, _m); if (glbReady) { if (mesh === carMesh) { if (carG.length) carG[i % 3].setMatrixAt((i / 3) | 0, _m); } else if (busG) busG.setMatrixAt(i, _m); } BEAM.setMatrixAt(mesh === carMesh ? i : cars.length + i, _m);
+    _q.setFromAxisAngle(_up, yaw); _m.compose(_p, _q, _s2); mesh.setMatrixAt(i, _m); if (glbReady) { if (mesh === carMesh) { if (carG.length) carG[0].setMatrixAt(i, _m); } else if (busG) busG.setMatrixAt(i, _m); } BEAM.setMatrixAt(mesh === carMesh ? i : cars.length + i, _m);
     SH.set(mesh === carMesh ? i : cars.length + i, _p.x, _p.z, (mesh === carMesh ? 2.6 : 3.4) * ek, (mesh === carMesh ? 5.4 : 12) * ek, yaw + Math.PI / 2);
   };
   cars.forEach((c, i) => place(carMesh, i, c)); buses.forEach((c, i) => place(busMesh, i, c));
