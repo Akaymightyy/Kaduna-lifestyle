@@ -13,6 +13,7 @@
 //   5 = Mansion                    — 22x16m
 //   6 = Private Estate             — 28x20m
 
+import { showContext, hideContext, isContextShown } from "../contextmenu.js";
 import * as THREE from "three";
 import { box, mergedMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { dressRoom } from "../art/dress.js";
@@ -274,6 +275,14 @@ export async function build(scene, ctx) {
     }
   }
 
+  // ---------- tap / walk-up context menu (small, see-through, never covers the room) ----------
+  const _SIT_RE = /sofa|chair|stool|bench|seat|bed|mattress/;
+  const _isSittable = (id) => _SIT_RE.test(id);
+  let _suppressKey = null, _sittingIdx = -1;
+  const _P = () => ctx.getPlayer ? ctx.getPlayer() : null;
+  const _keyOf = (idx) => "furn:" + idx;
+  const _radiusOf = (it) => Math.max(1.5, Math.max(it.w || 1, it.d || 1) * 0.5 + 0.9);
+
   function _selectFurniture(idx) {
     if (idx < 0 || idx >= _placedFurniture.length) return;
     _selectedIdx = idx;
@@ -281,45 +290,93 @@ export async function build(scene, ctx) {
   }
 
   function _showFurnitureControls(idx) {
-    const item = _placedFurniture[idx];
-    const it = getItem(item.id);
-    if (!it) return;
-    // Show a small control bar with Rotate / Move / Remove buttons
-    let bar = document.getElementById("furniture-controls");
-    if (!bar) {
-      bar = document.createElement("div");
-      bar.id = "furniture-controls";
-      bar.style.cssText =
-        "position:fixed;left:50%;bottom:calc(140px + env(safe-area-inset-bottom));" +
-        "transform:translateX(-50%);background:rgba(11,11,12,.95);color:#fff;" +
-        "padding:8px;gap:6px;border-radius:12px;display:flex;z-index:35;" +
-        "border:1px solid #f2b134;max-width:90vw;flex-wrap:wrap;justify-content:center;";
-      document.body.appendChild(bar);
+    const item = _placedFurniture[idx]; if (!item) return;
+    const it = getItem(item.id); if (!it) return;
+    const actions = [];
+    if (_isSittable(item.id)) actions.push({ icon: "🪑", label: "Sit", run: () => _sitOn(idx) });
+    if (!_isVisitor) {
+      actions.push({ icon: "↻", label: "Rotate", keepOpen: true, run: () => window._furnitureAction("rotate", idx) });
+      actions.push({ icon: "✥", label: "Move", run: () => window._furnitureAction("move", idx) });
+      actions.push({ icon: "💰", label: "Sell", danger: true, run: () => window._furnitureAction("sell", idx) });
+      actions.push({ icon: "📦", label: "Store", run: () => window._furnitureAction("remove", idx) });
     }
-    bar.innerHTML =
-      '<span style="font-size:11px;font-weight:600;color:#f2b134;padding:4px 8px;">' + (it.emoji || '🛋') + ' ' + it.name + '</span>' +
-      '<button onclick="window._furnitureAction(\'rotate\')" style="background:#f2b134;color:#000;border:none;border-radius:6px;padding:6px 10px;cursor:pointer;font:600 11px Poppins,sans-serif;">↻ Rotate</button>' +
-      '<button onclick="window._furnitureAction(\'move\')" style="background:#60a5fa;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer;font:600 11px Poppins,sans-serif;">✥ Move</button>' +
-      '<button onclick="window._furnitureAction(\'remove\')" style="background:#e11d48;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer;font:600 11px Poppins,sans-serif;">✕ Remove</button>' +
-      '<button onclick="window._furnitureAction(\'done\')" style="background:#4ade80;color:#000;border:none;border-radius:6px;padding:6px 10px;cursor:pointer;font:600 11px Poppins,sans-serif;">✓ Done</button>';
-    bar.style.display = "flex";
+    if (!actions.length) return;
+    const at = new THREE.Vector3(item.x || 0, 1.5, item.z || 0);
+    _selectedIdx = idx;
+    showContext({ key: _keyOf(idx), at, title: (it.emoji || "🛋") + " " + it.name, actions, radius: _radiusOf(it) + 1.5, getPlayer: _P,
+      onHide: () => { _suppressKey = _keyOf(idx); } });
   }
 
-  function _hideFurnitureControls() {
-    const bar = document.getElementById("furniture-controls");
-    if (bar) bar.style.display = "none";
+  function _hideFurnitureControls() { hideContext(); }
+
+  function _sitOn(idx) {
+    const item = _placedFurniture[idx]; const pl = _P(); if (!item || !pl) return;
+    pl.pos.set((item.x || 0) + Math.sin(item.rot || 0) * 0.05, 0, (item.z || 0) + Math.cos(item.rot || 0) * 0.05);
+    pl.heading = item.rot || 0;
+    _sittingIdx = idx;
+    try { window._emote && window._emote("sit"); } catch (e) {}
+    ctx.toast("🪑 Sitting — move the joystick to stand up");
+  }
+
+  // tap on a furniture piece -> its menu (a tap, not a camera drag)
+  let _tapDown = null;
+  function _onTapDown(e) { _tapDown = { x: e.clientX, y: e.clientY, t: performance.now() }; }
+  function _onTapUp(e) {
+    const d = _tapDown; _tapDown = null;
+    if (!d || _decorateMode) return;
+    if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 10 || performance.now() - d.t > 450) return;
+    const rect = ctx.canvas.getBoundingClientRect();
+    _pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    _pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    _raycaster.setFromCamera(_pointer, ctx.camera);
+    const hits = _raycaster.intersectObject(_furnitureGroup, true);
+    for (const h of hits) {
+      let o = h.object; while (o && !(o.userData && o.userData.isFurniture)) o = o.parent;
+      if (o) { _suppressKey = null; _selectFurniture(o.userData.placedIdx); return; }
+    }
+  }
+  ctx.canvas?.addEventListener?.("pointerdown", _onTapDown);
+  ctx.canvas?.addEventListener?.("pointerup", _onTapUp);
+
+  // walk up to a piece -> its menu appears by itself; walk away -> gone
+  function _proximityTick() {
+    const pl = _P(); if (!pl || _decorateMode) return;
+    if (_sittingIdx >= 0) { if (pl.speed > 0.25) _sittingIdx = -1; else return; }
+    let best = -1, bd = 1e9;
+    for (let i = 0; i < _placedFurniture.length; i++) {
+      const f = _placedFurniture[i], it = getItem(f.id); if (!it) continue;
+      if (_isVisitor && !_isSittable(f.id)) continue;
+      const dx = (f.x || 0) - pl.pos.x, dz = (f.z || 0) - pl.pos.z, d = Math.sqrt(dx * dx + dz * dz);
+      if (d < _radiusOf(it) && d < bd) { bd = d; best = i; }
+    }
+    if (best < 0) { _suppressKey = null; return; }
+    const key = _keyOf(best);
+    if (key === _suppressKey || isContextShown(key)) return;
+    if (isContextShown()) return;               // another chip is open: leave it
+    _showFurnitureControls(best);
   }
 
   // ---- Global furniture actions (called from control bar buttons) ----
-  window._furnitureAction = (action) => {
+  window._furnitureAction = (action, idxArg) => {
+    if (idxArg != null) _selectedIdx = idxArg;
     if (_selectedIdx < 0) return;
     const item = _placedFurniture[_selectedIdx];
     if (!item) return;
+    if (action === "sell") {
+      const it = getItem(item.id); const val = Math.round((it?.price || 0) * 0.5);
+      _placedFurniture.splice(_selectedIdx, 1);
+      _rebuildFurniture(); _saveFurniture();
+      if (ctx.game && ctx.game.state) { ctx.game.state.money = (ctx.game.state.money || 0) + val; ctx.game.save?.(); ctx.updateHUD?.(); }
+      ctx.toast("💰 Sold " + (it?.name || "item") + " for ₦" + val.toLocaleString());
+      _selectedIdx = -1;
+      return;
+    }
     if (action === "rotate") {
       item.rot = (item.rot || 0) + Math.PI / 2;
       _rebuildFurniture();
       _saveFurniture();
       ctx.toast("↻ Rotated");
+      _showFurnitureControls(_selectedIdx);
     } else if (action === "move") {
       // Enter move mode: pick up the item and place it again
       _pendingItem = { ...item };
@@ -386,8 +443,8 @@ export async function build(scene, ctx) {
   const handle = {
     group, colliders,
     enter(ps) { ps.pos.set(0, 0, HD - 1); ps.heading = Math.PI; },
-    exit() { _decorateMode = false; _pendingItem = null; _hideFurnitureControls(); _hidePlaceUI(); },
-    update() {},
+    exit() { hideContext(); _decorateMode = false; _pendingItem = null; _hideFurnitureControls(); _hidePlaceUI(); },
+    update() { _proximityTick(); },
     dispose() {
       scene.remove(group);
       disposeGroup(group);
@@ -395,6 +452,8 @@ export async function build(scene, ctx) {
       _hidePlaceUI();
       // Remove canvas tap listener
       ctx.canvas?.removeEventListener?.("pointerdown", _onCanvasTap);
+      ctx.canvas?.removeEventListener?.("pointerdown", _onTapDown);
+      ctx.canvas?.removeEventListener?.("pointerup", _onTapUp);
     },
     onUIEvent(eid, payload) {
       if (eid === "sleep") _doAction(ctx, "😴 Slept. Energy +40", "energy", 40);

@@ -46,9 +46,9 @@ export function initPlaceManager({ scene, worldGroup, ctx }) {
     const p = document.createElement("div");
     p.id = "place-prompt";
     p.style.cssText =
-      "position:fixed;left:50%;bottom:calc(40% + env(safe-area-inset-bottom));" +
-      "transform:translateX(-50%);background:rgba(15,77,58,.92);color:#fff;" +
-      "padding:10px 18px;border-radius:14px;font:600 13px Poppins,sans-serif;" +
+      "position:fixed;left:50%;bottom:calc(21% + env(safe-area-inset-bottom));" +
+      "transform:translateX(-50%);background:rgba(15,77,58,.72);color:#fff;" +
+      "padding:6px 13px;border-radius:14px;font:600 11px Poppins,sans-serif;" +
       "box-shadow:0 4px 14px rgba(0,0,0,.3);display:none;z-index:30;" +
       "border:1px solid rgba(255,255,255,.2);text-align:center;max-width:90vw;" +
       "cursor:pointer;";
