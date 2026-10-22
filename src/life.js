@@ -10,6 +10,42 @@ import { LAKE, AIRPORT } from "./scenery.js";
 import { makeBlobShadows } from "./street.js";
 import { NIGHT_GLOW } from "./art/style.js";
 import { carShape, busShape, personParts, hash2, paint, flatten, B, done } from "./town.js";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { createCharacter, loadCharacterBase } from "./characters.js";
+
+// ---- real 3D vehicles (same models as the main street) swapped in for the box cars ----
+let carG = [], busG = null, glbReady = false;
+async function glbInstanced(vehicleId, count) {
+  const { loadFittedModel } = await import("./vehicles.js");
+  const holder = await loadFittedModel(vehicleId); if (!holder) return null;
+  holder.updateMatrixWorld(true);
+  const buckets = new Map();
+  holder.traverse((o) => {
+    if (!o.isMesh || !o.visible || !o.geometry) return;
+    let g = o.geometry.clone(); g.applyMatrix4(o.matrixWorld);
+    for (const k of Object.keys(g.attributes)) if (!["position", "normal", "uv"].includes(k)) g.deleteAttribute(k);
+    if (!g.attributes.uv) g.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+    if (!g.attributes.normal) g.computeVertexNormals();
+    if (g.index) g = g.toNonIndexed();
+    const mt = o.material; if (!buckets.has(mt)) buckets.set(mt, []); buckets.get(mt).push(g);
+  });
+  if (!buckets.size) return null;
+  const mats = [], geos = [];
+  for (const [mt, list] of buckets) {
+    geos.push(mergeGeometries(list, false));
+    const lm = new THREE.MeshLambertMaterial({ color: mt.color ? mt.color.clone() : 0xffffff, map: mt.map || null, transparent: !!mt.transparent, opacity: mt.opacity == null ? 1 : mt.opacity, side: mt.side });
+    if (mt.map) lm.map.colorSpace = THREE.SRGBColorSpace;
+    mats.push(lm);
+  }
+  const im = new THREE.InstancedMesh(mergeGeometries(geos, true), mats, Math.max(1, count));
+  im.frustumCulled = false;
+  for (let i = 0; i < count; i++) im.setMatrixAt(i, new THREE.Matrix4().makeScale(0, 0, 0));
+  return im;
+}
+
+// ---- real people: a small pool of full character models is lent to the walkers nearest the player ----
+const POOL = 16, RIGS = [];                 // { ch, who:-1 }
+const SHOW_R = 55;
 
 let _scene = null, _on = false, _t = 0, _last = 0;
 let BEAM = null, SH = null, carMesh = null, busMesh = null, pm = null, boats = [], plane = null;
@@ -52,6 +88,27 @@ export function initLife(scene) {
   busMesh = new THREE.InstancedMesh(busShape(), mat, buses.length); busMesh.frustumCulled = false;
   buses.forEach((c, i) => busMesh.setColorAt(i, _col.set(0xf2b134)));
   scene.add(carMesh, busMesh);
+  (async () => {
+    try {
+      const kinds = ["jeep", "ferrari", "keke"];
+      const list = await Promise.all(kinds.map((k, ki) => glbInstanced(k, Math.ceil(cars.length / 3))));
+      const bus = await glbInstanced("bus", buses.length);
+      if (list.every(Boolean)) { carG = list; carG.forEach((m) => scene.add(m)); }
+      if (bus) { busG = bus; scene.add(bus); }
+      glbReady = true;
+    } catch (e) { console.warn("[life] glb vehicles failed", e); }
+  })();
+  (async () => {
+    try { await loadCharacterBase(THREE.DefaultLoadingManager, "male"); } catch (e) { console.warn("[life] base load failed", e); return; }
+    for (let i = 0; i < POOL; i++) {
+      try {
+        const ch = await createCharacter({ seed: 900 + i * 31, height: 1.62 + hash2("ph", i) * 0.22, outfit: i % 3 === 0 ? "kaftan" : "casual" });
+        ch.group.visible = false; ch.group.traverse((o) => { if (o.isMesh) { o.frustumCulled = true; o.castShadow = false; } });
+        scene.add(ch.group); RIGS.push({ ch, who: -1 });
+      } catch (e) { console.warn("[life] rig failed", e); break; }
+      await new Promise((r) => setTimeout(r, 60));
+    }
+  })();
 
   // people: 6 per district — 4 walkers on the pavements + 2 neighbours standing to chat.
   // Every walker has swinging legs and arms, a different height, and one of 3 outfits (shirt & trousers, kaftan, gown & hijab).
@@ -114,7 +171,7 @@ export function initLife(scene) {
 export function tickLife(px, pz, show = true) {
   if (!_on) return;
   const now = performance.now() / 1000, dt = Math.min(0.1, _last ? now - _last : 0.016); _last = now; _t += dt;
-  carMesh.visible = busMesh.visible = show; for (const k in pm) pm[k].visible = show;
+  carMesh.visible = show && !(glbReady && carG.length); busMesh.visible = show && !(glbReady && busG); carG.forEach((m) => { m.visible = show; }); if (busG) busG.visible = show; for (const k in pm) pm[k].visible = show;
   for (const b of boats) b.m.visible = show;
   plane.visible = show;
   if (SH) SH.mesh.visible = show;
@@ -131,11 +188,33 @@ export function tickLife(px, pz, show = true) {
     const lt = ((c.s % c.ln.len) + c.ln.len) % c.ln.len, ek = Math.max(0.001, Math.min(1, Math.min(lt, c.ln.len - lt) / 6));   // shrink at the lane ends: no popping out of walls
     _s2.setScalar(ek);
     const yaw = Math.atan2(-(nx.z - _p.z), nx.x - _p.x);
-    _q.setFromAxisAngle(_up, yaw); _m.compose(_p, _q, _s2); mesh.setMatrixAt(i, _m); BEAM.setMatrixAt(mesh === carMesh ? i : cars.length + i, _m);
+    _q.setFromAxisAngle(_up, yaw); _m.compose(_p, _q, _s2); mesh.setMatrixAt(i, _m); if (glbReady) { if (mesh === carMesh) { if (carG.length) carG[i % 3].setMatrixAt((i / 3) | 0, _m); } else if (busG) busG.setMatrixAt(i, _m); } BEAM.setMatrixAt(mesh === carMesh ? i : cars.length + i, _m);
     SH.set(mesh === carMesh ? i : cars.length + i, _p.x, _p.z, (mesh === carMesh ? 2.6 : 3.4) * ek, (mesh === carMesh ? 5.4 : 12) * ek, yaw + Math.PI / 2);
   };
   cars.forEach((c, i) => place(carMesh, i, c)); buses.forEach((c, i) => place(busMesh, i, c));
-  carMesh.instanceMatrix.needsUpdate = true; busMesh.instanceMatrix.needsUpdate = true;
+  carMesh.instanceMatrix.needsUpdate = true; busMesh.instanceMatrix.needsUpdate = true; carG.forEach((m) => { m.instanceMatrix.needsUpdate = true; }); if (busG) busG.instanceMatrix.needsUpdate = true;
+
+  // real people for the nearest walkers
+  const near = [];
+  people.forEach((p, i) => {
+    let x; if (p.chat) x = p.cx; else { const ph = (_t * p.sp + p.ph) / p.span, f = ph % 2, u = f < 1 ? f : 2 - f; x = p.ax - p.span + u * p.span * 2; }
+    const dx = x - px, dz = p.az - pz, d2 = dx * dx + dz * dz;
+    if (d2 < SHOW_R * SHOW_R) near.push([d2, i, x]);
+  });
+  near.sort((a, b) => a[0] - b[0]);
+  const chosen = new Map(); for (let k = 0; k < Math.min(near.length, RIGS.length); k++) chosen.set(near[k][1], near[k][2]);
+  for (const r of RIGS) if (r.who >= 0 && !chosen.has(r.who)) { r.ch.group.visible = false; r.who = -1; }
+  for (const [i] of chosen) { if (RIGS.some((r) => r.who === i)) continue; const r = RIGS.find((q) => q.who < 0); if (r) r.who = i; }
+  for (const r of RIGS) {
+    if (r.who < 0) continue;
+    const p = people[r.who], x = chosen.get(r.who), moving = !p.chat;
+    r.ch.group.visible = show; if (!show) continue;
+    const ph = (_t * p.sp + p.ph) / p.span, f = ph % 2;
+    r.ch.group.position.set(x, 0, p.az);
+    r.ch.group.rotation.y = p.chat ? p.face : (f < 1 ? Math.PI / 2 : -Math.PI / 2);
+    r.ch.animate(dt, moving ? p.sp * 1.6 : 0);
+  }
+  const hasRig = new Set(RIGS.filter((r) => r.who >= 0).map((r) => r.who));
 
   // people (only the ones near the player are drawn)
   people.forEach((p, i) => {
@@ -144,7 +223,7 @@ export function tickLife(px, pz, show = true) {
     else { const ph = (_t * p.sp + p.ph) / p.span, f = ph % 2, u = f < 1 ? f : 2 - f; x = p.ax - p.span + u * p.span * 2; yaw = f < 1 ? Math.PI / 2 : -Math.PI / 2; }
     const dx = x - px, dz = z - pz;
     const si = cars.length + buses.length + i;
-    if (dx * dx + dz * dz > 300 * 300) { for (const k in pm) pm[k].setMatrixAt(i, _Z); SH.hide(si); return; }
+    if (hasRig.has(i) || dx * dx + dz * dz > 300 * 300) { for (const k in pm) pm[k].setMatrixAt(i, _Z); SH.hide(si); return; }
     SH.set(si, x, z, 0.9 * p.sc, 0.9 * p.sc);
     const w = _t * p.sp * (p.sc < 0.7 ? 7 : 5.2) + p.ph, sw = moving ? Math.sin(w) * 0.62 : 0, bob = moving ? Math.abs(Math.sin(w)) * 0.035 * p.sc : 0;
     const g = moving ? 0 : Math.sin(_t * 1.7 + p.ph) * 0.3;                                   // chatting: little arm gestures + head-nod sway

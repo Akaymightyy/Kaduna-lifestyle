@@ -2165,16 +2165,8 @@ window._sellCompany = () => {
 window._setGraphicsQuality = (q) => {
   applyQuality(q, { renderer, sun, scene });
   _gLevel = 0; _gAcc = 0; _gN = 0; _gWarm = 0;
-  // BLOOM (Oct 21): re-apply the CSS bloom filter when quality changes
-  try {
-    if (q === "high") {
-      renderer.domElement.style.filter = 'saturate(1.2) contrast(1.1) brightness(1.05) drop-shadow(0 0 1px rgba(255,240,200,.15))';
-    } else if (q === "medium") {
-      renderer.domElement.style.filter = 'saturate(1.16) contrast(1.08) brightness(1.02)';
-    } else {
-      renderer.domElement.style.filter = 'saturate(1.08) contrast(1.04) brightness(1.0)';
-    }
-  } catch (e) {}
+  // (no CSS filter on the canvas: it caused the High-quality blur/lag — see note near the renderer setup)
+  try { renderer.domElement.style.filter = ''; } catch (e) {}
   toast("🎨 Graphics set to " + q.toUpperCase() + ". Governor reset.");
   showPhoneApp("settings");
 };
