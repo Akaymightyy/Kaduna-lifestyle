@@ -90,7 +90,8 @@ export function initLife(scene) {
   scene.add(carMesh, busMesh);
   (async () => {
     try {
-      const kinds = ["jeep"];   // light model only (jeep ~11k tris, danfo ~20k). Ferrari (311k) and keke (126k) per instance would freeze phones
+      const kinds = [];   // box cars restored (the jeep model looked half-made: its texture is missing). Danfo bus keeps the real model.
+      // const kinds = ["jeep"];   // light model only (jeep ~11k tris, danfo ~20k). Ferrari (311k) and keke (126k) per instance would freeze phones
       const list = await Promise.all(kinds.map((k, ki) => glbInstanced(k, cars.length)));
       const bus = await glbInstanced("bus", buses.length);
       if (list.every(Boolean)) { carG = list; carG.forEach((m) => { cars.forEach((c, i) => m.setColorAt(i, _col.setHSL(c.hue, 0.55, 0.62))); m.instanceColor.needsUpdate = true; scene.add(m); }); }

@@ -259,7 +259,7 @@ function _buildStatic(area) {
   const padCol = area.tier === "rich" ? 0x8fbf7a : area.tier === "middle" ? 0xa9bf86 : 0xbfae85;
   _quad(L, 92, zmax - zmin + 14, area.x - 4, 0.008, (zmin + zmax) / 2, padCol, 12);
   const roadW = 124;
-  _quad(L, roadW, 6, area.x, 0.015, area.z, 0x3a3d43, 13);
+  _quad(L, roadW, 6, area.x, 0.015, area.z, 0x5c6068, 13);
   _quad(L, roadW, 1.5, area.x, 0.012, area.z + 3.75, 0xd2bf9c, 9);
   _quad(L, roadW, 1.5, area.x, 0.012, area.z - 3.75, 0xd2bf9c, 9);
   for (let x = -roadW / 2 + 4; x < roadW / 2 - 3; x += 8) _quad(L, 3.5, 0.16, area.x + x, 0.02, area.z, 0xe9d36a);
@@ -311,7 +311,7 @@ function _buildArea(area) {
   }
   // real jeep model instead of the box (light model, ~11k triangles); the box stays as a fallback until it loads
   const carGlbRef = { mesh: null };
-  import("./life.js").then(async (L) => {
+  if (false) import("./life.js").then(async (L) => {   // disabled: box cars look better than the untextured jeep
     try {
       const im = await L.glbInstanced("jeep", CAR_N); if (!im) return;
       for (let i = 0; i < CAR_N; i++) { carMesh.getMatrixAt(i, _m4); im.setMatrixAt(i, _m4); carMesh.getColorAt(i, _col); im.setColorAt(i, _col.clone().offsetHSL(0, 0, 0.15)); }

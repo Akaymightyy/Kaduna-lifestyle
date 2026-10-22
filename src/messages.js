@@ -34,13 +34,14 @@ async function _ensureMyProfile(uid, fallbackName) {
 
 // ---- Public profile lookup (userProfiles is readable by every signed-in user; players/{uid} is NOT) ----
 const _profCache = {};
+const _known = {};            // names we were TOLD (from search / the chat we opened) when the person has no public profile yet
 export async function getProfile(uid) {
   if (!uid) return null;
   if (_profCache[uid]) return _profCache[uid];
   try {
     const snap = await get(ref(db, "userProfiles/" + uid));
     const p = snap.val();
-    _profCache[uid] = p ? { uid, name: p.name || p.username || "Player", username: p.username || "" } : { uid, name: "Player", username: "", missing: true };
+    _profCache[uid] = p ? { uid, name: p.name || p.username || "Player", username: p.username || "" } : { uid, name: "", username: "", missing: true };
   } catch (e) { return null; }
   return _profCache[uid];
 }
@@ -103,6 +104,7 @@ export async function searchUsers(q, limit = 10) {
         }
       } catch (e) { /* ignore */ }
     }
+    for (const r of results) _known[r.uid] = { name: r.name, username: r.username };
     return results.slice(0, limit).map(r => ({ uid: r.uid, username: r.username, name: r.name }));
   } catch (e) {
     console.warn("[messages] searchUsers failed:", e.message);
@@ -118,7 +120,9 @@ export async function openDM(otherUid, otherName) {
   const metaSnap = await get(metaRef);
   if (!metaSnap.exists()) { await set(metaRef, { type: "dm", members: { [_uid]: true, [otherUid]: true }, createdAt: Date.now() }); }
   const prof = await getProfile(otherUid);
-  return { chatId, otherUid, otherName: (prof && prof.name) || otherName, otherUsername: prof ? prof.username : "" };
+  if (otherName && otherName !== "Chat" && otherName !== "Player") _known[otherUid] = Object.assign({}, _known[otherUid], { name: otherName });
+  const kn = _known[otherUid] || {};
+  return { chatId, otherUid, otherName: (prof && prof.name) || kn.name || otherName, otherUsername: (prof && prof.username) || kn.username || "" };
 }
 
 function _previewOf(m) {
@@ -163,8 +167,9 @@ export async function sendMessage(chatId, text, type = "text", amount = 0, extra
     if (isGroup) { f.type = "group"; f.name = meta.name || "Group"; f.icon = meta.icon || "👥"; }
     else {
       const otherUid = memberUids.find((u) => u !== memberUid) || null;
-      const op = otherUid ? profs[otherUid] : null;
-      f.type = "dm"; f.otherUid = otherUid; f.otherName = (op && op.name) || ""; f.otherUsername = (op && op.username) || "";
+      const op = otherUid ? profs[otherUid] : null, kn = (otherUid && _known[otherUid]) || {};
+      f.type = "dm"; f.otherUid = otherUid; f.otherName = (op && op.name) || kn.name || ""; f.otherUsername = (op && op.username) || kn.username || "";
+      if (f.otherName === "Player") f.otherName = "";
     }
     if (isMe) f.unread = 0; else f.unread = increment(1);
     return update(ref(db, "userChats/" + memberUid + "/" + chatId), f);
@@ -239,7 +244,7 @@ export function getChatList() {
     const isGroup = info.type === "group" || chatId.startsWith("grp_");
     const otherUid = isGroup ? null : (info.otherUid || _otherUidFromChatId(chatId));
     const prof = otherUid ? _profCache[otherUid] : null;
-    const title = isGroup ? ((info.icon || "👥") + " " + (info.name || "Group")) : ((prof && !prof.missing && prof.name) || info.otherName || "");
+    const title = isGroup ? ((info.icon || "👥") + " " + (info.name || "Group")) : ((prof && !prof.missing && prof.name) || (info.otherName && info.otherName !== "Player" ? info.otherName : "") || (_known[otherUid] && _known[otherUid].name) || (info.otherUsername ? "@" + info.otherUsername : "") || "Player");
     const username = (prof && prof.username) || info.otherUsername || "";
     return { chatId, ...info, isGroup, otherUid, title, username };
   }).filter((c) => c.lastTs).sort((a, b) => (b.lastTs || 0) - (a.lastTs || 0));

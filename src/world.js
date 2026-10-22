@@ -126,7 +126,7 @@ export function buildWorld(scene) {
   world.add(ground);
 
   // ---- road ----
-  const asphalt = stylize(new THREE.MeshLambertMaterial({ color: 0x3a3d43, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), { pat: true, ao: false, fake: false }); // flat planes: plain Lambert (cheapest). polygonOffset = no flicker/skipping on far roads
+  const asphalt = stylize(new THREE.MeshLambertMaterial({ color: 0x5c6068, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), { pat: true, ao: false, fake: false }); // flat planes: plain Lambert (cheapest). polygonOffset = no flicker/skipping on far roads
   const road = new THREE.Mesh(withPat(new THREE.PlaneGeometry(WORLD_HALF_X * 2 + 200, ROAD_HALF * 2), 13), asphalt);
   road.rotation.x = -Math.PI / 2; road.position.y = 0.01; road.receiveShadow = true;
   world.add(road);
