@@ -21,6 +21,7 @@ import { ref, get, onValue, update, set } from "firebase/database";
 import { openCreator } from "./creator.js";
 import { mountPreview, setPreviewLook } from "./charpreview.js";
 import { outfitsFor, BUILDS, SHOP, SLOT_KEYS } from "./outfits.js";
+import { tickContext } from "./contextmenu.js";
 import { peekWorld, initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, getActivePlace, enterPlace, enterPlaceAsVisitor, exitPlace, sendUIEvent } from "./places/manager.js";
 import { listPlaces, getPlace, updateHomeEntrance } from "./places/registry.js";
 import { initMissions, getActiveMission, getAllChapters, getDailyMissions, getWeeklyMissions, checkStep, createMissionState, claimDailyReward, claimWeeklyReward, setCelebrateCallback } from "./missions.js";
@@ -750,6 +751,7 @@ const placeCtx = {
   updateHUD: () => updateHUD(),
   canvas: document.getElementById("game"),
   camera: camera,
+  getPlayer: () => player,
   onPlaceChange: (def) => {
     // Update the HUD chip + show activity buttons when inside a place
     const titleEl = document.querySelector(".chip.title");
@@ -4069,6 +4071,7 @@ function _frame() {
   }
   // Update active place (NPC animations, smoke, etc.)
   updateActive(dt, now);
+  tickContext(camera);
   // Show entrance/exit prompt
   tickEntrancePrompt(player.pos.x, player.pos.z, _gameHour());
 
