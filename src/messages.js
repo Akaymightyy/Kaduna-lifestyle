@@ -7,11 +7,30 @@ let _uid = null, _name = "Player", _userChats = {}, _openChatId = null, _unsubOp
 export function initMessages(uid, name, toast, onUpdate) {
   _uid = uid; _name = name || "Player"; _toast = toast; _onUpdate = onUpdate;
   _unsubUserChats = onValue(ref(db, "userChats/" + uid), (snap) => { _userChats = snap.val() || {}; _onUpdate?.(); _resolveMissingProfiles(); });
+  _ensureMyProfile(uid, name);
   const pRef = ref(db, "presence/" + uid);
   update(pRef, { online: true, lastSeen: Date.now() });
   onDisconnect(pRef).update({ online: false, lastSeen: serverTimestamp() });
 }
 
+
+// Older accounts were created before the public profile existed, so nobody could find them in search.
+// On every login make sure userProfiles/{uid} and the usernames/{name} claim exist (cheap: 1-2 reads).
+async function _ensureMyProfile(uid, fallbackName) {
+  try {
+    const have = (await get(ref(db, "userProfiles/" + uid))).val();
+    let uname = have && have.username, nm = have && have.name;
+    if (!have || !uname) {
+      const me = (await get(ref(db, "players/" + uid))).val() || {};
+      uname = uname || me.username || me.name || fallbackName || "player";
+      nm = nm || me.name || uname;
+      await set(ref(db, "userProfiles/" + uid), { name: nm, username: uname, createdAt: (have && have.createdAt) || Date.now() });
+    }
+    const key = String(uname).toLowerCase().replace(/\./g, "_");
+    const claim = (await get(ref(db, "usernames/" + key))).val();
+    if (!claim) await set(ref(db, "usernames/" + key), uid);
+  } catch (e) { console.warn("[messages] ensure profile failed", e.message); }
+}
 
 // ---- Public profile lookup (userProfiles is readable by every signed-in user; players/{uid} is NOT) ----
 const _profCache = {};
@@ -73,6 +92,17 @@ export async function searchUsers(q, limit = 10) {
       if (a._isUnamePrefix !== b._isUnamePrefix) return a._isUnamePrefix ? -1 : 1;
       return (a.name || "").localeCompare(b.name || "");
     });
+    // Fallback: an exact @username always works, even if that person has no public profile yet
+    if (query.length >= 3) {
+      try {
+        const key = query.replace(/\./g, "_");
+        const uid = (await get(ref(db, "usernames/" + key))).val();
+        if (uid && uid !== _uid && !results.some((r) => r.uid === uid)) {
+          const pr = await getProfile(uid);
+          results.unshift({ uid, username: (pr && pr.username) || query, name: (pr && pr.name !== "Player" && pr.name) || query, _isUnamePrefix: true });
+        }
+      } catch (e) { /* ignore */ }
+    }
     return results.slice(0, limit).map(r => ({ uid: r.uid, username: r.username, name: r.name }));
   } catch (e) {
     console.warn("[messages] searchUsers failed:", e.message);
