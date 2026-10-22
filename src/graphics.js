@@ -19,8 +19,11 @@ import * as THREE from "three";
 let Sky = null;
 
 let _sky = null;
+let _lastHourArg = null;     // the most recent hour updateSky() was given, so a late-loading sky can catch up
 let _clouds = null;
 let _sunSphere = null;
+let _sunUp = true;                                   // is the sun above the horizon (hide the sun disc at night)
+const _sunDir = new THREE.Vector3(0.3, 0.8, 0.5).normalize();
 let _renderer = null;
 let _scene = null;
 let _sun = null;       // the DirectionalLight
@@ -115,6 +118,10 @@ export async function initGraphics({ renderer, scene, sun, hemi, quality }) {
         skyUniforms["rayleigh"].value = 2;
         skyUniforms["mieCoefficient"].value = 0.005;
         skyUniforms["mieDirectionalG"].value = 0.8;
+        // FIX (white wall): the Sky loads AFTER the first updateSky() call, and updateSky() then skips itself until the game
+        // hour changes (every 6 REAL minutes now that game time is real-time). Until then sunPosition stayed (0,0,0), which the
+        // sky shader turns into a flat cream/white screen. Give it a sane sun now, and re-apply the current hour straight away.
+        skyUniforms["sunPosition"].value.set(0.3, 0.8, 0.5);
       }
     } catch (e) { console.warn("Sky addon failed to load:", e.message); }
   }
@@ -127,11 +134,21 @@ export async function initGraphics({ renderer, scene, sun, hemi, quality }) {
 
   // ---- Sun sphere (visible disc) — only on high ----
   if (_quality === "high") {
-    const sunGeo = new THREE.SphereGeometry(20, 16, 16);
+    // FIX (white wall): this used to be a 20 m ball placed ~150-250 m from the middle of the map, and it stayed at the map centre
+    // (0,0,0) until the first hourly update, so near the centre of Kaduna it filled the screen with a cream wall. Now it is a small
+    // disc (about 4 degrees across) that always sits 300 m from the CAMERA in the direction of the sun, so it can only ever be in the sky.
+    const sunGeo = new THREE.SphereGeometry(10, 16, 16);
     const sunMat = new THREE.MeshBasicMaterial({ color: 0xfff2d6, fog: false });
     _sunSphere = new THREE.Mesh(sunGeo, sunMat);
+    _sunSphere.frustumCulled = false;
+    _sunSphere.onBeforeRender = (r, sc, cam) => { _sunSphere.position.copy(cam.position).addScaledVector(_sunDir, 300); _sunSphere.updateMatrixWorld(true); };
     _scene.add(_sunSphere);
   }
+
+  // The sky, clouds and sun disc above all load AFTER the first updateSky() call, and updateSky() skips itself until the game hour
+  // changes (every 6 real minutes on the real clock). Apply the current hour now so nothing waits at its blank default.
+  _lastHour = -1;
+  if (_lastHourArg != null) updateSky(_lastHourArg);
 }
 
 // ---- Create cloud billboards ----
@@ -178,6 +195,7 @@ export function nightAmount(hour) {
 }
 
 export function updateSky(hour) {
+  _lastHourArg = hour;
   NIGHT_GLOW.value = nightAmount(hour);     // cheap, every frame: smooth dusk/dawn for the glow
 
   // ---- Dynamic tone-mapping exposure (FIX v2, Oct 19) ----
@@ -287,8 +305,9 @@ export function updateSky(hour) {
 
   // ---- Sun sphere position ----
   if (_sunSphere && _sun) {
-    _sunSphere.position.copy(_sun.position).multiplyScalar(3);
-    _sunSphere.position.y = Math.max(20, _sunSphere.position.y);
+    _sunDir.copy(_sun.position).normalize();            // the disc follows the camera (see initGraphics), this is just which way
+    _sunUp = elevation > 0.04;
+    _sunSphere.visible = _quality === "high" && _sunUp;  // no sun at night
   }
 
   // ---- Clouds: drift + fade at night ----
@@ -342,7 +361,7 @@ export function applyQuality(q, { renderer, sun, scene }) {
   // The sky shader / clouds / sun disc are the heaviest "pretty" parts: switch them off live on Low (no reload needed)
   if (_sky) _sky.visible = !!preset.skyShader;
   if (_clouds) _clouds.visible = !!preset.clouds;
-  if (_sunSphere) _sunSphere.visible = q === "high";
+  if (_sunSphere) _sunSphere.visible = q === "high" && _sunUp;
   if (_scene) _ensureEnvironment(preset.ibl);
   renderer.setPixelRatio(Math.min(preset.pixelRatio, devicePixelRatio));
   renderer.shadowMap.enabled = preset.shadows;
