@@ -22,7 +22,8 @@ export function buildPlaceExteriors(world, colliders) {
     try {
       const st = STYLE[def.id] || [14, 8, 9, 0xcfc5b0];
       const [W, H, D, col] = st;
-      const h = def.entranceZ >= 0 ? 0 : Math.PI;   // building sits BEHIND the entrance, away from the main street (z=0)
+      const FLIP = { arena: true };               // arena: the cross street (z=-88) is behind the entrance, so the building goes toward the main street instead
+      const h = (def.entranceZ >= 0) !== !!FLIP[def.id] ? 0 : Math.PI;   // building sits BEHIND the entrance, away from the main street (z=0)
       const fx = Math.sin(h), fz = Math.cos(h);
       const g = new THREE.Group();
       g.position.set(def.entranceX + fx * (D / 2 + 2.2), 0, def.entranceZ + fz * (D / 2 + 2.2));
