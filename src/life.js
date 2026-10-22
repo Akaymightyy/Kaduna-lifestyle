@@ -15,7 +15,7 @@ import { createCharacter, loadCharacterBase } from "./characters.js";
 
 // ---- real 3D vehicles (same models as the main street) swapped in for the box cars ----
 let carG = [], busG = null, glbReady = false;
-async function glbInstanced(vehicleId, count) {
+export async function glbInstanced(vehicleId, count) {
   const { loadFittedModel } = await import("./vehicles.js");
   const holder = await loadFittedModel(vehicleId); if (!holder) return null;
   holder.updateMatrixWorld(true);

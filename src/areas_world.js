@@ -301,6 +301,26 @@ function _buildArea(area) {
     _col.setHSL(hash2(area.id, "cc" + i), 0.55, 0.5); carMesh.setColorAt(i, _col);
   }
   carMesh.count = CAR_N; carMesh.instanceMatrix.needsUpdate = true; carMesh.instanceColor.needsUpdate = true;
+  // solid parked cars: you can no longer walk through them
+  const parkColliders = [];
+  for (let i = 0; i < CAR_N; i++) {
+    const side = i % 2 ? 1 : -1;
+    const x = area.x - 50 + (i >> 1) * 19 + (hash2(area.id, "cx" + i) * 6 - 3), z = area.z + side * 2.0;
+    const c = { minX: x - 2.7, maxX: x + 2.7, minZ: z - 1.4, maxZ: z + 1.4, _areaId: area.id };
+    parkColliders.push(c); if (_worldColliders) _worldColliders.push(c);
+  }
+  // real jeep model instead of the box (light model, ~11k triangles); the box stays as a fallback until it loads
+  const carGlbRef = { mesh: null };
+  import("./life.js").then(async (L) => {
+    try {
+      const im = await L.glbInstanced("jeep", CAR_N); if (!im) return;
+      for (let i = 0; i < CAR_N; i++) { carMesh.getMatrixAt(i, _m4); im.setMatrixAt(i, _m4); carMesh.getColorAt(i, _col); im.setColorAt(i, _col.clone().offsetHSL(0, 0, 0.15)); }
+      im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true;
+      if (!_areasBuilt.has(area.id)) { im.dispose(); return; }
+      carMesh.visible = false; carMesh.userData.swapped = true; _scene.add(im); carGlbRef.mesh = im;
+      const e = _areasBuilt.get(area.id); if (e) e.carGlb = im;
+    } catch (e) { console.warn("parked car glb failed", e); }
+  });
   const kioskMesh = mk(S.kiosk, KIOSK_N, true);
   for (let i = 0; i < KIOSK_N; i++) {
     const side = i % 2 ? 1 : -1;
@@ -310,6 +330,12 @@ function _buildArea(area) {
     _col.setHSL(hash2(area.id, "kc" + i), 0.7, 0.55); kioskMesh.setColorAt(i, _col);
   }
   kioskMesh.count = KIOSK_N; kioskMesh.instanceMatrix.needsUpdate = true; kioskMesh.instanceColor.needsUpdate = true;
+  for (let i = 0; i < KIOSK_N; i++) {   // kiosks are solid too
+    const side = i % 2 ? 1 : -1;
+    const x = area.x - 44 + (i >> 1) * 24 + (hash2(area.id, "kx" + i) * 8 - 4), z = area.z + side * 4.1;
+    const c = { minX: x - 1.2, maxX: x + 1.2, minZ: z - 1.0, maxZ: z + 1.0, _areaId: area.id };
+    if (_worldColliders) _worldColliders.push(c);
+  }
 
   // lamps (1 per 4 plots, max 30)
   const lampCount = Math.min(30, Math.ceil(area.plots / 4));
@@ -353,6 +379,8 @@ function _updateArea(area, playerX, playerZ, distToArea, range) {
   const { houses, wallMesh, treeMesh, carMesh, kioskMesh, lampMesh, staticMesh, capacity, lampCount, houseColliders } = entry;
   const vis = distToArea <= range + 80;
   for (const m of [...houses, wallMesh, treeMesh, carMesh, kioskMesh, lampMesh, staticMesh]) m.visible = vis;
+  if (carMesh.userData.swapped) carMesh.visible = false;
+  if (entry.carGlb) entry.carGlb.visible = vis;
   if (!vis) return;
 
   const occupied = getAreaHouses(area.id);
@@ -405,6 +433,7 @@ function _disposeArea(areaId) {
   const e = _areasBuilt.get(areaId);
   if (!e) return;
   for (const m of [...e.houses, e.wallMesh, e.treeMesh, e.carMesh, e.kioskMesh, e.lampMesh]) { _scene.remove(m); m.dispose(); }
+  if (e.carGlb) { _scene.remove(e.carGlb); e.carGlb.dispose(); }
   e.lampMat.dispose();
   _scene.remove(e.staticMesh); e.staticMesh.geometry.dispose();
   if (_worldColliders) for (let i = _worldColliders.length - 1; i >= 0; i--) if (_worldColliders[i]._areaId === areaId) _worldColliders.splice(i, 1);
