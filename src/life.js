@@ -45,7 +45,9 @@ export async function glbInstanced(vehicleId, count) {
 
 // ---- real people: a small pool of full character models is lent to the walkers nearest the player ----
 const POOL = 10, RIGS = [];                 // { ch, who:-1 }
-const SHOW_R = 55;
+const SHOW_R = 55, CROWD_R = 150;
+const slotOwner = [];                       // which person each packed crowd slot currently shows
+let PEOPLE_COLS = [];
 
 let _scene = null, _on = false, _t = 0, _last = 0;
 let BEAM = null, SH = null, carMesh = null, busMesh = null, pm = null, boats = [], plane = null;
@@ -134,7 +136,7 @@ export function initLife(scene, colliders = []) {
 
   // people: 6 per district — 4 walkers on the pavements + 2 neighbours standing to chat.
   // Every walker has swinging legs and arms, a different height, and one of 3 outfits (shirt & trousers, kaftan, gown & hijab).
-  const PP = personParts(), PER = 14, N = AREAS.length * PER;
+  const PP = personParts(), PER = 22, N = AREAS.length * PER;
   const SKINS = [0x3b2418, 0x5a3a26, 0x7a4e32, 0x2a1810, 0x9a6a46, 0x6b4429];
   const SHIRTS = [0xe8e2d0, 0x2f6fb5, 0xc0392b, 0x2e7d4f, 0xf2b134, 0x6b4a8a, 0x1f1f24, 0xd98e2b, 0x3aa6a0];
   const TROUS = [0x1f2a36, 0x2a2a2e, 0x4a3b2a, 0x3b4f72, 0x5a5a5e];
@@ -144,18 +146,19 @@ export function initLife(scene, colliders = []) {
   let pi = 0;
   for (const a of AREAS) {
     for (let k = 0; k < PER; k++, pi++) {
-      const q = (k - 10) >> 1, cx = a.x + (hash2(a.id, "chat" + q) - 0.5) * 80;
+      const q = (k - 16) >> 1, cx = a.x + (hash2(a.id, "chat" + q) - 0.5) * 80;
       const side = k % 2 ? 1 : -1, id = a.id + k, r = hash2(id, "type");
       const type = r < 0.5 ? 0 : r < 0.72 ? 1 : 2, kid = type === 0 && hash2(id, "kid") < 0.14;
       const p = { type, sc: kid ? 0.62 : 0.93 + hash2(id, "h") * 0.14, skin: pick(SKINS, id, "s"), az: a.z + side * (3.6 + hash2(a.id, "pz" + k) * 0.6), ax: a.x,
-        span: 40 + hash2(a.id, "ps" + k) * 22, ph: hash2(a.id, "pp" + k) * 100, sp: (kid ? 1.8 : 1.1) + hash2(a.id, "pv" + k) * 0.7, chat: k >= 10 };
+        span: 40 + hash2(a.id, "ps" + k) * 22, ph: hash2(a.id, "pp" + k) * 100, sp: (kid ? 1.8 : 1.1) + hash2(a.id, "pv" + k) * 0.7, chat: k >= 16 };
       p.top = type === 0 ? pick(SHIRTS, id, "t") : type === 1 ? pick(ROBES, id, "r") : pick(GOWNS, id, "g"); p.bot = pick(TROUS, id, "b");
       if (p.chat) { const lead = k % 2 === 0; p.az = a.z + (lead ? -1 : 1) * 3.9; p.cx = cx + (lead ? -0.6 : 0.6); p.face = lead ? Math.PI / 2 : -Math.PI / 2; }
       people.push(p);
     }
   }
-  const mk = (geo) => { const m = new THREE.InstancedMesh(geo, mat, N); m.frustumCulled = false; scene.add(m); return m; };
+  const mk = (geo) => { const m = new THREE.InstancedMesh(geo, mat, N); m.frustumCulled = false; m.count = 0; scene.add(m); return m; };
   pm = { torso: mk(PP.torso), kaftan: mk(PP.kaftan), gown: mk(PP.gown), legL: mk(PP.leg), legR: mk(PP.leg), armL: mk(PP.arm), armR: mk(PP.arm), hair: mk(PP.headHair), cap: mk(PP.headCap), bare: mk(PP.headBare) };
+  PEOPLE_COLS = [[pm.torso, (p) => p.top], [pm.kaftan, (p) => p.top], [pm.gown, (p) => p.top], [pm.legL, (p) => p.bot], [pm.legR, (p) => p.bot], [pm.armL, (p) => p.top], [pm.armR, (p) => p.top], [pm.hair, (p) => p.skin], [pm.cap, (p) => p.skin], [pm.bare, (p) => p.skin]].map(([m, c]) => ({ m, c }));
   people.forEach((p, i) => {
     const sleeve = _col.set(p.top);
     pm.torso.setColorAt(i, _col.set(p.top)); pm.kaftan.setColorAt(i, _col.set(p.top)); pm.gown.setColorAt(i, _col.set(p.top));
@@ -239,23 +242,27 @@ export function tickLife(px, pz, show = true) {
   const hasRig = new Set(RIGS.filter((r) => r.who >= 0).map((r) => r.who));
 
   // people (only the ones near the player are drawn)
+  let nj = 0;                                    // crowd is packed into the first nj slots: far people cost nothing on the GPU
   people.forEach((p, i) => {
     let x, z = p.az, yaw, moving = true;
     if (p.chat) { x = p.cx; yaw = p.face; moving = false; }
     else { const ph = (_t * p.sp + p.ph) / p.span, f = ph % 2, u = f < 1 ? f : 2 - f; x = p.ax - p.span + u * p.span * 2; yaw = f < 1 ? Math.PI / 2 : -Math.PI / 2; }
     const dx = x - px, dz = z - pz;
     const si = cars.length + buses.length + i;
-    if (hasRig.has(i) || dx * dx + dz * dz > 300 * 300) { for (const k in pm) pm[k].setMatrixAt(i, _Z); SH.hide(si); return; }
+    if (hasRig.has(i) || dx * dx + dz * dz > CROWD_R * CROWD_R) { SH.hide(si); return; }
+    const j = nj++;
+    if (slotOwner[j] !== i) { slotOwner[j] = i; for (const h of PEOPLE_COLS) h.m.setColorAt(j, _col.set(h.c(p))); for (const k in pm) if (pm[k].instanceColor) pm[k].instanceColor.needsUpdate = true; }
     SH.set(si, x, z, 0.9 * p.sc, 0.9 * p.sc);
     const w = _t * p.sp * (p.sc < 0.7 ? 7 : 5.2) + p.ph, sw = moving ? Math.sin(w) * 0.62 : 0, bob = moving ? Math.abs(Math.sin(w)) * 0.035 * p.sc : 0;
     const g = moving ? 0 : Math.sin(_t * 1.7 + p.ph) * 0.3;                                   // chatting: little arm gestures + head-nod sway
     _p.set(x, bob, z); _q.setFromAxisAngle(_up, yaw + (moving ? 0 : Math.sin(_t * 0.8 + p.ph) * 0.12)); _s2.setScalar(p.sc); _mb.compose(_p, _q, _s2);
-    const part = (mesh, px_, py_, ang) => { _m2.makeTranslation(px_, py_, 0); if (ang) _m2.multiply(_m3.makeRotationX(ang)); mesh.setMatrixAt(i, _m.multiplyMatrices(_mb, _m2)); };
-    pm.torso.setMatrixAt(i, p.type === 0 ? _mb : _Z); pm.kaftan.setMatrixAt(i, p.type === 1 ? _mb : _Z); pm.gown.setMatrixAt(i, p.type === 2 ? _mb : _Z);
-    pm.hair.setMatrixAt(i, p.type === 0 ? _mb : _Z); pm.cap.setMatrixAt(i, p.type === 1 ? _mb : _Z); pm.bare.setMatrixAt(i, p.type === 2 ? _mb : _Z);
-    if (p.type === 0) { part(pm.legL, -0.11, 0.9, sw); part(pm.legR, 0.11, 0.9, -sw); } else { pm.legL.setMatrixAt(i, _Z); pm.legR.setMatrixAt(i, _Z); }
+    const part = (mesh, px_, py_, ang) => { _m2.makeTranslation(px_, py_, 0); if (ang) _m2.multiply(_m3.makeRotationX(ang)); mesh.setMatrixAt(j, _m.multiplyMatrices(_mb, _m2)); };
+    pm.torso.setMatrixAt(j, p.type === 0 ? _mb : _Z); pm.kaftan.setMatrixAt(j, p.type === 1 ? _mb : _Z); pm.gown.setMatrixAt(j, p.type === 2 ? _mb : _Z);
+    pm.hair.setMatrixAt(j, p.type === 0 ? _mb : _Z); pm.cap.setMatrixAt(j, p.type === 1 ? _mb : _Z); pm.bare.setMatrixAt(j, p.type === 2 ? _mb : _Z);
+    if (p.type === 0) { part(pm.legL, -0.11, 0.9, sw); part(pm.legR, 0.11, 0.9, -sw); } else { pm.legL.setMatrixAt(j, _Z); pm.legR.setMatrixAt(j, _Z); }
     part(pm.armL, -0.28, 1.5, moving ? -sw * 0.8 : -0.5 + g); part(pm.armR, 0.28, 1.5, moving ? sw * 0.8 : -0.9 - g);
   });
+  for (const k in pm) pm[k].count = nj;
   for (const k in pm) pm[k].instanceMatrix.needsUpdate = true;
   SH.done(); BEAM.instanceMatrix.needsUpdate = true;
 
