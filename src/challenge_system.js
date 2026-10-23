@@ -218,6 +218,14 @@ export async function acceptChallenge(challengeId) {
     match.target = 7;
     match.players[ch.hostUid].potted = 0;
     match.players[uid].potted = 0;
+  } else if (ch.game === "okada_dash") {
+    // Okada Dash: 5 rounds, pick lane + action, highest score wins
+    match.rider = ch.hostUid;
+    match.phase = "ride_pick";
+    match.round = 0;
+    match.riderPick = null;
+    match.lastResult = null;
+    match.target = 5;
   }
   try {
     await set(matchRef, match);

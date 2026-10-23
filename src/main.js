@@ -36,6 +36,8 @@ import { initPenaltyUI } from "./penalty_shootout_ui.js";
 import { initSniperUI } from "./sniper_ui.js";
 import { initBowlingUI } from "./bowling_ui.js";
 import { initPoolUI } from "./pool_ui.js";
+import { initOkadaDashUI } from "./okada_dash_ui.js";
+import { initSceneCulling, tickSceneCulling } from "./scene_culling.js";
 import { initHowToPlay, showHowToPlay } from "./how_to_play.js";
 import { initSpyMissions, getSpyMissions, getMyUnlockTag } from "./spy_missions.js";
 import { initSpyMissionsUI, renderSpyMissionsApp, openMission as openSpyMission } from "./spy_mission_ui.js";
@@ -3378,6 +3380,23 @@ initAuth((user) => {
     } catch (e) {
       console.warn("[pool] initPoolUI failed:", e.message);
     }
+    // OKADA DASH (Oct 23): endless runner arcade game — 5 rounds, pick lane
+    // + action (dodge/collect/boost), highest score wins.
+    try {
+      initOkadaDashUI({ game, toast, getMyUid: () => getMyUid(), getMyName: () => getMyName() || "Player" });
+      console.log("[okada_dash] okada dash UI initialised");
+    } catch (e) {
+      console.warn("[okada_dash] initOkadaDashUI failed:", e.message);
+    }
+    // SCENE CULLING (Oct 23): distance-based culling for InstancedMeshes.
+    // Adapted from slop-newyork (MIT, © 2026 Mr.doob). Saves draw calls
+    // by hiding far-away traffic + pedestrians + props.
+    try {
+      initSceneCulling(scene);
+      console.log("[culling] scene culling initialised");
+    } catch (e) {
+      console.warn("[culling] initSceneCulling failed:", e.message);
+    }
     // SPY MISSIONS (Oct 20): Capital Heat-style story-driven missions with
     // 6 chapters, cutscenes, code-breaking minigame, star ratings, big
     // money rewards (₦500k → ₦10M per mission). Total payout: ~₦27M.
@@ -4209,6 +4228,8 @@ function _frame() {
   tickMoneyHunt(Date.now());
   // ---- Graphics tick: cloud drift ----
   tickGraphics(dt);
+  // SCENE CULLING (Oct 23): hide far-away InstancedMeshes to save draw calls
+  tickSceneCulling(camera);
   // ---- Particles tick: confetti, dust, rain (Oct 19) ----
   tickParticles(dt, camera);
   // ---- Road events tick: rain/weather, checkpoints, traffic jams (Oct 19) ----

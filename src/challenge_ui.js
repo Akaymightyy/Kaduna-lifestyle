@@ -21,6 +21,7 @@ import { openPenaltyMatchScreen, initPenaltyUI } from "./penalty_shootout_ui.js"
 import { openSniperMatchScreen, initSniperUI } from "./sniper_ui.js";
 import { openBowlingMatchScreen, initBowlingUI } from "./bowling_ui.js";
 import { openPoolMatchScreen, initPoolUI } from "./pool_ui.js";
+import { openOkadaDashMatchScreen, initOkadaDashUI } from "./okada_dash_ui.js";
 import { db } from "./firebase.js";
 import { ref, get as fbGet } from "firebase/database";
 
@@ -144,6 +145,11 @@ function _openCreator() {
           <div class="emoji">🎱</div>
           <div class="name">Pool</div>
           <div class="desc">7 rounds, most balls potted wins</div>
+        </div>
+        <div class="cc-game" data-game="okada_dash">
+          <div class="emoji">🏍️</div>
+          <div class="name">Okada Dash</div>
+          <div class="desc">5 rounds, dodge + collect + boost</div>
         </div>
       </div>
       <div class="cc-section">Stake (winner takes 95% of pot)</div>
@@ -308,6 +314,11 @@ async function _openMatchScreen(matchId) {
     if (m && m.game === "pool") {
       _matchEl.style.display = "none";
       openPoolMatchScreen(matchId);
+      return;
+    }
+    if (m && m.game === "okada_dash") {
+      _matchEl.style.display = "none";
+      openOkadaDashMatchScreen(matchId);
       return;
     }
   } catch (e) {
