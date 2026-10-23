@@ -17,17 +17,20 @@ export function driveStep(player, input, dt, maxSpd) {
   // ACCEL (throttle > 0): ramp UP toward max speed
   // BRAKE (throttle < 0): ramp DOWN to 0 (STOP — no reverse)
   // IDLE (throttle = 0): coast (slowly decelerate)
-  let target;
+  // REAL acceleration (Oct 23): hold ACCEL and speed climbs steadily to top speed (about 3.5s to full),
+  // BRAKE slams it down to a full stop (about 0.6s), letting go coasts gently. Never reverses.
+  const accel = maxSpd * 0.30;     // m/s gained per second while ACCEL is held
+  const brake = maxSpd * 1.7;      // m/s lost per second while BRAKE is held
+  const coast = maxSpd * 0.10;     // m/s lost per second when no pedal
   if (throttle > 0) {
-    target = throttle * maxSpd;               // accelerate forward
+    const top = throttle * maxSpd;
+    if (player.speed < top) player.speed = Math.min(top, player.speed + accel * dt * (1.4 - 0.4 * (player.speed / maxSpd)));
+    else player.speed = Math.max(top, player.speed - coast * dt);
   } else if (throttle < 0) {
-    target = 0;                                // brake to stop — NO REVERSE
+    player.speed = Math.max(0, player.speed - brake * dt * Math.min(1, -throttle * 1.5));
   } else {
-    target = player.speed * 0.96;              // coast — slowly lose speed
+    player.speed = Math.max(0, player.speed - coast * dt);
   }
-  const braking = throttle < 0 && player.speed > 0.1;
-  player.speed += (target - player.speed) * (1 - Math.exp(-dt * (braking ? 6 : 3)));
-  // Clamp to 0 when very close (prevents tiny negative drift from coasting)
   if (Math.abs(player.speed) < 0.05) player.speed = 0;
   // steering eases in (no jerk), cannot spin on the spot, and turns a little wider at top speed
   player.steerSm = (player.steerSm || 0) + (steer - (player.steerSm || 0)) * (1 - Math.exp(-dt * 8));

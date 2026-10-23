@@ -183,7 +183,7 @@ function _ensureVehicleControls() {
     "position:fixed;inset:0;z-index:28;pointer-events:none;display:none;";
   // Acceleration (big green button, bottom-right) — hold to add speed
   const accelBtn = document.createElement("button");
-  accelBtn.innerHTML = '<div style="line-height:1;font-size:28px;">▲</div><div style="font:800 10px Poppins,sans-serif;margin-top:2px">ACCEL</div>';
+  accelBtn.innerHTML = '<div style="line-height:1;font-size:28px;">▲</div><div style="font:800 8px Poppins,sans-serif;margin-top:2px">ACCELERATE</div>';
   accelBtn.style.cssText = "position:absolute;right:20px;bottom:calc(130px + env(safe-area-inset-bottom));" +
     "width:80px;height:80px;border-radius:50%;background:#4ade80;color:#000;border:3px solid #fff;display:flex;flex-direction:column;align-items:center;justify-content:center;" +
     "font-size:28px;font-weight:700;cursor:pointer;pointer-events:auto;touch-action:none;" +
@@ -4015,9 +4015,10 @@ function _frame() {
     // _vehBtnSteer / _vehBtnThrottle are set by the on-screen driving buttons.
     // Joystick left/right also steers; joystick up/down also throttles.
     // Keyboard WASD/arrows also work.
-    const maxVehSpd = getRideSpeed() * 1.8;
-    let steer = (window._vehBtnSteer || 0) + (ctl.joyX || 0);
-    let throttle = (window._vehBtnThrottle || 0) + (ctl.joyY || 0);
+    const maxVehSpd = getRideSpeed() * 3.2;   // top speed (bigger = faster cars); ACCEL ramps up to it
+    let steer = (window._vehBtnSteer || 0) + (Math.abs(ctl.joyX || 0) > 0.08 ? ctl.joyX : 0);
+    const _jy = Math.abs(ctl.joyY || 0) > 0.35 ? ctl.joyY : 0;   // dead-zone so steering with the stick never taps gas/brake
+    let throttle = (window._vehBtnThrottle || 0) + _jy;
     const k = ctl.keys || {};
     if (k["w"] || k["arrowup"]) throttle += 1;
     if (k["s"] || k["arrowdown"]) throttle -= 1;

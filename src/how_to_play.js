@@ -64,7 +64,7 @@ export function showHowToPlay() {
       tips: [
         "Open <b>🚗 Cars</b> app → tap <b>Ride</b> on any owned vehicle.",
         "<b>Joystick left/right</b> = steer the vehicle.",
-        "<b>▲ ACCEL button</b> (green, bottom-right) = hold to accelerate.",
+        "<b>▲ ACCELERATE</b> (green, bottom-right) = hold to add speed, it climbs the longer you hold.",
         "<b>■ BRAKE button</b> (red, left of ACCEL) = press to stop. Brake STOPS — it does NOT reverse.",
         "Tap <b>🚶 Dismount</b> in the Cars app to get out.",
         "Buy luxury cars at <b>Kaduna Motors</b> (🚗 on the map, east side).",
