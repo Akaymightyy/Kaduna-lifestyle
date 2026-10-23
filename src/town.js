@@ -3,6 +3,7 @@
 // All shapes are original and built from plain boxes / cones. Colours are baked as "multipliers" so one
 // per-instance colour (the wall colour) tints the whole house: white = wall, grey = darker roof, near-black = windows.
 import * as THREE from "three";
+import { carShapeNew, busShapeNew } from "./car_shapes.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
 // ---------- tiny helpers ----------
@@ -115,20 +116,13 @@ export function treeShape() {
 
 // ---------- parked / driving car (length along X) ----------
 export function carShape() {
-  const L = [];
-  B(L, 4.1, 0.75, 1.8, 0, 0.7, 0, 1); B(L, 2.1, 0.65, 1.6, -0.2, 1.4, 0, 0.4);
-  B(L, 0.2, 0.45, 1.65, 0.85, 1.4, 0, 0.1); B(L, 0.2, 0.45, 1.65, -1.25, 1.4, 0, 0.1);
-  for (const x of [-1.3, 1.3]) for (const z of [-0.85, 0.85]) B(L, 0.7, 0.7, 0.3, x, 0.35, z, 0.04);
-  B(L, 0.06, 0.3, 0.5, 2.06, 0.75, 0.6, 0xfff2b0); B(L, 0.06, 0.3, 0.5, 2.06, 0.75, -0.6, 0xfff2b0);
-  return done(L);
+  // Oct 23: lofted low-poly car from src/car_shapes.js
+  // © 2026 Mr.doob — loft idea adapted from slop-newyork (MIT).
+  return carShapeNew();
 }
-export function busShape() {                                      // yellow danfo-style bus, original box shape
-  const L = [];
-  B(L, 8, 2.6, 2.4, 0, 1.9, 0, 1); B(L, 8.05, 0.5, 2.45, 0, 1.1, 0, 0.12);
-  for (let i = 0; i < 5; i++) { B(L, 1.1, 0.8, 0.06, -3 + i * 1.5, 2.3, 1.22, 0.12); B(L, 1.1, 0.8, 0.06, -3 + i * 1.5, 2.3, -1.22, 0.12); }
-  B(L, 0.06, 1, 2.0, 4.0, 2.4, 0, 0.12);
-  for (const x of [-2.6, 2.6]) for (const z of [-1.1, 1.1]) B(L, 1, 1, 0.35, x, 0.5, z, 0.04);
-  return done(L);
+export function busShape() {
+  // Oct 23: lofted danfo bus from src/car_shapes.js
+  return busShapeNew();
 }
 
 // ---------- kiosk / market stall ----------
