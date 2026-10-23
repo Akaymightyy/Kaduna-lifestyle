@@ -542,7 +542,7 @@ const world = buildWorld(scene);
 world.world.add(buildStreetDetail(scene, world.colliders));
 const _pShadow = makeBlobShadows(scene, 1);
 addScenery(scene, world);
-initLife(scene);
+initLife(scene, world.colliders);
 initActivity(scene);
 const traffic = createTraffic(scene);
 let mmDraw = createMinimap($("mm"), world.mapShapes);

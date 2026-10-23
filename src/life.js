@@ -61,7 +61,7 @@ for (const ax of WIDE_AVENUES_X) for (const cz of [-195, 195]) RB.push([ax, cz])
 function lanePos(c, s, out) {
   const len = c.len;
   let t = ((s % len) + len) % len;
-  const along = c.dir > 0 ? -len / 2 + t : len / 2 - t;
+  const mid = c.mid || 0, along = c.dir > 0 ? mid - len / 2 + t : mid + len / 2 - t;
   let x, z;
   if (c.axis === "z") { x = c.fix + c.off; z = along; } else { x = along; z = c.fix + c.off; }
   for (const [rx, rz] of RB) {                       // go round the island instead of through it
@@ -72,16 +72,37 @@ function lanePos(c, s, out) {
   out.set(x, 0, z); return out;
 }
 
-export function initLife(scene) {
+// Split a lane into the stretches where a car really fits: anywhere a building, wall, gate or kiosk sits on the road,
+// that bit is cut out and cars never enter it (they loop inside each clear stretch and shrink away at the ends).
+function clearStretches(ln, cols) {
+  const tmp = { axis: ln.axis, fix: ln.fix, off: ln.off, dir: 1, len: ln.len, mid: 0 }, P = new THREE.Vector3();
+  const cx = ln.axis === "z" ? ln.fix + ln.off : 0, cz = ln.axis === "x" ? ln.fix + ln.off : 0;
+  const near = cols.filter((c) => c.minX < c.maxX && (ln.axis === "z" ? (c.maxX > cx - 30 && c.minX < cx + 30) : (c.maxZ > cz - 30 && c.minZ < cz + 30)));
+  const hx = ln.axis === "z" ? 1.5 : 3.2, hz = ln.axis === "z" ? 3.2 : 1.5;
+  const segs = []; let start = null;
+  for (let a = -ln.len / 2; a <= ln.len / 2; a += 1) {
+    lanePos(tmp, a + ln.len / 2, P);
+    let blocked = false;
+    for (const c of near) if (P.x + hx > c.minX && P.x - hx < c.maxX && P.z + hz > c.minZ && P.z - hz < c.maxZ) { blocked = true; break; }
+    if (!blocked && start === null) start = a;
+    if ((blocked || a + 1 > ln.len / 2) && start !== null) { const b = a - (blocked ? 1.5 : 0); if (b - start >= 28) segs.push({ axis: ln.axis, fix: ln.fix, off: ln.off, dir: ln.dir, len: b - start - 3, mid: (start + b) / 2 }); start = null; }
+  }
+  return segs.length ? segs : [ln];
+}
+const pickSeg = (segs, f) => { const tot = segs.reduce((a, g) => a + g.len, 0); let x = (f % 1) * tot; for (const g of segs) { if (x < g.len) return g; x -= g.len; } return segs[segs.length - 1]; };
+
+export function initLife(scene, colliders = []) {
   _scene = scene;
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
   // roads: lane offset +-2.8, 3 cars per lane, 2 buses per avenue
   const lanes = [];
   for (const ax of WIDE_AVENUES_X) for (const off of [-2.8, 2.8]) lanes.push({ axis: "z", fix: ax, off, dir: off > 0 ? 1 : -1, len: MAP_HALF_Z * 2 - 30 });
   for (const cz of WIDE_CROSS_Z) for (const off of [-2.8, 2.8]) lanes.push({ axis: "x", fix: cz, off, dir: off > 0 ? 1 : -1, len: MAP_HALF_X * 2 - 30 });
-  lanes.forEach((ln, li) => {
-    for (let k = 0; k < 3; k++) cars.push({ ln, s: (k / 3) * ln.len + hash2("c" + li, k) * 60, v: 9 + hash2("v" + li, k) * 6, hue: hash2("h" + li, k) });
-    if (li % 2 === 0) buses.push({ ln, s: hash2("b" + li, 1) * ln.len, v: 6 + hash2("bv" + li, 1) * 2 });
+  lanes.forEach((full, li) => {
+    const segs = clearStretches(full, colliders);
+    (window.__laneSegs = window.__laneSegs || []).push({ axis: full.axis, fix: full.fix, off: full.off, segs: segs.map((g) => [Math.round(g.mid - g.len / 2), Math.round(g.mid + g.len / 2)]) });
+    for (let k = 0; k < 3; k++) { const ln = pickSeg(segs, (k + 0.5) / 3 + hash2("cs" + li, k) * 0.1); cars.push({ ln, s: hash2("c" + li, k) * ln.len, v: 9 + hash2("v" + li, k) * 6, hue: hash2("h" + li, k) }); }
+    if (li % 2 === 0) { const ln = pickSeg(segs, hash2("bs" + li, 1)); buses.push({ ln, s: hash2("b" + li, 1) * ln.len, v: 6 + hash2("bv" + li, 1) * 2 }); }
   });
   carMesh = new THREE.InstancedMesh(carShape(), mat, cars.length); carMesh.frustumCulled = false;
   cars.forEach((c, i) => carMesh.setColorAt(i, _col.setHSL(c.hue, 0.6, 0.5)));
