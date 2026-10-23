@@ -36,6 +36,7 @@ import { initPenaltyUI } from "./penalty_shootout_ui.js";
 import { initSniperUI } from "./sniper_ui.js";
 import { initBowlingUI } from "./bowling_ui.js";
 import { initPoolUI } from "./pool_ui.js";
+import { initHowToPlay, showHowToPlay } from "./how_to_play.js";
 import { initSpyMissions, getSpyMissions, getMyUnlockTag } from "./spy_missions.js";
 import { initSpyMissionsUI, renderSpyMissionsApp, openMission as openSpyMission } from "./spy_mission_ui.js";
 import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
@@ -180,34 +181,23 @@ function _ensureVehicleControls() {
   _vehControlsEl.id = "vehicle-controls";
   _vehControlsEl.style.cssText =
     "position:fixed;inset:0;z-index:28;pointer-events:none;display:none;";
-  // Accelerate (big green button, bottom-right)
+  // Acceleration (big green button, bottom-right) — hold to add speed
   const accelBtn = document.createElement("button");
-  accelBtn.innerHTML = '<div style="line-height:1">▲</div><div style="font:800 10px Poppins,sans-serif;margin-top:2px">GAS</div>';
+  accelBtn.innerHTML = '<div style="line-height:1;font-size:28px;">▲</div><div style="font:800 10px Poppins,sans-serif;margin-top:2px">ACCEL</div>';
   accelBtn.style.cssText = "position:absolute;right:20px;bottom:calc(130px + env(safe-area-inset-bottom));" +
-    "width:72px;height:72px;border-radius:50%;background:#4ade80;color:#000;border:3px solid #fff;display:flex;flex-direction:column;align-items:center;justify-content:center;" +
-    "font-size:32px;font-weight:700;cursor:pointer;pointer-events:auto;touch-action:none;" +
+    "width:80px;height:80px;border-radius:50%;background:#4ade80;color:#000;border:3px solid #fff;display:flex;flex-direction:column;align-items:center;justify-content:center;" +
+    "font-size:28px;font-weight:700;cursor:pointer;pointer-events:auto;touch-action:none;" +
     "box-shadow:0 4px 12px rgba(0,0,0,.4);user-select:none;-webkit-user-select:none;";
-  // Brake/reverse (red button, left of accelerate)
+  // Brake (red button, left of accelerate) — press to stop
   const brakeBtn = document.createElement("button");
-  brakeBtn.innerHTML = '<div style="line-height:1">▼</div><div style="font:800 9px Poppins,sans-serif">BRAKE</div>';
-  brakeBtn.style.cssText = "position:absolute;right:104px;bottom:calc(130px + env(safe-area-inset-bottom));" +
-    "width:56px;height:56px;border-radius:50%;background:#e11d48;color:#fff;border:3px solid #fff;display:flex;flex-direction:column;align-items:center;justify-content:center;" +
+  brakeBtn.innerHTML = '<div style="line-height:1;font-size:24px;">■</div><div style="font:800 9px Poppins,sans-serif">BRAKE</div>';
+  brakeBtn.style.cssText = "position:absolute;right:110px;bottom:calc(130px + env(safe-area-inset-bottom));" +
+    "width:64px;height:64px;border-radius:50%;background:#e11d48;color:#fff;border:3px solid #fff;display:flex;flex-direction:column;align-items:center;justify-content:center;" +
     "font-size:24px;font-weight:700;cursor:pointer;pointer-events:auto;touch-action:none;" +
     "box-shadow:0 4px 12px rgba(0,0,0,.4);user-select:none;-webkit-user-select:none;";
-  // Steer left (bottom-center-left)
-  const leftBtn = document.createElement("button");
-  leftBtn.innerHTML = '<div style="line-height:1">◀</div><div style="font:800 9px Poppins,sans-serif">LEFT</div>';
-  leftBtn.style.cssText = "position:absolute;left:112px;bottom:calc(130px + env(safe-area-inset-bottom));" +
-    "width:56px;height:56px;border-radius:50%;background:rgba(15,77,58,.92);color:#fff;border:2px solid rgba(255,255,255,.3);display:flex;flex-direction:column;align-items:center;justify-content:center;" +
-    "font-size:22px;font-weight:700;cursor:pointer;pointer-events:auto;touch-action:none;" +
-    "box-shadow:0 4px 12px rgba(0,0,0,.4);user-select:none;-webkit-user-select:none;";
-  // Steer right (bottom-center-right)
-  const rightBtn = document.createElement("button");
-  rightBtn.innerHTML = '<div style="line-height:1">▶</div><div style="font:800 9px Poppins,sans-serif">RIGHT</div>';
-  rightBtn.style.cssText = "position:absolute;left:176px;bottom:calc(130px + env(safe-area-inset-bottom));" +
-    "width:56px;height:56px;border-radius:50%;background:rgba(15,77,58,.92);color:#fff;border:2px solid rgba(255,255,255,.3);display:flex;flex-direction:column;align-items:center;justify-content:center;" +
-    "font-size:22px;font-weight:700;cursor:pointer;pointer-events:auto;touch-action:none;" +
-    "box-shadow:0 4px 12px rgba(0,0,0,.4);user-select:none;-webkit-user-select:none;";
+  // NOTE: Left/right steering buttons REMOVED (Oct 21). Steering now comes
+  // from the analog joystick only (left/right on the joystick = steer).
+  // This is cleaner + more intuitive — like real driving games.
   // Wire up pointer events for each button
   const wireBtn = (el, steerVal, throttleVal) => {
     const start = (e) => { e.preventDefault(); if (steerVal !== undefined) window._vehBtnSteer = (window._vehBtnSteer || 0) + steerVal; if (throttleVal !== undefined) window._vehBtnThrottle = (window._vehBtnThrottle || 0) + throttleVal; el.style.transform = el.style.transform.replace("scale(1)", "scale(0.92)"); };
@@ -217,14 +207,10 @@ function _ensureVehicleControls() {
     el.addEventListener("pointercancel", end);
     el.addEventListener("pointerleave", end);
   };
-  wireBtn(accelBtn, undefined, 1);     // accelerate
-  wireBtn(brakeBtn, undefined, -1);    // brake/reverse
-  wireBtn(leftBtn, -1, undefined);     // steer left
-  wireBtn(rightBtn, 1, undefined);     // steer right
+  wireBtn(accelBtn, undefined, 1);     // accelerate (hold to add speed)
+  wireBtn(brakeBtn, undefined, -1);    // brake (press to stop — no reverse)
   _vehControlsEl.appendChild(accelBtn);
   _vehControlsEl.appendChild(brakeBtn);
-  _vehControlsEl.appendChild(leftBtn);
-  _vehControlsEl.appendChild(rightBtn);
   document.body.appendChild(_vehControlsEl);
 }
 // ---- PASSENGER "Get off ride" button (Oct 19) ----
@@ -1836,6 +1822,11 @@ function _showPhoneApp(appId) {
         '<div style="font-size:10px;color:#999;margin-bottom:10px;">UID: '+(getMyUid()||"guest").slice(0,20)+'</div>'+
         '<button onclick="window.logout()" style="width:100%;background:#e11d48;color:#fff;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:13px;font-weight:600;">🚪 Log Out</button>'+
       '</div>'+
+      '<div style="background:var(--cream);border-radius:10px;padding:12px;margin-bottom:8px;">'+
+        '<div style="font-size:12px;font-weight:600;margin-bottom:6px;">📖 How to Play</div>'+
+        '<div style="font-size:11px;color:#666;margin-bottom:8px;">New player? Read the quick guide on walking, driving, phone apps, challenges + more.</div>'+
+        '<button onclick="window.showHowToPlay()" style="width:100%;background:var(--green);color:#fff;border:none;border-radius:8px;padding:10px;cursor:pointer;font-size:13px;font-weight:600;">📖 Open Guide</button>'+
+      '</div>'+
       '<div style="background:var(--cream);border-radius:10px;padding:12px;">'+
         '<div style="font-size:12px;font-weight:600;margin-bottom:6px;">About</div>'+
         '<div style="font-size:11px;color:#666;line-height:1.5;">Kaduna Lifestyle v0.3 — A 3D multiplayer life-sim set in Kaduna, Nigeria. Built with Three.js + Firebase. © OpenStreetMap contributors for road data.</div>'+
@@ -3422,6 +3413,9 @@ initAuth((user) => {
   }
   // FEATURE: init billboard/ad system (10 billboards in every district + 10 on the main roads)
   initBillboards(scene);
+  // HOW TO PLAY (Oct 21): show guide on first login + accessible from Settings
+  initHowToPlay();
+  window.showHowToPlay = showHowToPlay;
   // EMOTE BROADCAST (Oct 21): lets players send emotes (wave, dance, clap,
   // etc) that all nearby players see on their remote avatar. Writes to
   // live/{uid} = { emote, emoteDur, emoteTs }. Remote avatars render the
