@@ -21,12 +21,25 @@ export async function build(scene, ctx) {
   }
   // Walls
   group.add(mergedMesh([box(60, 7, 0.4, 0, 3.5, -25, 0xf4f4ec), box(60, 7, 0.4, 0, 3.5, 25, 0xf4f4ec), box(0.4, 7, 50, -30, 3.5, 0, 0xf4f4ec), box(0.4, 7, 50, 30, 3.5, 0, 0xf4f4ec)]));
-  // 5 shop storefronts
+  // 5 shop storefronts (north wall)
   const shops = [{ name: "BOUTIQUE", color: 0xc0392b, x: -20 }, { name: "PHONE STORE", color: 0x1d5fa8, x: -10 }, { name: "BOOKSHOP", color: 0x2e7d4f, x: 0 }, { name: "GADGETS", color: 0xf2b134, x: 10 }, { name: "COSMETICS", color: 0x7a3b8f, x: 20 }];
   const colliders = [];
   for (const shop of shops) {
     const sf = _buildStorefront(shop, R); sf.position.set(shop.x, 0, -22); group.add(sf);
     colliders.push({ minX: shop.x - 4, maxX: shop.x + 4, minZ: -25, maxZ: -19 });
+  }
+  // 3 more storefronts (east wall — MyAbujaLife style: PIXEL POINT, SUYA EXPRESS, GAME ZONE)
+  const eastShops = [
+    { name: "PIXEL POINT", color: 0x05d9e8, z: -15 },
+    { name: "SUYA EXPRESS", color: 0xe11d48, z: 0 },
+    { name: "GAME ZONE", color: 0x9333ea, z: 15 },
+  ];
+  for (const shop of eastShops) {
+    const sf = _buildStorefront(shop, R);
+    sf.position.set(22, 0, shop.z);
+    sf.rotation.y = -Math.PI / 2; // face west (into the mall)
+    group.add(sf);
+    colliders.push({ minX: 19, maxX: 25, minZ: shop.z - 4, maxZ: shop.z + 4 });
   }
   // Escalator
   const escalatorGroup = _buildEscalator(); escalatorGroup.position.set(-12, 0, 0); group.add(escalatorGroup);
