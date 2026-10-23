@@ -28,6 +28,25 @@ const C_TAIL = [1.0, 0.16, 0.16]; // red (taillights)
 const C_TYRE = 0.05;      // near-black (tyres)
 const C_DARK = 0.12;      // dark plastic (grille, trim)
 
+
+// ---- Safe merge ----
+// mergeGeometries() returns NULL (it does not throw) if the parts do not have exactly the same attributes. The hand-built loft
+// has no "uv" but boxes and cylinders do, so every car merge silently failed, the cars became meshes with NO geometry, and the
+// renderer then crashed every frame ("Cannot read properties of null (reading 'id')"). Same rule as town.js flatten():
+// every part is made non-indexed and loses its uv, so all parts always match.
+function safeMerge(parts, useGroups) {
+  const same = parts.map((g) => {
+    const q = g.index ? g.toNonIndexed() : g;
+    if (q.attributes.uv) q.deleteAttribute("uv");
+    if (q.attributes.uv1) q.deleteAttribute("uv1");
+    if (!q.attributes.normal) q.computeVertexNormals();
+    return q;
+  });
+  const merged = mergeGeometries(same, useGroups);
+  if (!merged) throw new Error("car_shapes: could not merge car parts");   // fail loudly here, not later inside the renderer
+  return merged;
+}
+
 // ---- Helper: create a box geometry with vertex colours ----
 function vcol(geo, r, g, b) {
   const n = geo.attributes.position.count;
@@ -166,7 +185,7 @@ export function buildSedan() {
     ...lightGeo(L, W, 0.45, true),   // headlights
     ...lightGeo(L, W, 0.45, false),  // taillights
   ];
-  return mergeGeometries(parts, true);
+  return safeMerge(parts, true);
 }
 
 export function buildHatchback() {
@@ -192,7 +211,7 @@ export function buildHatchback() {
     ...lightGeo(L, W, 0.42, true),
     ...lightGeo(L, W, 0.42, false),
   ];
-  return mergeGeometries(parts, true);
+  return safeMerge(parts, true);
 }
 
 export function buildSUV() {
@@ -219,7 +238,7 @@ export function buildSUV() {
     ...lightGeo(L, W, 0.55, true),
     ...lightGeo(L, W, 0.55, false),
   ];
-  return mergeGeometries(parts, true);
+  return safeMerge(parts, true);
 }
 
 export function buildTaxi() {
@@ -248,7 +267,7 @@ export function buildTaxi() {
     ...lightGeo(L, W, 0.45, true),
     ...lightGeo(L, W, 0.45, false),
   ];
-  return mergeGeometries(parts, true);
+  return safeMerge(parts, true);
 }
 
 export function buildPickup() {
@@ -281,7 +300,7 @@ export function buildPickup() {
     ...lightGeo(L, W, 0.48, true),
     ...lightGeo(L, W, 0.48, false),
   ];
-  return mergeGeometries(parts, true);
+  return safeMerge(parts, true);
 }
 
 export function buildDanfoBus() {
@@ -314,7 +333,7 @@ export function buildDanfoBus() {
     wheelGeo(0.45, 0, W/2), wheelGeo(0.45, 0, -W/2),
     wheelGeo(0.45, L*0.35, W/2), wheelGeo(0.45, L*0.35, -W/2),
   ];
-  return mergeGeometries(parts, true);
+  return safeMerge(parts, true);
 }
 
 // ---- Convenience: get a car shape by type name ----
