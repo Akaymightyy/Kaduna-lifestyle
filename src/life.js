@@ -9,6 +9,7 @@ import { AREAS } from "./areas.js";
 import { LAKE, AIRPORT } from "./scenery.js";
 import { makeBlobShadows } from "./street.js";
 import { NIGHT_GLOW } from "./art/style.js";
+import { getCarShape } from "./car_shapes.js";
 import { carShape, busShape, personParts, hash2, paint, flatten, B, done } from "./town.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { createCharacter, loadCharacterBase } from "./characters.js";
@@ -50,7 +51,7 @@ const slotOwner = [];                       // which person each packed crowd sl
 let PEOPLE_COLS = [];
 
 let _scene = null, _on = false, _t = 0, _last = 0;
-let BEAM = null, SH = null, carMesh = null, busMesh = null, pm = null, boats = [], plane = null;
+let carX = [], BEAM = null, SH = null, carMesh = null, busMesh = null, pm = null, boats = [], plane = null;
 const cars = [], buses = [], people = [];
 const _pv = { x: 0, z: 0, on: false };             // the player's own vehicle: cars wait for it
 export function setLifePlayerVehicle(x, z, on) { _pv.x = x; _pv.z = z; _pv.on = !!on; }
@@ -110,6 +111,9 @@ export function initLife(scene, colliders = []) {
   cars.forEach((c, i) => carMesh.setColorAt(i, _col.setHSL(c.hue, 0.6, 0.5)));
   busMesh = new THREE.InstancedMesh(busShape(), mat, buses.length); busMesh.frustumCulled = false;
   buses.forEach((c, i) => busMesh.setColorAt(i, _col.set(0xf2b134)));
+  // variety: every 4th car is a hatchback / SUV / pickup (own instanced meshes, still just a few draw calls)
+  cars.forEach((c, i) => { c.t = i % 4; });
+  carX = ["hatch", "suv", "pickup"].map((k, ki) => { const m = new THREE.InstancedMesh(getCarShape(k), mat, cars.length); m.frustumCulled = false; cars.forEach((c, i) => m.setColorAt(i, _col.setHSL(c.hue, 0.6, 0.5))); for (let i = 0; i < cars.length; i++) m.setMatrixAt(i, _Z); scene.add(m); return m; });
   scene.add(carMesh, busMesh);
   (async () => {
     try {
@@ -196,7 +200,7 @@ export function initLife(scene, colliders = []) {
 export function tickLife(px, pz, show = true) {
   if (!_on) return;
   const now = performance.now() / 1000, dt = Math.min(0.1, _last ? now - _last : 0.016); _last = now; _t += dt;
-  carMesh.visible = show && !(glbReady && carG.length); busMesh.visible = show && !(glbReady && busG); carG.forEach((m) => { m.visible = show; }); if (busG) busG.visible = show; for (const k in pm) pm[k].visible = show;
+  carMesh.visible = show && !(glbReady && carG.length); carX.forEach((m) => { m.visible = show; }); busMesh.visible = show && !(glbReady && busG); carG.forEach((m) => { m.visible = show; }); if (busG) busG.visible = show; for (const k in pm) pm[k].visible = show;
   for (const b of boats) b.m.visible = show;
   plane.visible = show;
   if (SH) SH.mesh.visible = show;
@@ -213,11 +217,11 @@ export function tickLife(px, pz, show = true) {
     const lt = ((c.s % c.ln.len) + c.ln.len) % c.ln.len, ek = Math.max(0, Math.min(1, Math.min(lt, c.ln.len - lt) / 3));   // FIX (Oct 23): was /6 + min 0.001 — cars became tiny dots at road ends. Now /3 (faster shrink) + min 0 (fully invisible, no dot)
     _s2.setScalar(ek);
     const yaw = Math.atan2(-(nx.z - _p.z), nx.x - _p.x);
-    _q.setFromAxisAngle(_up, yaw); _m.compose(_p, _q, _s2); mesh.setMatrixAt(i, _m); if (glbReady) { if (mesh === carMesh) { if (carG.length) carG[0].setMatrixAt(i, _m); } else if (busG) busG.setMatrixAt(i, _m); } BEAM.setMatrixAt(mesh === carMesh ? i : cars.length + i, _m);
+    _q.setFromAxisAngle(_up, yaw); _m.compose(_p, _q, _s2); if (mesh === carMesh && c.t > 0) { carMesh.setMatrixAt(i, _Z); for (let k = 0; k < 3; k++) carX[k].setMatrixAt(i, k === c.t - 1 ? _m : _Z); } else mesh.setMatrixAt(i, _m); if (glbReady) { if (mesh === carMesh) { if (carG.length) carG[0].setMatrixAt(i, _m); } else if (busG) busG.setMatrixAt(i, _m); } BEAM.setMatrixAt(mesh === carMesh ? i : cars.length + i, _m);
     SH.set(mesh === carMesh ? i : cars.length + i, _p.x, _p.z, (mesh === carMesh ? 2.6 : 3.4) * ek, (mesh === carMesh ? 5.4 : 12) * ek, yaw + Math.PI / 2);
   };
   cars.forEach((c, i) => place(carMesh, i, c)); buses.forEach((c, i) => place(busMesh, i, c));
-  carMesh.instanceMatrix.needsUpdate = true; busMesh.instanceMatrix.needsUpdate = true; carG.forEach((m) => { m.instanceMatrix.needsUpdate = true; }); if (busG) busG.instanceMatrix.needsUpdate = true;
+  carMesh.instanceMatrix.needsUpdate = true; carX.forEach((m) => { m.instanceMatrix.needsUpdate = true; }); busMesh.instanceMatrix.needsUpdate = true; carG.forEach((m) => { m.instanceMatrix.needsUpdate = true; }); if (busG) busG.instanceMatrix.needsUpdate = true;
 
   // real people for the nearest walkers
   const near = [];
