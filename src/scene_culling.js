@@ -1,30 +1,26 @@
-// src/scene_culling.js — Simple spatial culling for InstancedMeshes.
+// src/scene_culling.js — Simple frustum culling enabler for InstancedMeshes.
 //
 // Adapted from mrdoob/slop-newyork js/scene-culling.js (MIT, © 2026 Mr.doob).
-// Our version is simpler: instead of splitting meshes into grid chunks, we:
-//   1. After scene build, find all InstancedMeshes with frustumCulled=false
-//   2. Compute a tight bounding sphere from instance positions
-//   3. Set frustumCulled=true (lets Three.js cull off-screen meshes)
-//   4. Every frame, also do a distance check: if mesh center > MAX_DIST from
-//      camera, set visible=false (saves draw calls for far-away instances)
+// Our version is simpler and SAFER: instead of hiding far meshes (which
+// interfered with life.js's own visibility management — see the bug where
+// pedestrians vanished), we ONLY:
+//   1. Compute a tight bounding sphere from instance positions
+//   2. Set frustumCulled = true (lets Three.js cull off-screen meshes)
 //
-// This gives a ~30-50% perf boost on mobile by not drawing far-away traffic,
-// pedestrians, and props that are behind the camera or too far to see.
+// We do NOT set visible=false — life.js manages its own visibility per frame
+// (pm[k].visible = show, pm[k].count = nj). Setting visible=false here
+// would override life.js and make pedestrians disappear.
 
 import * as THREE from "three";
 
-const MAX_DIST = 600; // metres — beyond this, hide the whole InstancedMesh
-const MAX_DIST_SQ = MAX_DIST * MAX_DIST;
-
 let _scene = null;
-let _meshes = []; // { mesh, centerX, centerZ, hasCustomBS }
+let _meshes = [];
 
 export function initSceneCulling(scene) {
   _scene = scene;
   _meshes = [];
-  // Scan for InstancedMeshes — do this after the world + life + traffic are built
-  // (called from main.js after initLife + createTraffic + addCity)
-  setTimeout(() => _scanScene(), 2000); // delay to let async builds finish
+  // Scan for InstancedMeshes after the world + life + traffic are built
+  setTimeout(() => _scanScene(), 2000);
 }
 
 function _scanScene() {
@@ -35,7 +31,7 @@ function _scanScene() {
       const m = new THREE.Matrix4();
       const pos = new THREE.Vector3();
       let sx = 0, sz = 0, n = 0;
-      const step = Math.max(1, Math.floor(obj.count / 50)); // sample every Nth instance
+      const step = Math.max(1, Math.floor(obj.count / 50));
       for (let i = 0; i < obj.count; i += step) {
         obj.getMatrixAt(i, m);
         pos.setFromMatrixPosition(m);
@@ -59,30 +55,16 @@ function _scanScene() {
       }
     }
   });
-  console.log("[culling] found", _meshes.length, "InstancedMeshes to cull");
+  console.log("[culling] found", _meshes.length, "InstancedMeshes, frustum culling enabled");
 }
 
+// Per-frame tick — currently a no-op (frustum culling is automatic once enabled).
+// Kept for future distance-based culling if needed, but NOT touching visible flag
+// to avoid conflicting with life.js's own visibility management.
 export function tickSceneCulling(camera) {
-  if (!_meshes.length) return;
-  const cx = camera.position.x, cz = camera.position.z;
-  for (const m of _meshes) {
-    const dx = m.cx - cx, dz = m.cz - cz;
-    const dSq = dx * dx + dz * dz;
-    // If the mesh center is very far AND its bounding sphere doesn't reach the camera
-    // (i.e., even the closest instance is beyond MAX_DIST), hide it entirely
-    if (dSq > MAX_DIST_SQ) {
-      const bs = m.mesh.geometry.boundingSphere;
-      if (bs) {
-        const distToCenter = Math.sqrt(dSq);
-        if (distToCenter - bs.radius > MAX_DIST) {
-          m.mesh.visible = false;
-          continue;
-        }
-      } else {
-        m.mesh.visible = false;
-        continue;
-      }
-    }
-    m.mesh.visible = true;
-  }
+  // No-op — frustum culling is handled by Three.js automatically once
+  // frustumCulled = true and boundingSphere is set.
+  // We intentionally do NOT set mesh.visible = false here — that broke
+  // pedestrian visibility (life.js sets visible per frame and our override
+  // was clobbering it).
 }

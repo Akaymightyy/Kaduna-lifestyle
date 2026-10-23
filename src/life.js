@@ -45,7 +45,7 @@ export async function glbInstanced(vehicleId, count) {
 
 // ---- real people: a small pool of full character models is lent to the walkers nearest the player ----
 const POOL = 10, RIGS = [];                 // { ch, who:-1 }
-const SHOW_R = 55, CROWD_R = 150;
+const SHOW_R = 55, CROWD_R = 300;  // Oct 23: was 150 — too small for 580m map, pedestrians invisible in outer districts
 const slotOwner = [];                       // which person each packed crowd slot currently shows
 let PEOPLE_COLS = [];
 
