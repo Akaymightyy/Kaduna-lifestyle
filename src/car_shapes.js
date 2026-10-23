@@ -1,4 +1,4 @@
-// src/car_shapes.js — Low-poly 3D car bodies using a simple loft approach.
+// src/car_shapes.js — Low-poly 3D car bodies using a loft approach.
 //
 // Inspired by mrdoob/slop-newyork (MIT, © 2026 Mr.doob) — the idea: define
 // cross-sections along the car length (front bumper, hood, windshield base,
@@ -6,35 +6,26 @@
 // one smooth body, then add windshield, bumpers, mirrors, lights, wheels.
 //
 // This is our OWN WebGL implementation using plain THREE.BufferGeometry +
-// vertex colours (same style as carShape() in src/town.js). No TSL/WebGPU.
+// vertex colours. No TSL/WebGPU. © 2026 Mr.doob — loft idea adapted from
+// slop-newyork/js/actor-models.js (MIT).
 //
-// Each car is max 3,000-5,000 triangles. Body paint comes from instance
-// colour (vertex colour = white); glass, tyres, chrome, lights use fixed
-// vertex colours (dark/silver/yellow/red) that get subtly tinted but still
-// read correctly.
-//
-// © 2026 Mr.doob — loft idea adapted from slop-newyork/js/actor-models.js (MIT).
-// Implementation written from scratch for WebGL/Kaduna Lifestyle.
+// FIX v2 (Oct 23): rewrote cross-sections — 16 points per section (was 8),
+// 8 sections (was 6), curved silhouettes (not just rounded rectangles).
+// Cars now look much more like real cars, not boxes.
 
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
 // ---- Vertex colour constants ----
-const C_BODY = 1.0;       // white — tinted by instance colour (body paint)
-const C_GLASS = 0.18;     // dark — tinted (reads as tinted glass)
-const C_CHROME = 0.55;    // silver — tinted (reads as metallic trim)
-const C_HEAD = [1.0, 0.95, 0.69]; // warm yellow (headlights)
-const C_TAIL = [1.0, 0.16, 0.16]; // red (taillights)
-const C_TYRE = 0.05;      // near-black (tyres)
-const C_DARK = 0.12;      // dark plastic (grille, trim)
+const C_BODY = 1.0;
+const C_GLASS = 0.18;
+const C_CHROME = 0.55;
+const C_HEAD = [1.0, 0.95, 0.69];
+const C_TAIL = [1.0, 0.16, 0.16];
+const C_TYRE = 0.05;
+const C_DARK = 0.12;
 
-
-// ---- Safe merge ----
-// mergeGeometries() returns NULL (it does not throw) if the parts do not have exactly the same attributes. The hand-built loft
-// has no "uv" but boxes and cylinders do, so every car merge silently failed, the cars became meshes with NO geometry, and the
-// renderer then crashed every frame ("Cannot read properties of null (reading 'id')"). Same rule as town.js flatten():
-// every part is made non-indexed and loses its uv, so all parts always match.
-function safeMerge(parts, useGroups) {
+function safeMerge(parts) {
   const same = parts.map((g) => {
     const q = g.index ? g.toNonIndexed() : g;
     if (q.attributes.uv) q.deleteAttribute("uv");
@@ -42,12 +33,11 @@ function safeMerge(parts, useGroups) {
     if (!q.attributes.normal) q.computeVertexNormals();
     return q;
   });
-  const merged = mergeGeometries(same, useGroups);
-  if (!merged) throw new Error("car_shapes: could not merge car parts");   // fail loudly here, not later inside the renderer
+  const merged = mergeGeometries(same, true);
+  if (!merged) throw new Error("car_shapes: merge failed");
   return merged;
 }
 
-// ---- Helper: create a box geometry with vertex colours ----
 function vcol(geo, r, g, b) {
   const n = geo.attributes.position.count;
   const col = new Float32Array(n * 3);
@@ -55,57 +45,68 @@ function vcol(geo, r, g, b) {
   geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
   return geo;
 }
-function box(w, h, d, x, y, z, c) {
-  return vcol(new THREE.BoxGeometry(w, h, d).translate(x, y, z), c, c, c);
-}
-function boxRGB(w, h, d, x, y, z, r, g, b) {
-  return vcol(new THREE.BoxGeometry(w, h, d).translate(x, y, z), r, g, b);
+function box(w, h, d, x, y, z, c) { return vcol(new THREE.BoxGeometry(w, h, d).translate(x, y, z), c, c, c); }
+function boxRGB(w, h, d, x, y, z, r, g, b) { return vcol(new THREE.BoxGeometry(w, h, d).translate(x, y, z), r, g, b); }
+
+// ---- 16-point cross-section: proper car silhouette ----
+// Points go clockwise: bottom-left → left-bottom → left → left-top → top-left
+// → top → top-right → right-top → right → right-bottom → bottom-right → bottom
+// → bottom-left-curve → left-bottom-curve → right-bottom-curve → bottom-mid
+//
+// The cross-section is shaped like a real car: flat bottom, flared sides
+// (tumblehome), rounded roof, slightly tapered bottom.
+function cs16(hw, ht, yC) {
+  // hw = half-width at widest point, ht = total height, yC = center height
+  const tb = hw * 0.82;   // bottom half-width (tucked in — tumblehome)
+  const tt = hw * 0.75;   // top half-width (narrower — roof slope)
+  const yB = yC - ht / 2;  // bottom y
+  const yT = yC + ht / 2;  // top y
+  const yS = yC + ht * 0.15; // shoulder line y (where sides start curving in)
+  return [
+    [-tb * 0.7, yB],              // 0: bottom-left curve
+    [-tb, yB + ht * 0.1],         // 1: left-bottom
+    [-tb, yC - ht * 0.05],        // 2: left-mid (widest point)
+    [-hw, yS],                     // 3: left-shoulder (flare out)
+    [-hw * 0.95, yS + ht * 0.1],  // 4: left-upper-shoulder
+    [-tt, yT - ht * 0.08],        // 5: left-top (narrowing)
+    [-tt * 0.6, yT],              // 6: top-left
+    [0, yT + ht * 0.02],          // 7: top-center (slight crown)
+    [tt * 0.6, yT],               // 8: top-right
+    [tt, yT - ht * 0.08],         // 9: right-top
+    [hw * 0.95, yS + ht * 0.1],  // 10: right-upper-shoulder
+    [hw, yS],                     // 11: right-shoulder
+    [tb, yC - ht * 0.05],        // 12: right-mid
+    [tb, yB + ht * 0.1],         // 13: right-bottom
+    [tb * 0.7, yB],              // 14: bottom-right curve
+    [0, yB - ht * 0.02],         // 15: bottom-center (slight underbody curve)
+  ];
 }
 
-// ---- Simple loft: build a body from cross-sections ----
-// Each cross-section is { x, pts: [[w,h], ...] } where w = half-width, h = y-centre.
-// pts defines the outline at that x position (going clockwise: bottom-left, left, top-left, top, top-right, right, bottom-right, bottom).
-// We use 8 points per cross-section for a rounded look.
-//
-// The loft connects adjacent cross-sections with triangle strips.
+// ---- Loft: build body from 16-point cross-sections ----
 function loftBody(sections) {
   const positions = [];
   const colors = [];
   const indices = [];
-
-  // Build vertex list
   for (const s of sections) {
     for (const [w, h] of s.pts) {
-      // Each point is [halfWidthOffset, y]
       positions.push(s.x, h, w);
-      colors.push(C_BODY, C_BODY, C_BODY); // body paint — tinted by instance colour
+      colors.push(C_BODY, C_BODY, C_BODY);
     }
   }
-
-  const npts = sections[0].pts.length; // vertices per cross-section
-  // Connect adjacent cross-sections with quads (2 triangles)
+  const npts = sections[0].pts.length;
   for (let s = 0; s < sections.length - 1; s++) {
     for (let p = 0; p < npts; p++) {
       const p2 = (p + 1) % npts;
-      const a = s * npts + p;
-      const b = s * npts + p2;
-      const c = (s + 1) * npts + p2;
-      const d = (s + 1) * npts + p;
+      const a = s * npts + p, b = s * npts + p2;
+      const c = (s + 1) * npts + p2, d = (s + 1) * npts + p;
       indices.push(a, b, c, a, c, d);
     }
   }
-
-  // Cap front and rear (fan from first/last vertex)
-  // Front cap (section 0)
-  for (let p = 1; p < npts - 1; p++) {
-    indices.push(0, p, p + 1);
-  }
-  // Rear cap (last section)
-  const lastStart = (sections.length - 1) * npts;
-  for (let p = 1; p < npts - 1; p++) {
-    indices.push(lastStart, lastStart + p + 1, lastStart + p);
-  }
-
+  // Cap front
+  for (let p = 1; p < npts - 1; p++) indices.push(0, p, p + 1);
+  // Cap rear
+  const ls = (sections.length - 1) * npts;
+  for (let p = 1; p < npts - 1; p++) indices.push(ls, ls + p + 1, ls + p);
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
   geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
@@ -114,230 +115,193 @@ function loftBody(sections) {
   return geo;
 }
 
-// ---- Cross-section generator: 8-point rounded rectangle ----
-function cs(width, height, yCenter) {
-  const hw = width / 2;
-  return [
-    [-hw * 0.7, yCenter - height / 2],  // bottom-left
-    [-hw, yCenter - height * 0.2],       // left-bottom
-    [-hw, yCenter + height * 0.2],       // left-top
-    [-hw * 0.7, yCenter + height / 2],  // top-left
-    [hw * 0.7, yCenter + height / 2],   // top-right
-    [hw, yCenter + height * 0.2],        // right-top
-    [hw, yCenter - height * 0.2],        // right-bottom
-    [hw * 0.7, yCenter - height / 2],   // bottom-right
-  ];
-}
-
-// ---- Wheel helper ----
 function wheelGeo(r, x, z) {
-  // Cylinder for tyre (dark) — laid flat (rotated)
-  const g = new THREE.CylinderGeometry(r, r, 0.22, 10);
+  const g = new THREE.CylinderGeometry(r, r, 0.22, 12);
   g.rotateZ(Math.PI / 2);
   g.translate(x, r, z);
   return vcol(g, C_TYRE, C_TYRE, C_TYRE);
 }
-
-// ---- Light helper (headlight or taillight) ----
 function lightGeo(L, W, y, isHead) {
-  const r = isHead ? C_HEAD[0] : C_TAIL[0];
-  const g = isHead ? C_HEAD[1] : C_TAIL[1];
-  const b = isHead ? C_HEAD[2] : C_TAIL[2];
-  const xOff = isHead ? L / 2 + 0.02 : -L / 2 - 0.02;
-  return [
-    boxRGB(0.08, 0.16, 0.3, xOff, y, W * 0.34, r, g, b),
-    boxRGB(0.08, 0.16, 0.3, xOff, y, -W * 0.34, r, g, b),
-  ];
+  const r = isHead ? C_HEAD[0] : C_TAIL[0], g2 = isHead ? C_HEAD[1] : C_TAIL[1], b = isHead ? C_HEAD[2] : C_TAIL[2];
+  const xOff = isHead ? L/2 + 0.02 : -L/2 - 0.02;
+  return [boxRGB(0.08, 0.16, 0.3, xOff, y, W*0.34, r, g2, b), boxRGB(0.08, 0.16, 0.3, xOff, y, -W*0.34, r, g2, b)];
 }
 
-// ===== CAR TYPE BUILDERS =====
-// Each returns a merged BufferGeometry with vertex colours.
+// ===== CAR BUILDERS (v2 — 8 sections × 16 points = 256 verts body) =====
 
 export function buildSedan() {
   const L = 4.4, W = 1.8;
   const body = loftBody([
-    { x: -L/2,       pts: cs(W*0.85, 0.7, 0.42) },  // rear bumper (narrow, low)
-    { x: -L*0.35,    pts: cs(W*0.95, 1.0, 0.58) },  // trunk (full width, mid)
-    { x: -L*0.15,    pts: cs(W*0.90, 1.4, 0.75) },  // rear roof (full, tall)
-    { x:  L*0.15,    pts: cs(W*0.90, 1.4, 0.75) },  // front roof (full, tall)
-    { x:  L*0.35,    pts: cs(W*0.95, 1.0, 0.58) },  // hood (full, mid)
-    { x:  L/2,       pts: cs(W*0.85, 0.7, 0.42) },  // front bumper (narrow, low)
+    { x: -L/2,     pts: cs16(W*0.82, 0.65, 0.38) },  // rear bumper (narrow, low)
+    { x: -L*0.38,  pts: cs16(W*0.92, 0.95, 0.55) },  // trunk (full, mid)
+    { x: -L*0.20,  pts: cs16(W*0.88, 1.35, 0.72) },  // rear roof (tall)
+    { x: -L*0.05,  pts: cs16(W*0.87, 1.42, 0.76) },  // peak roof
+    { x:  L*0.10,  pts: cs16(W*0.87, 1.38, 0.74) },  // front roof
+    { x:  L*0.25,  pts: cs16(W*0.90, 1.1, 0.62) },    // windshield base (transition)
+    { x:  L*0.38,  pts: cs16(W*0.93, 0.95, 0.55) },  // hood (full, mid)
+    { x:  L/2,     pts: cs16(W*0.82, 0.65, 0.38) },  // front bumper (narrow, low)
   ]);
-  const parts = [
+  return safeMerge([
     body,
-    // Windshield (glass)
-    boxRGB(0.08, 0.5, W*0.85, L*0.22, 1.05, 0, C_GLASS, C_GLASS, C_GLASS),
-    // Rear window (glass)
-    boxRGB(0.08, 0.5, W*0.85, -L*0.22, 1.05, 0, C_GLASS, C_GLASS, C_GLASS),
-    // Front bumper (chrome)
-    box(0.12, 0.25, W*0.95, L/2 - 0.06, 0.5, 0, C_CHROME),
-    // Rear bumper (chrome)
-    box(0.12, 0.25, W*0.95, -L/2 + 0.06, 0.5, 0, C_CHROME),
-    // Side mirrors (chrome)
-    box(0.1, 0.08, 0.08, L*0.25, 1.05, W*0.5, C_CHROME),
-    box(0.1, 0.08, 0.08, L*0.25, 1.05, -W*0.5, C_CHROME),
-    // Grille (dark)
-    box(0.04, 0.15, W*0.6, L/2 - 0.02, 0.55, 0, C_DARK),
-    // Wheels
+    boxRGB(0.06, 0.45, W*0.82, L*0.23, 1.02, 0, C_GLASS, C_GLASS, C_GLASS),  // windshield
+    boxRGB(0.06, 0.45, W*0.82, -L*0.23, 1.02, 0, C_GLASS, C_GLASS, C_GLASS),  // rear window
+    box(0.1, 0.22, W*0.93, L/2 - 0.05, 0.48, 0, C_CHROME),  // front bumper
+    box(0.1, 0.22, W*0.93, -L/2 + 0.05, 0.48, 0, C_CHROME),  // rear bumper
+    box(0.08, 0.06, 0.08, L*0.25, 1.02, W*0.5, C_CHROME),  // mirror R
+    box(0.08, 0.06, 0.08, L*0.25, 1.02, -W*0.5, C_CHROME),  // mirror L
+    box(0.03, 0.12, W*0.55, L/2 - 0.02, 0.52, 0, C_DARK),  // grille
     wheelGeo(0.33, -L*0.32, W/2), wheelGeo(0.33, -L*0.32, -W/2),
     wheelGeo(0.33, L*0.32, W/2), wheelGeo(0.33, L*0.32, -W/2),
-    // Lights
-    ...lightGeo(L, W, 0.45, true),   // headlights
-    ...lightGeo(L, W, 0.45, false),  // taillights
-  ];
-  return safeMerge(parts, true);
+    ...lightGeo(L, W, 0.43, true), ...lightGeo(L, W, 0.43, false),
+  ]);
 }
 
 export function buildHatchback() {
   const L = 3.7, W = 1.7;
   const body = loftBody([
-    { x: -L/2,       pts: cs(W*0.85, 0.65, 0.40) },
-    { x: -L*0.30,    pts: cs(W*0.95, 1.3, 0.70) },  // tall rear (hatchback shape)
-    { x: -L*0.10,    pts: cs(W*0.90, 1.35, 0.75) },
-    { x:  L*0.15,    pts: cs(W*0.90, 1.25, 0.70) },
-    { x:  L*0.35,    pts: cs(W*0.95, 0.9, 0.55) },
-    { x:  L/2,       pts: cs(W*0.85, 0.65, 0.40) },
+    { x: -L/2,     pts: cs16(W*0.82, 0.60, 0.35) },
+    { x: -L*0.32,  pts: cs16(W*0.92, 1.25, 0.66) },  // tall rear (hatch)
+    { x: -L*0.12,  pts: cs16(W*0.87, 1.32, 0.72) },
+    { x:  L*0.05,  pts: cs16(W*0.87, 1.28, 0.70) },
+    { x:  L*0.20,  pts: cs16(W*0.90, 1.0, 0.56) },   // windshield base
+    { x:  L*0.35,  pts: cs16(W*0.92, 0.85, 0.50) },  // hood
+    { x:  L/2,     pts: cs16(W*0.82, 0.60, 0.35) },
+    { x:  L*0.42,  pts: cs16(W*0.85, 0.7, 0.42) },   // extra section for smoother front
   ]);
-  const parts = [
+  return safeMerge([
     body,
-    boxRGB(0.08, 0.4, W*0.82, L*0.20, 0.98, 0, C_GLASS, C_GLASS, C_GLASS),
-    boxRGB(0.08, 0.4, W*0.82, -L*0.20, 0.98, 0, C_GLASS, C_GLASS, C_GLASS),
-    box(0.12, 0.22, W*0.92, L/2 - 0.06, 0.48, 0, C_CHROME),
-    box(0.12, 0.22, W*0.92, -L/2 + 0.06, 0.48, 0, C_CHROME),
-    box(0.1, 0.08, 0.08, L*0.22, 0.98, W*0.5, C_CHROME),
-    box(0.1, 0.08, 0.08, L*0.22, 0.98, -W*0.5, C_CHROME),
+    boxRGB(0.06, 0.38, W*0.80, L*0.18, 0.95, 0, C_GLASS, C_GLASS, C_GLASS),
+    boxRGB(0.06, 0.38, W*0.80, -L*0.18, 0.95, 0, C_GLASS, C_GLASS, C_GLASS),
+    box(0.1, 0.2, W*0.90, L/2 - 0.05, 0.45, 0, C_CHROME),
+    box(0.1, 0.2, W*0.90, -L/2 + 0.05, 0.45, 0, C_CHROME),
+    box(0.08, 0.06, 0.08, L*0.20, 0.95, W*0.5, C_CHROME),
+    box(0.08, 0.06, 0.08, L*0.20, 0.95, -W*0.5, C_CHROME),
     wheelGeo(0.31, -L*0.32, W/2), wheelGeo(0.31, -L*0.32, -W/2),
     wheelGeo(0.31, L*0.32, W/2), wheelGeo(0.31, L*0.32, -W/2),
-    ...lightGeo(L, W, 0.42, true),
-    ...lightGeo(L, W, 0.42, false),
-  ];
-  return safeMerge(parts, true);
+    ...lightGeo(L, W, 0.40, true), ...lightGeo(L, W, 0.40, false),
+  ]);
 }
 
 export function buildSUV() {
   const L = 4.7, W = 1.95;
   const body = loftBody([
-    { x: -L/2,       pts: cs(W*0.85, 0.9, 0.50) },
-    { x: -L*0.35,    pts: cs(W*0.95, 1.6, 0.85) },
-    { x: -L*0.15,    pts: cs(W*0.90, 1.9, 1.0) },
-    { x:  L*0.15,    pts: cs(W*0.90, 1.9, 1.0) },
-    { x:  L*0.35,    pts: cs(W*0.95, 1.4, 0.75) },
-    { x:  L/2,       pts: cs(W*0.85, 0.9, 0.50) },
+    { x: -L/2,     pts: cs16(W*0.82, 0.85, 0.48) },
+    { x: -L*0.38,  pts: cs16(W*0.92, 1.55, 0.82) },
+    { x: -L*0.18,  pts: cs16(W*0.88, 1.85, 0.98) },
+    { x:  L*0.0,   pts: cs16(W*0.87, 1.88, 1.0) },   // peak roof (tall, like real SUV)
+    { x:  L*0.15,  pts: cs16(W*0.87, 1.80, 0.96) },
+    { x:  L*0.28,  pts: cs16(W*0.90, 1.35, 0.72) },  // windshield base
+    { x:  L*0.38,  pts: cs16(W*0.93, 1.1, 0.60) },   // hood
+    { x:  L/2,     pts: cs16(W*0.82, 0.85, 0.48) },
   ]);
-  const parts = [
+  return safeMerge([
     body,
-    boxRGB(0.08, 0.6, W*0.85, L*0.22, 1.35, 0, C_GLASS, C_GLASS, C_GLASS),
-    boxRGB(0.08, 0.6, W*0.85, -L*0.22, 1.35, 0, C_GLASS, C_GLASS, C_GLASS),
-    box(0.15, 0.3, W*0.97, L/2 - 0.08, 0.6, 0, C_CHROME),
-    box(0.15, 0.3, W*0.97, -L/2 + 0.08, 0.6, 0, C_CHROME),
-    box(0.12, 0.1, 0.1, L*0.28, 1.3, W*0.5, C_CHROME),
-    box(0.12, 0.1, 0.1, L*0.28, 1.3, -W*0.5, C_CHROME),
-    box(0.04, 0.2, W*0.6, L/2 - 0.02, 0.65, 0, C_DARK),
+    boxRGB(0.06, 0.55, W*0.83, L*0.24, 1.32, 0, C_GLASS, C_GLASS, C_GLASS),  // windshield
+    boxRGB(0.06, 0.55, W*0.83, -L*0.24, 1.32, 0, C_GLASS, C_GLASS, C_GLASS),  // rear window
+    box(0.12, 0.28, W*0.95, L/2 - 0.07, 0.58, 0, C_CHROME),  // front bumper
+    box(0.12, 0.28, W*0.95, -L/2 + 0.07, 0.58, 0, C_CHROME),  // rear bumper
+    box(0.1, 0.08, 0.1, L*0.28, 1.28, W*0.5, C_CHROME),  // mirror R
+    box(0.1, 0.08, 0.1, L*0.28, 1.28, -W*0.5, C_CHROME),  // mirror L
+    box(0.03, 0.18, W*0.58, L/2 - 0.02, 0.62, 0, C_DARK),  // grille
     wheelGeo(0.4, -L*0.32, W/2), wheelGeo(0.4, -L*0.32, -W/2),
     wheelGeo(0.4, L*0.32, W/2), wheelGeo(0.4, L*0.32, -W/2),
-    ...lightGeo(L, W, 0.55, true),
-    ...lightGeo(L, W, 0.55, false),
-  ];
-  return safeMerge(parts, true);
+    ...lightGeo(L, W, 0.52, true), ...lightGeo(L, W, 0.52, false),
+  ]);
 }
 
 export function buildTaxi() {
-  // Kaduna taxi: yellow body with black roof sign
   const L = 4.4, W = 1.8;
   const body = loftBody([
-    { x: -L/2,       pts: cs(W*0.85, 0.7, 0.42) },
-    { x: -L*0.35,    pts: cs(W*0.95, 1.0, 0.58) },
-    { x: -L*0.15,    pts: cs(W*0.90, 1.4, 0.75) },
-    { x:  L*0.15,    pts: cs(W*0.90, 1.4, 0.75) },
-    { x:  L*0.35,    pts: cs(W*0.95, 1.0, 0.58) },
-    { x:  L/2,       pts: cs(W*0.85, 0.7, 0.42) },
+    { x: -L/2,     pts: cs16(W*0.82, 0.65, 0.38) },
+    { x: -L*0.38,  pts: cs16(W*0.92, 0.95, 0.55) },
+    { x: -L*0.20,  pts: cs16(W*0.88, 1.35, 0.72) },
+    { x: -L*0.05,  pts: cs16(W*0.87, 1.42, 0.76) },
+    { x:  L*0.10,  pts: cs16(W*0.87, 1.38, 0.74) },
+    { x:  L*0.25,  pts: cs16(W*0.90, 1.1, 0.62) },
+    { x:  L*0.38,  pts: cs16(W*0.93, 0.95, 0.55) },
+    { x:  L/2,     pts: cs16(W*0.82, 0.65, 0.38) },
   ]);
-  const parts = [
+  return safeMerge([
     body,
-    boxRGB(0.08, 0.5, W*0.85, L*0.22, 1.05, 0, C_GLASS, C_GLASS, C_GLASS),
-    boxRGB(0.08, 0.5, W*0.85, -L*0.22, 1.05, 0, C_GLASS, C_GLASS, C_GLASS),
-    box(0.12, 0.25, W*0.95, L/2 - 0.06, 0.5, 0, C_CHROME),
-    box(0.12, 0.25, W*0.95, -L/2 + 0.06, 0.5, 0, C_CHROME),
-    box(0.1, 0.08, 0.08, L*0.25, 1.05, W*0.5, C_CHROME),
-    box(0.1, 0.08, 0.08, L*0.25, 1.05, -W*0.5, C_CHROME),
-    // Taxi roof sign (dark — "TAXI" text area)
-    boxRGB(0.5, 0.12, 0.3, 0, 1.55, 0, C_DARK, C_DARK, C_DARK),
+    boxRGB(0.06, 0.45, W*0.82, L*0.23, 1.02, 0, C_GLASS, C_GLASS, C_GLASS),
+    boxRGB(0.06, 0.45, W*0.82, -L*0.23, 1.02, 0, C_GLASS, C_GLASS, C_GLASS),
+    box(0.1, 0.22, W*0.93, L/2 - 0.05, 0.48, 0, C_CHROME),
+    box(0.1, 0.22, W*0.93, -L/2 + 0.05, 0.48, 0, C_CHROME),
+    box(0.08, 0.06, 0.08, L*0.25, 1.02, W*0.5, C_CHROME),
+    box(0.08, 0.06, 0.08, L*0.25, 1.02, -W*0.5, C_CHROME),
+    // Taxi roof sign
+    boxRGB(0.45, 0.1, 0.25, 0, 1.50, 0, C_DARK, C_DARK, C_DARK),
     wheelGeo(0.33, -L*0.32, W/2), wheelGeo(0.33, -L*0.32, -W/2),
     wheelGeo(0.33, L*0.32, W/2), wheelGeo(0.33, L*0.32, -W/2),
-    ...lightGeo(L, W, 0.45, true),
-    ...lightGeo(L, W, 0.45, false),
-  ];
-  return safeMerge(parts, true);
+    ...lightGeo(L, W, 0.43, true), ...lightGeo(L, W, 0.43, false),
+  ]);
 }
 
 export function buildPickup() {
   const L = 5.0, W = 1.9;
   const body = loftBody([
-    { x: -L/2,       pts: cs(W*0.85, 0.8, 0.45) },
-    { x: -L*0.35,    pts: cs(W*0.95, 0.9, 0.50) },  // flat bed rear
-    { x: -L*0.15,    pts: cs(W*0.90, 1.3, 0.70) },  // cabin rear
-    { x:  L*0.05,    pts: cs(W*0.90, 1.3, 0.70) },  // cabin front
-    { x:  L*0.30,    pts: cs(W*0.95, 1.0, 0.58) },  // hood
-    { x:  L/2,       pts: cs(W*0.85, 0.8, 0.45) },
+    { x: -L/2,     pts: cs16(W*0.82, 0.75, 0.42) },
+    { x: -L*0.38,  pts: cs16(W*0.92, 0.85, 0.48) },  // flat bed
+    { x: -L*0.20,  pts: cs16(W*0.88, 0.85, 0.48) },  // bed continues flat
+    { x: -L*0.10,  pts: cs16(W*0.87, 1.25, 0.68) },  // cabin rear (jumps up)
+    { x:  L*0.05,  pts: cs16(W*0.87, 1.28, 0.70) },  // cabin front
+    { x:  L*0.22,  pts: cs16(W*0.90, 0.95, 0.55) },  // windshield base
+    { x:  L*0.38,  pts: cs16(W*0.93, 0.85, 0.50) },  // hood
+    { x:  L/2,     pts: cs16(W*0.82, 0.75, 0.42) },
   ]);
-  const parts = [
+  return safeMerge([
     body,
-    // Cabin glass
-    boxRGB(0.08, 0.5, W*0.82, L*0.0, 1.0, 0, C_GLASS, C_GLASS, C_GLASS),
-    boxRGB(0.08, 0.4, W*0.82, -L*0.15, 1.0, 0, C_GLASS, C_GLASS, C_GLASS),
-    // Bed walls (dark)
-    box(L*0.3, 0.4, 0.1, -L*0.2, 0.7, W*0.48, C_DARK),
-    box(L*0.3, 0.4, 0.1, -L*0.2, 0.7, -W*0.48, C_DARK),
-    box(0.1, 0.4, W*0.95, -L*0.35, 0.7, 0, C_DARK),
-    // Bumpers
-    box(0.12, 0.25, W*0.95, L/2 - 0.06, 0.5, 0, C_CHROME),
-    box(0.12, 0.25, W*0.95, -L/2 + 0.06, 0.5, 0, C_CHROME),
-    // Mirrors
-    box(0.1, 0.08, 0.08, L*0.15, 1.0, W*0.5, C_CHROME),
-    box(0.1, 0.08, 0.08, L*0.15, 1.0, -W*0.5, C_CHROME),
+    boxRGB(0.06, 0.42, W*0.80, L*0.0, 0.98, 0, C_GLASS, C_GLASS, C_GLASS),  // cabin glass
+    boxRGB(0.06, 0.35, W*0.80, -L*0.15, 0.98, 0, C_GLASS, C_GLASS, C_GLASS),  // rear cabin glass
+    // Bed walls
+    box(L*0.28, 0.35, 0.08, -L*0.20, 0.65, W*0.47, C_DARK),
+    box(L*0.28, 0.35, 0.08, -L*0.20, 0.65, -W*0.47, C_DARK),
+    box(0.08, 0.35, W*0.93, -L*0.34, 0.65, 0, C_DARK),
+    box(0.1, 0.22, W*0.93, L/2 - 0.05, 0.48, 0, C_CHROME),
+    box(0.1, 0.22, W*0.93, -L/2 + 0.05, 0.48, 0, C_CHROME),
+    box(0.08, 0.06, 0.08, L*0.15, 0.98, W*0.5, C_CHROME),
+    box(0.08, 0.06, 0.08, L*0.15, 0.98, -W*0.5, C_CHROME),
     wheelGeo(0.38, -L*0.32, W/2), wheelGeo(0.38, -L*0.32, -W/2),
     wheelGeo(0.38, L*0.32, W/2), wheelGeo(0.38, L*0.32, -W/2),
-    ...lightGeo(L, W, 0.48, true),
-    ...lightGeo(L, W, 0.48, false),
-  ];
-  return safeMerge(parts, true);
+    ...lightGeo(L, W, 0.45, true), ...lightGeo(L, W, 0.45, false),
+  ]);
 }
 
 export function buildDanfoBus() {
   const L = 8.0, W = 2.4;
   const body = loftBody([
-    { x: -L/2,       pts: cs(W*0.85, 2.4, 1.3) },
-    { x: -L*0.40,    pts: cs(W*0.95, 2.6, 1.4) },
-    { x: -L*0.10,    pts: cs(W*0.95, 2.6, 1.4) },
-    { x:  L*0.10,    pts: cs(W*0.95, 2.6, 1.4) },
-    { x:  L*0.35,    pts: cs(W*0.90, 2.4, 1.3) },  // sloped front
-    { x:  L/2,       pts: cs(W*0.85, 1.8, 1.0) },  // front narrower
+    { x: -L/2,     pts: cs16(W*0.82, 2.3, 1.25) },
+    { x: -L*0.38,  pts: cs16(W*0.92, 2.5, 1.35) },
+    { x: -L*0.15,  pts: cs16(W*0.92, 2.5, 1.35) },
+    { x:  L*0.05,  pts: cs16(W*0.92, 2.5, 1.35) },
+    { x:  L*0.22,  pts: cs16(W*0.90, 2.3, 1.25) },  // sloped front
+    { x:  L*0.38,  pts: cs16(W*0.85, 1.8, 1.0) },   // windshield area
+    { x:  L*0.46,  pts: cs16(W*0.82, 1.5, 0.85) },  // front taper
+    { x:  L/2,     pts: cs16(W*0.78, 1.2, 0.70) },  // nose (narrow, low)
   ]);
-  const parts = [
+  return safeMerge([
     body,
-    // Green stripe (along the side — like Lagos danfo)
-    box(L*0.9, 0.3, 0.05, 0, 1.0, W*0.48, 0.06),
-    box(L*0.9, 0.3, 0.05, 0, 1.0, -W*0.48, 0.06),
+    // Green stripe
+    box(L*0.88, 0.25, 0.04, 0, 0.95, W*0.48, 0.06),
+    box(L*0.88, 0.25, 0.04, 0, 0.95, -W*0.48, 0.06),
     // Windshield
-    boxRGB(0.08, 1.2, W*0.8, L*0.4, 1.8, 0, C_GLASS, C_GLASS, C_GLASS),
-    // Side windows (5 per side)
-    ...Array.from({length: 5}, (_, i) => boxRGB(0.06, 0.7, W*0.85, -L*0.35 + i * L*0.16, 1.8, 0, C_GLASS, C_GLASS, C_GLASS)),
+    boxRGB(0.06, 1.1, W*0.78, L*0.42, 1.75, 0, C_GLASS, C_GLASS, C_GLASS),
+    // Side windows (5)
+    ...Array.from({length: 5}, (_, i) => boxRGB(0.05, 0.65, W*0.82, -L*0.35 + i * L*0.16, 1.75, 0, C_GLASS, C_GLASS, C_GLASS)),
     // Headlights
-    boxRGB(0.1, 0.3, 0.4, L/2 + 0.02, 0.8, W*0.3, C_HEAD[0], C_HEAD[1], C_HEAD[2]),
-    boxRGB(0.1, 0.3, 0.4, L/2 + 0.02, 0.8, -W*0.3, C_HEAD[0], C_HEAD[1], C_HEAD[2]),
+    boxRGB(0.1, 0.28, 0.35, L/2 + 0.02, 0.75, W*0.28, C_HEAD[0], C_HEAD[1], C_HEAD[2]),
+    boxRGB(0.1, 0.28, 0.35, L/2 + 0.02, 0.75, -W*0.28, C_HEAD[0], C_HEAD[1], C_HEAD[2]),
     // Taillights
-    boxRGB(0.1, 0.3, 0.4, -L/2 - 0.02, 0.8, W*0.3, C_TAIL[0], C_TAIL[1], C_TAIL[2]),
-    boxRGB(0.1, 0.3, 0.4, -L/2 - 0.02, 0.8, -W*0.3, C_TAIL[0], C_TAIL[1], C_TAIL[2]),
-    // Wheels (6 — 3 per side)
+    boxRGB(0.1, 0.28, 0.35, -L/2 - 0.02, 0.75, W*0.28, C_TAIL[0], C_TAIL[1], C_TAIL[2]),
+    boxRGB(0.1, 0.28, 0.35, -L/2 - 0.02, 0.75, -W*0.28, C_TAIL[0], C_TAIL[1], C_TAIL[2]),
+    // Wheels (6)
     wheelGeo(0.45, -L*0.35, W/2), wheelGeo(0.45, -L*0.35, -W/2),
     wheelGeo(0.45, 0, W/2), wheelGeo(0.45, 0, -W/2),
     wheelGeo(0.45, L*0.35, W/2), wheelGeo(0.45, L*0.35, -W/2),
-  ];
-  return safeMerge(parts, true);
+  ]);
 }
 
-// ---- Convenience: get a car shape by type name ----
-// Returns a merged BufferGeometry with vertex colours, ready for InstancedMesh.
+// ---- Convenience ----
 const _cache = {};
 export function getCarShape(type) {
   if (_cache[type]) return _cache[type];
@@ -354,14 +318,7 @@ export function getCarShape(type) {
   _cache[type] = geo;
   return geo;
 }
-
-// ---- Replacements for town.js carShape() and busShape() ----
-// These are used by life.js (avenue traffic) and areas_world.js (parked cars).
 export function carShapeNew() { return getCarShape("sedan"); }
 export function busShapeNew() { return getCarShape("bus"); }
-
-// ---- All 5 car types for traffic.js ----
-// traffic.js picks a random type per car (weighted). Each type is a separate
-// InstancedMesh so body colour can vary per instance.
 export const CAR_TYPES = ["sedan", "hatch", "suv", "taxi", "pickup"];
-export const CAR_WEIGHTS = [4, 3, 3, 2, 1]; // sedan common, pickup rare
+export const CAR_WEIGHTS = [4, 3, 3, 2, 1];
