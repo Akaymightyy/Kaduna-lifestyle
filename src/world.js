@@ -470,6 +470,7 @@ export function buildWorld(scene) {
       { id: "central_mosque", x: 0, z: -18, name: "MOSQUE", icon: "🕌", color: 0x1f7a5a },
       { id: "kawo_park", x: -40, z: -97, name: "KAWO PARK", icon: "🚌", color: 0xf2b134 },
       { id: "university", x: 100, z: -57, name: "POLYTECHNIC", icon: "🎓", color: 0x1d5fa8 },
+      { id: "kasu", x: 160, z: 24, name: "KASU", icon: "🎓", color: 0x1f7a5a },
       { id: "mall_cinema", x: 180, z: 37, name: "MALL", icon: "🏬", color: 0x7a3b8f },
       { id: "hospital", x: -180, z: 57, name: "HOSPITAL", icon: "🏥", color: 0xe11d48 },
       { id: "bank", x: 50, z: 37, name: "BANK", icon: "🏦", color: 0x1a5a3a },

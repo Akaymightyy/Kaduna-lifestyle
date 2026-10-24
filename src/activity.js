@@ -190,6 +190,20 @@ export function placeSpec(placeId, eid, handle, player, onDone) {
       return { ...base, label: "Watching TV...", icon: "📺", anim: "sitwatch", seconds: 7, path: path || undefined, props: sofa ? [] : ["stool"], face: Math.PI, cancelOnMove: false, walkLabel: "Going to the living room..." };
     }
   }
+  if (placeId === "kasu") {
+    // KASU campus activities — real character animations so it feels alive
+    if (eid === "study_library") return { ...base, label: "Studying in the library...", icon: "📚", anim: "sitwatch", seconds: 8, props: ["stool"], face: player.heading, cancelOnMove: false };
+    if (eid === "bookshop") return { ...base, label: "Browsing textbooks...", icon: "📖", anim: "point", seconds: 4, face: player.heading };
+    if (eid === "play_basketball") return { ...base, label: "Playing basketball...", icon: "🏀", anim: "jump", seconds: 7, face: player.heading };
+    if (eid === "play_volleyball") return { ...base, label: "Playing volleyball...", icon: "🏐", anim: "jump", seconds: 7, face: player.heading };
+    if (eid === "sprint_race") return { ...base, label: "Sprinting the 100m dash...", icon: "🏃", anim: "jump", seconds: 5, face: player.heading };
+    if (eid === "quiz_night") return { ...base, label: "Taking the quiz...", icon: "🧠", anim: "point", seconds: 4, face: player.heading, cancelOnMove: false };
+    if (eid === "karaoke") return { ...base, label: "Singing on stage...", icon: "🎤", anim: "dance", seconds: 8, face: player.heading };
+    if (eid === "talent_show") return { ...base, label: "Performing on stage...", icon: "🎭", anim: "dance", seconds: 8, face: player.heading };
+    if (eid === "debate_club") return { ...base, label: "Debating...", icon: "🗣️", anim: "point", seconds: 6, face: player.heading };
+    if (eid === "campus_party") return { ...base, label: "Party time!...", icon: "🎉", anim: "dance", seconds: 9, face: player.heading };
+    if (eid === "hangout") return { ...base, label: "Gisting under the mango tree...", icon: "🌳", anim: "sitwatch", seconds: 8, props: ["stool"], face: player.heading, cancelOnMove: false };
+  }
   if (EAT_IDS.has(eid)) return { ...base, label: "Eating...", icon: "🍛", anim: "eat", seconds: 6, props: ["stool", "table"], face: player.heading };
   if (DRINK_IDS.has(eid)) return { ...base, label: "Drinking...", icon: "🥤", anim: "drink", seconds: 3.5, face: player.heading };
   if (eid === "dance") return { ...base, label: "Dancing...", icon: "💃", anim: "dance", seconds: 6, face: player.heading };
