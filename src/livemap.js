@@ -28,6 +28,10 @@ function css() {
   #livemap .lm-zoom{position:absolute;right:10px;bottom:calc(90px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:6px}
   #livemap .lm-tag{position:absolute;left:0;top:0;white-space:nowrap;background:rgba(255,255,255,.93);color:#16352a;border-radius:12px;padding:3px 8px;font:600 11px Poppins,sans-serif;box-shadow:0 1px 5px rgba(0,0,0,.3);pointer-events:auto;will-change:transform;transform:translate(-9999px,-9999px)}
   #livemap .lm-tag.area{background:rgba(15,77,58,.92);color:#fff}
+  #livemap .lm-tag.pin{background:#e11d48;color:#fff;pointer-events:none}
+  #livemap .lm-pinbar{position:absolute;left:50%;bottom:calc(80px + env(safe-area-inset-bottom));transform:translateX(-50%);display:none;gap:8px;align-items:center;background:#fff;border-radius:14px;padding:8px 10px;box-shadow:0 4px 16px rgba(0,0,0,.35);font:700 12px Poppins,sans-serif;color:#9f1239;white-space:nowrap}
+  #livemap .lm-pinbar.show{display:flex}
+  #livemap .lm-pinbar button{border:0;border-radius:9px;padding:8px 11px;font:700 12px Poppins,sans-serif}
   #livemap .lm-tag.me{background:#ff6a3d;color:#fff}
   #livemap .lm-hint{position:absolute;left:0;right:0;bottom:calc(24px + env(safe-area-inset-bottom));text-align:center;color:#fff;font:600 12px Poppins,sans-serif;text-shadow:0 1px 4px #000;pointer-events:none}
   #livemap .lm-card{position:absolute;left:50%;bottom:calc(80px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(20px);width:min(360px,92vw);background:#fff;border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,.35);overflow:hidden;opacity:0;transition:opacity .25s,transform .25s;pointer-events:auto}
@@ -51,7 +55,8 @@ function build() {
   root = document.createElement("div"); root.id = "livemap";
   root.innerHTML = '<div class="lm-top"><button class="lm-btn" id="lm-back">← Back</button><button class="lm-btn on" id="lm-names">🏷️ Names</button><button class="lm-btn" id="lm-me">📍 Me</button></div>' +
     '<div class="lm-zoom"><button class="lm-btn" id="lm-in">＋</button><button class="lm-btn" id="lm-out">－</button></div>' +
-    '<div class="lm-hint">Drag to move · pinch or ＋ － to zoom · tap a name to see ride prices</div><div id="lm-labels"></div>';
+    '<div class="lm-hint">Drag to move · pinch or ＋ － to zoom · tap a name to see ride prices · tap the ground to drop a 📍 pin</div><div id="lm-labels"></div>' +
+    '<div class="lm-pinbar" id="lm-pinbar">📍 Pin dropped <button id="lm-pin-ride" style="background:#2e7d4f;color:#fff">🛺 Ride here</button><button id="lm-pin-clear" style="background:#eee;color:#9f1239">✕ Clear</button></div>';
   document.body.appendChild(root);
   labelBox = root.querySelector("#lm-labels");
   root.querySelector("#lm-back").onclick = closeLiveMap;
@@ -71,10 +76,36 @@ function build() {
     st.tx -= dx * mpp; st.tz -= dy * mpp / Math.sin(PITCH);
     const L = S.limits; st.tx = Math.max(-L.x - 200, Math.min(L.x + 200, st.tx)); st.tz = Math.max(-L.z - 200, Math.min(L.z + 200, st.tz));
   });
-  const up = (e) => { ptr.delete(e.pointerId); if (ptr.size < 2) pinch0 = 0; };
+  const up = (e) => {
+    const wasOne = ptr.size === 1 && ptr.has(e.pointerId);
+    ptr.delete(e.pointerId); if (ptr.size < 2) pinch0 = 0;
+    // a quick tap on bare ground drops a pin there (the same pin the minimap and the Ride app use)
+    if (e.type === "pointerup" && wasOne && moved < 8 && !(e.target.closest && e.target.closest(".lm-btn,.lm-tag,.lm-card,.lm-pinbar"))) dropPin(e.clientX, e.clientY);
+  };
   root.addEventListener("pointerup", up); root.addEventListener("pointercancel", up);
   root.addEventListener("wheel", (e) => { st.tdist = Math.max(MIN_D, Math.min(MAX_D, st.tdist * (e.deltaY > 0 ? 1.15 : 0.87))); }, { passive: true });
   root._moved = () => moved;
+  wirePinBar();
+}
+
+// ---- DROP A PIN ON THE MAP (Oct 24) ----
+const _ray = new THREE.Raycaster(), _pl = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), _hit = new THREE.Vector3();
+let pinEl = null;
+function dropPin(cx, cy) {
+  _ray.setFromCamera(new THREE.Vector2((cx / innerWidth) * 2 - 1, -(cy / innerHeight) * 2 + 1), S.camera);
+  if (!_ray.ray.intersectPlane(_pl, _hit)) return;
+  const L = S.limits;
+  window._markedDest = { x: Math.max(-L.x, Math.min(L.x, _hit.x)), z: Math.max(-L.z, Math.min(L.z, _hit.z)), label: "📍 Map mark" };
+  showPin();
+}
+function showPin() {
+  if (!pinEl) { pinEl = document.createElement("div"); pinEl.className = "lm-tag pin"; pinEl.textContent = "📍 Pin"; labelBox.appendChild(pinEl); }
+  const bar = root.querySelector("#lm-pinbar"); bar.classList.toggle("show", !!window._markedDest);
+  pinEl.style.display = window._markedDest ? "" : "none";
+}
+function wirePinBar() {
+  root.querySelector("#lm-pin-clear").onclick = () => { window._markedDest = null; window._rideDest = ""; showPin(); };
+  root.querySelector("#lm-pin-ride").onclick = () => { closeLiveMap(); if (window._mapRide) window._mapRide(); };
 }
 
 // where "You" are on the map: outside the house door when you are inside a building
@@ -119,7 +150,7 @@ export function openLiveMap() {
   S.camera.far = 4000; S.camera.near = 2; S.camera.updateProjectionMatrix();
   if (S.scene.fog) { S.scene.fog.near = 500; S.scene.fog.far = 2600; }
   document.body.classList.add("live-map");
-  root.style.display = ""; makeLabels();
+  root.style.display = ""; makeLabels(); pinEl = null; showPin();
 }
 
 export function closeLiveMap() {
@@ -174,8 +205,12 @@ export function liveMapFrame(dt) {
   c.lookAt(st.x, 0, st.z);
   c.updateMatrixWorld();
   S.tickWorld(st.x, st.z, Math.min(560, st.dist * 1.7 + 120));      // keep districts / houses streamed in around the view
-  if (!names) return;
   const w = innerWidth, h = innerHeight;
+  if (pinEl && window._markedDest) {
+    _v.set(window._markedDest.x, 4, window._markedDest.z).project(c);
+    pinEl.style.transform = (_v.z < 1 && Math.abs(_v.x) < 1.15 && Math.abs(_v.y) < 1.1) ? "translate(" + ((_v.x * 0.5 + 0.5) * w).toFixed(0) + "px," + ((-_v.y * 0.5 + 0.5) * h).toFixed(0) + "px) translate(-50%,-100%)" : "translate(-9999px,-9999px)";
+  }
+  if (!names) return;
   for (const L of labels) {
     const mp = L.follow ? me() : null, x = mp ? mp.x : L.x, z = mp ? mp.z : L.z;
     _v.set(x, L.y, z).project(c);

@@ -96,6 +96,16 @@ export function createMinimap(canvas, shapes) {
         ctx.fillStyle = "#fff"; ctx.font = "bold 10px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("🏠", hx, hz);
       }
     }
+    // ---- dropped pin (set on the phone Map app or by tapping this minimap) ----
+    if (window._markedDest) {
+      const md = window._markedDest; let mx = md.x, mz = md.z;
+      const dd = Math.hypot(mx - px, mz - pz), lim = range * 0.85;
+      if (dd > lim) { mx = px + (mx - px) * lim / dd; mz = pz + (mz - pz) * lim / dd; }   // far away: pin sticks to the edge, pointing the way
+      ctx.save(); ctx.translate(X(mx), Z(mz)); ctx.rotate(-(yaw + Math.PI)); ctx.scale(S / sc * 1.2, S / sc * 1.2);
+      ctx.fillStyle = "#e11d48"; ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, -9, 7, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-4, -4); ctx.lineTo(0, 4); ctx.lineTo(4, -4); ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(0, -9, 2.5, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    }
     ctx.translate(X(px), Z(pz)); ctx.rotate(Math.PI - heading); ctx.scale(S / sc, S / sc);
     ctx.fillStyle = "#ff6a3d"; ctx.strokeStyle = "#fff"; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(0, -11); ctx.lineTo(8, 9); ctx.lineTo(0, 4); ctx.lineTo(-8, 9); ctx.closePath(); ctx.fill(); ctx.stroke();

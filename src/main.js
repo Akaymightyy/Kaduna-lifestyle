@@ -1036,7 +1036,7 @@ function _showPhoneApp(appId) {
     // Player position
     const px = player.pos.x, pz = player.pos.z;
     // Build SVG (crisp, tappable)
-    let svg = '<svg width="100%" viewBox="0 0 '+MAP_W+' '+MAP_H+'" style="background:#9aab62;border-radius:12px;display:block;touch-action:manipulation;">';
+    let svg = '<svg id="kmap" onclick="window._mapTap(event)" width="100%" viewBox="0 0 '+MAP_W+' '+MAP_H+'" style="background:#9aab62;border-radius:12px;display:block;touch-action:manipulation;">';
     // Avenues + cross streets of the wide city
     for (const ax of WIDE_AVENUES_X) svg += '<rect x="'+(toMapX(ax)-5*sx1)+'" y="0" width="'+(10*sx1)+'" height="'+MAP_H+'" fill="#555a62"/>';
     for (const cz of WIDE_CROSS_Z) svg += '<rect x="0" y="'+(toMapZ(cz)-5*sz1)+'" width="'+MAP_W+'" height="'+(10*sz1)+'" fill="#555a62"/>';
@@ -1076,14 +1076,20 @@ function _showPhoneApp(appId) {
     svg += '<circle cx="'+pmx+'" cy="'+pmz+'" r="3.5" fill="#ff6a3d" stroke="#fff" stroke-width="1.5"/>';
     // "YOU" label
     svg += '<text x="'+pmx+'" y="'+(pmz+10)+'" text-anchor="middle" font-size="5" font-weight="700" fill="#fff" style="paint-order:stroke;stroke:#000;stroke-width:1.5;">YOU</text>';
+    // dropped pin (MAP MARK)
+    if (window._markedDest) { const md = window._markedDest, kx = toMapX(md.x), kz = toMapZ(md.z);
+      svg += '<circle cx="'+kx+'" cy="'+kz+'" r="7" fill="#e11d48" opacity="0.28"><animate attributeName="r" values="5;10;5" dur="1.4s" repeatCount="indefinite"/></circle>';
+      svg += '<circle cx="'+kx+'" cy="'+kz+'" r="3" fill="#e11d48" stroke="#fff" stroke-width="1.4"/>';
+      svg += '<text x="'+kx+'" y="'+(kz-5)+'" text-anchor="middle" font-size="9">📍</text>'; }
     svg += '</svg>';
     // Legend
     const legend = '<div style="display:flex;gap:10px;font-size:9px;color:#666;margin:6px 0 10px;flex-wrap:wrap;">'+
       '<span><span style="display:inline-block;width:8px;height:8px;background:#ff6a3d;border-radius:50%;border:1px solid #fff;"></span> You</span>'+
       '<span><span style="display:inline-block;width:8px;height:8px;background:#2e7d4f;border-radius:50%;"></span> Open place</span>'+
       '<span><span style="display:inline-block;width:8px;height:8px;background:#e11d48;border-radius:50%;"></span> Closed place</span>'+
-      '<span>👆 Tap a place or a district to travel</span>'+
-    '</div>';
+      '<span>👆 Tap a place or a district to travel · tap empty ground to drop a 📍 pin</span>'+
+    '</div>'+
+    (window._markedDest ? '<div style="display:flex;gap:8px;align-items:center;background:#fff3f5;border:1px solid #e11d48;border-radius:10px;padding:8px 10px;margin:0 0 10px;font-size:12px;font-weight:600;color:#9f1239;">📍 Pin dropped<span style="flex:1"></span><button onclick="window._mapRide()" style="background:#2e7d4f;color:#fff;border:none;border-radius:8px;padding:6px 10px;font-weight:700;font-size:12px;">🛺 Ride here</button><button onclick="window._clearMapMark()" style="background:#fff;color:#9f1239;border:1px solid #e11d48;border-radius:8px;padding:6px 10px;font-weight:700;font-size:12px;">✕</button></div>' : '');
     // Place list (tappable)
     const placeList = places.map(p => {
       const open = (p.hours == null) ? true : (gameHour >= p.hours.open && gameHour < p.hours.close);
@@ -3032,6 +3038,21 @@ window._rdPick=(id)=>{
   const list=document.getElementById("rd-list"); if(list) list.style.display="none";
   const arrow=document.getElementById("rd-arrow"); if(arrow) arrow.textContent="▼";
 };
+// BIG MAP PIN (Oct 24): tap empty ground on the phone Map app to drop a pin (same pin the minimap shows + the Ride app uses)
+window._mapTap = (ev) => {
+  try {
+    if (ev.target && ev.target.closest && ev.target.closest("g[onclick]")) return;      // a place / district was tapped: its own handler runs
+    const svgEl = document.getElementById("kmap"); if (!svgEl) return;
+    const r = svgEl.getBoundingClientRect(); if (!r.width) return;
+    const wx = -MAP_HALF_X + ((ev.clientX - r.left) / r.width) * MAP_HALF_X * 2;
+    const wz = -MAP_HALF_Z + ((ev.clientY - r.top) / r.height) * MAP_HALF_Z * 2;
+    window._markedDest = { x: Math.max(-MAP_HALF_X + 5, Math.min(MAP_HALF_X - 5, wx)), z: Math.max(-MAP_HALF_Z + 5, Math.min(MAP_HALF_Z - 5, wz)), label: "📍 Map mark" };
+    toast("📍 Pin dropped. Tap Ride here, or see it on your minimap.");
+    showPhoneApp("map");
+  } catch (e) { console.warn("[map] tap failed", e); }
+};
+window._mapRide = () => showPhoneApp("ride");
+window._clearMapMark = () => { window._markedDest = null; window._rideDest = ""; showPhoneApp("map"); };
 // MAP MARK (Oct 19): clear the marked destination if user doesn't want it
 window._clearMarkedDest = () => {
   window._markedDest = null;
