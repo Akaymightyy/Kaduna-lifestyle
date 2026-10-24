@@ -133,6 +133,17 @@ const DIALOGUE = {
   "quiz master": ["Welcome to Quiz Night! Win up to ₦6,750!", "Five questions. No cheating oo!", "Textbook owners dey win double here!"],
   "guard": ["Welcome to KASU campus.", "Show your ID card, abeg.", "Campus dey safe. No worry."],
   "cheerleader": ["KASU! KASU! We dey win!", "Come watch the match, e go sweet!", "Our team na the best!"],
+  "exam officer": ["Exam dey start — no expo oo!", "Bring your textbook, e go help you!", "Quiet in the exam hall, abeg."],
+  "graduation marshal": ["Graduation fee na ₦5,000!", "Come with your gown, the VC dey wait!", "Today you become graduate!"],
+  "party host": ["Block-o tonight at Amina Hostel!", "₦800 only — come with your friends!", "We go dance till morning!"],
+  "zookeeper": ["Welcome to Kaduna Zoo!", "No feed the animals without me, abeg.", "Simba the lion dey in good mood today."],
+  "tour guide": ["Tour na ₦700 — you go see everything!", "Stay on the path, wetin dey cage no dey smile.", "Zoo open 9am to 6pm daily!"],
+  "vet": ["All our animals dey healthy.", "Simba just finish check-up — e dey strong.", "Wildlife conservation matters, my friend."],
+  "zoo vendor": ["Popcorn! Fresh popcorn! ₦300!", "Cold zobo and cookies dey too!", "No near the monkey cage with food oo!"],
+  "carnival MC": ["Kaduna Carnival! Make some noise!", "Dance-Off winner go chop ₦4,000!", "One more time for the drummers!"],
+  "drummer": ["Feel the beat — gbam gbam gbam!", "Gangan no dey lie. Follow the rhythm.", "Come learn the talking drum!"],
+  "face painter": ["You want lion face or butterfly?", "₦400 — you go fine well well!", "Carnival no complete without face paint!"],
+  "booth attendant": ["Ring toss ₦300 — win ₦1,000!", "Balloon darts! Test your aim!", "One try — you fit win big!"],
 };
 const NAMED = {
   "Mama Nkechi": ["My sister, Ankara na ₦5000. Quality no be small.", "You wan buy two? I go give you better price.", "This color go fit your skin well."],
@@ -168,6 +179,17 @@ const NAMED = {
   "Coach Emeka": ["Sprint! Faster! You fit do am!", "Basketball court dey free — come play!", "Teamwork makes the dream work!"],
   "Mallam Bala": ["Textbook ₦600 — Quiz Night go pay you back!", "Past questions dey available!", "Buy your handout here, fresh print!"],
   "Officer Yusuf": ["Welcome to KASU campus.", "No noise after 10pm, abeg.", "Campus dey safe, no worry."],
+  "Mrs. Danladi": ["Exam hall dey quiet — enter softly.", "Read your textbook, e go save you!", "No cheating — eyes right!"],
+  "Chief Bello": ["Graduation fee ₦5,000 — come celebrate!", "Your certificate dey ready!", "Family go proud of you today!"],
+  "Blessing": ["Block-o tonight! ₦800 only!", "Come with your crew, we go turnt!", "Amina Hostel parties no dey disappoint!"],
+  "Alhaji Musa": ["Welcome to the zoo — no loud noise, abeg.", "Simba dey sleep now, come back later.", "Feeding time na 2pm!"],
+  "Grace": ["Guided tour ₦700 — best value!", "The elephants na my favorite.", "Stay on the path, abeg!"],
+  "Dr. Ngozi": ["All animals dey healthy today.", "I treat even lions — no fear.", "Conservation na our future."],
+  "Hauwa": ["Popcorn ₦300! Hot hot!", "No carry food near monkeys oo!", "Cold drinks dey available!"],
+  "Queen Ada": ["Welcome to Kaduna Carnival!", "Dance-Off dey soon — come win!", "Enjoy the rides, one love!"],
+  "Baba Ola": ["Feel the gangan rhythm!", "Drum circle starts now — join us!", "The talking drum speaks your name."],
+  "Ngozi": ["Lion face or butterfly — ₦400!", "You go shine for the parade!", "Face painting — carnival special!"],
+  "Eddy": ["Ring toss — ₦300 to play!", "Balloon darts! Win ₦1,200!", "Try your luck, my friend!"],
 };
 export function getDialogue(role, name) { const l = DIALOGUE[role] || DIALOGUE._generic; return l[Math.floor(Math.random() * l.length)]; }
 export function getNamedDialogue(name) { const l = NAMED[name]; return l ? l[Math.floor(Math.random() * l.length)] : null; }

@@ -8,6 +8,7 @@ import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { rng } from "../config.js";
 import { spawnPeople, getNamedDialogue, getDialogue } from "./people.js";
+import { celebrate } from "../celebrate.js";
 
 let _built = false, _cache = null;
 
@@ -134,6 +135,9 @@ export async function build(scene, ctx) {
     { id: "kasu_fan1", name: "Cheerleader", role: "student", outfit: "casual", pose: "sit", x: 33, z: 3.4, ry: Math.PI, top: "#f2b134" },
     { id: "kasu_fan2", name: "Cheerleader", role: "student", outfit: "casual", pose: "sit", x: 35, z: 3.4, ry: Math.PI, top: "#c0392b" },
     { id: "kasu_fan3", name: "Cheerleader", role: "student", outfit: "casual", pose: "sit", x: 37, z: 3.4, ry: Math.PI, top: "#1d5fa8" },
+    { id: "kasu_exam", name: "Mrs. Danladi", role: "exam officer", outfit: "casual", pose: "stand", x: -28, z: -15, ry: 0, top: "#34495e" },
+    { id: "kasu_grad", name: "Chief Bello", role: "graduation marshal", outfit: "kaftan", pose: "stand", x: 41.5, z: -2.8, ry: Math.PI / 2, top: "#8a5a3c" },
+    { id: "kasu_hostel", name: "Blessing", role: "party host", outfit: "casual", pose: "stand", x: 43, z: 9.5, ry: Math.PI, top: "#c0392b" },
   ]).then((p) => { _people = p; });
 
   // Animated bits: flag ripple + fountain water bob
@@ -167,6 +171,9 @@ export async function build(scene, ctx) {
       else if (eid === "campus_party") _act(ctx, 1000, "🎉 Campus party turnt! DJ Zainab played your song all night!", { fun: 40, social: 25, energy: -15 });
       else if (eid === "hangout") _act(ctx, 0, "🌳 You gisted under the mango tree till sunset. Social +20", { social: 20, fun: 10, energy: -5 });
       else if (eid === "rest_hostel") _act(ctx, 0, "😴 You rested at Amina Hostel. Energy +40", { energy: 40 });
+      else if (eid === "graduation") _graduate(ctx);
+      else if (eid === "write_exam") _writeExam(ctx);
+      else if (eid === "hostel_party") _act(ctx, 800, "🪩 Hostel block-o at Amina! You even did the Risky dance! Fun +35", { fun: 35, social: 25, energy: -15 });
     },
   };
   _built = true; _cache = handle; return handle;
@@ -184,6 +191,26 @@ function _act(ctx, cost, msg, effects) {
     if (effects[k]) ctx.game.state.needs[k] = Math.min(100, Math.max(0, (ctx.game.state.needs[k] || 0) + effects[k]));
   }
   ctx.game.save?.(); ctx.updateHUD?.(); ctx.toast(msg);
+}
+
+function _graduate(ctx) {
+  if (!ctx.game) return;
+  if (ctx.game.state.money < 5000) { ctx.toast("Need ₦5,000 for the graduation fee"); return; }
+  ctx.game.state.money -= 5000;
+  ctx.game.state.kasuGraduate = true;
+  celebrate("🎓 CONGRATULATIONS, GRADUATE!", "KASU Class of '26 — your family dey proud of you!");
+  _act(ctx, 0, "🎓 Degree collected! The VC shook your hand, confetti everywhere! Fun +50", { fun: 50, social: 30, energy: -20 });
+}
+
+function _writeExam(ctx) {
+  if (!ctx.game) return;
+  const passed = !!ctx.game.state.kasuTextbook || Math.random() < 0.55;
+  if (passed) {
+    celebrate("📝 EXAM PASSED!", "Straight-A energy — well done!");
+    _act(ctx, 0, "📝 GNS 102 exam — PASSED! ₦1,500 scholarship alert!" + (ctx.game.state.kasuTextbook ? " (textbook carry-over dey work!)" : ""), { fun: 20, social: 5, energy: -25, _earn: 1500 });
+  } else {
+    _act(ctx, 0, "📝 Chai! The exam hard o. Buy the textbook at the bookshop for a guaranteed pass!", { fun: 5, energy: -25 });
+  }
 }
 
 function _buyTextbook(ctx) {
