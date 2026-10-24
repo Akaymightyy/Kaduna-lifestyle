@@ -11,6 +11,7 @@
 import {
   openChallenge, acceptChallenge, cancelChallenge, resignMatch,
   pushMatchUpdate, subscribeToChallenges, subscribeToMatch, declareWinner,
+  getMyActiveMatches,
 } from "./challenge_system.js";
 import {
   applyRoll, applyBank, applyResign, isMyTurn, getWinnerName, getPlayerScore,
@@ -68,7 +69,7 @@ function _ensureHudBtn() {
 }
 
 // ---- Creator panel ----
-function _openCreator() {
+async function _openCreator() {
   if (!_creatorEl) {
     _creatorEl = document.createElement("div");
     _creatorEl.id = "challenge-creator";
@@ -82,6 +83,11 @@ function _openCreator() {
   _creatorEl.innerHTML = `
     <style>
       #challenge-creator .cc-wrap { max-width:480px;margin:0 auto;padding:18px 16px calc(20px + env(safe-area-inset-bottom)); }
+      #challenge-creator .cc-resume { display:none;margin:0 0 14px;padding:12px 14px;border-radius:12px;background:rgba(242,177,52,.12);border:1px solid #f2b134;align-items:center;justify-content:space-between;gap:10px; }
+      #challenge-creator .cc-resume.show { display:flex; }
+      #challenge-creator .cc-resume .t { font:700 12px Poppins,sans-serif;color:#f2b134; }
+      #challenge-creator .cc-resume .s { font:600 10px Poppins,sans-serif;color:#9ec9b0;margin-top:2px; }
+      #challenge-creator .cc-resume button { background:#4ade80;color:#000;border:none;border-radius:8px;padding:9px 16px;font:700 12px Poppins,sans-serif;cursor:pointer;white-space:nowrap; }
       #challenge-creator .cc-close { position:sticky;top:0;display:flex;justify-content:flex-end;margin:-18px -16px 8px;padding:14px 16px 6px;background:linear-gradient(180deg,rgba(0,0,0,.25),transparent); }
       #challenge-creator .cc-close button { background:rgba(255,255,255,.15);color:#fff;border:none;border-radius:8px;padding:7px 12px;cursor:pointer;font:600 12px Poppins,sans-serif; }
       #challenge-creator .cc-head { text-align:center;margin-bottom:18px; }
@@ -112,6 +118,10 @@ function _openCreator() {
         <div class="cc-emoji">🎲</div>
         <div class="cc-title">Challenge Anyone</div>
         <div class="cc-sub">Stake real money · Winner takes pot</div>
+      </div>
+      <div id="cc-resume" class="cc-resume">
+        <div><div class="t">⏳ You have a match running</div><div class="s" id="cc-resume-sub">Tap to jump back in — your stakes are locked</div></div>
+        <button onclick="window._ccResumeMatch()">Resume ▶</button>
       </div>
       <div class="cc-balance">Your balance: ₦${balance.toLocaleString()}</div>
       <div class="cc-section">Pick a game</div>
@@ -174,6 +184,20 @@ function _openCreator() {
   window._ccClose = () => { _creatorEl.style.display = "none"; };
   window._ccOpenChallenge = _handleOpenChallenge;
   window._ccSetCustom = _handleSetCustom;
+  // BUGFIX (Oct 24): if I already have an active match (e.g. I refreshed or
+  // backed out of the waiting screen), show a Resume banner so I can rejoin
+  // instead of seeing "no challenge" and opening a duplicate.
+  try {
+    const mine = await getMyActiveMatches();
+    if (mine && mine.length) {
+      const m = mine[mine.length - 1];
+      const box = _creatorEl.querySelector("#cc-resume");
+      if (box) {
+        box.classList.add("show");
+        window._ccResumeMatch = () => { _creatorEl.style.display = "none"; _openMatchScreen(m.id); };
+      }
+    }
+  } catch (e) { /* resume banner is best-effort */ }
   // wire game + stake selection
   _creatorEl.querySelectorAll(".cc-game").forEach(el => {
     el.onclick = () => {
@@ -435,6 +459,9 @@ function _renderMatch(state) {
         </div>
       ` : `
         <div class="cm-waiting">⏳ Waiting for ${otherName} to play...</div>
+        <div class="cm-actions" style="justify-content:center;">
+          <button class="cm-btn cm-btn-resign" onclick="window._cmResign()">🏳️ Resign</button>
+        </div>
       `}
     </div>
   `;

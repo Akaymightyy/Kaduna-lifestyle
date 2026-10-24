@@ -83,6 +83,17 @@ const FRONT_FACES_PLUS_Z = true;  // which way the front door of the model point
 function firstMesh(root) { let m = null; root.traverse((o) => { if (!m && o.isMesh) m = o; }); return m; }
 
 export async function addCity(scene, world, manager) {
+  // FIX (Oct 24): the Kenney city GLBs reference "Textures/colormap.png",
+  // which resolved to /models/city/Textures/... (404 — 25 console errors on
+  // every boot + buildings lost their texture atlas). The file ships at
+  // /models/city/texture/colormap.png — remap so it finally loads.
+  // NOTE: setURLModifier lives on LoadingManager, not on GLTFLoader.
+  if (manager && manager.setURLModifier) {
+    manager.setURLModifier((url) => {
+      if (url.endsWith("Textures/colormap.png")) return "/models/city/texture/colormap.png";
+      return url;
+    });
+  }
   const loader = new GLTFLoader(manager);
   const names = [...HOUSES, ...EXTRA];
   const loaded = {};

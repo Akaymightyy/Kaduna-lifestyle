@@ -2,7 +2,7 @@
 // FIX: Cars now YIELD at zebra crossings when a pedestrian is on or near the crossing
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { LANES, WORLD_HALF_X, CROSSINGS, rng } from "./config.js";
+import { LANES, WORLD_HALF_X, CROSSINGS, WIDE_AVENUES_X, rng } from "./config.js";
 
 function part(w, h, d, x, y, z, hex) {
   const g = new THREE.BoxGeometry(w, h, d);
@@ -196,25 +196,33 @@ export function createTraffic(scene, colliders = []) {
   const bag = []; names.forEach((n) => { for (let i = 0; i < TYPES[n].weight; i++) bag.push(n); });
   const len = WORLD_HALF_X * 2;
   const cars = [];
-  // FIX (Oct 23): apply clearStretches to traffic lanes too (same as life.js)
-  // so cars don't drive through houses/buildings on the road.
-  const _tmp = { axis: "z", fix: 0, off: 0, dir: 1, len: 0, mid: 0 };
-  const _P = new THREE.Vector3();
+  // FIX (Oct 23, REWRITTEN Oct 24 — TODO #1): apply clearStretches to traffic
+  // lanes so cars don't drive through houses/buildings on the road.
+  // The Oct 23 version read ln.fix + ln.off, but LANES only have { z, dir,
+  // speed } — that made the collider filter NaN and match NOTHING, so cars
+  // still crossed the whole street (through the arena etc). This version:
+  //   * filters colliders by the lane's real z range,
+  //   * walks the street and keeps only collider-free runs >= 28 m,
+  //   * returns segs that cars LOOP INSIDE (like life.js), not just spawn in.
   function _clearStretches(ln) {
-    const cx = ln.fix + ln.off;
-    const near = colliders.filter((c) => c.minX < c.maxX && c.maxX > cx - 30 && c.minX < cx + 30);
+    const near = colliders.filter((c) => isFinite(c.minX) && c.minX < c.maxX && c.minZ < c.maxZ && c.maxZ > ln.z - 6 && c.minZ < ln.z + 6);
     const segs = []; let start = null;
-    for (let a = 0; a <= ln.len; a += 1) {
-      const s = a;
-      const x = ln.dir > 0 ? -WORLD_HALF_X + s : WORLD_HALF_X - s;
+    for (let a = 0; a <= len; a += 2) {
+      const x = ln.dir > 0 ? -WORLD_HALF_X + a : WORLD_HALF_X - a;
       let blocked = false;
       for (const c of near) if (x + 1.5 > c.minX && x - 1.5 < c.maxX && ln.z + 3.2 > c.minZ && ln.z - 3.2 < c.maxZ) { blocked = true; break; }
       if (!blocked && start === null) start = a;
-      if ((blocked || a >= ln.len) && start !== null) { const b = a - (blocked ? 1.5 : 0); if (b - start >= 28) segs.push({ ...ln, len: b - start - 3, mid: (start + b) / 2 }); start = null; }
+      if ((blocked || a >= len) && start !== null) {
+        const b = a - (blocked ? 2 : 0);
+        const segLen = b - start - 3;
+        if (segLen >= 28) segs.push({ z: ln.z, dir: ln.dir, speed: ln.speed, len: segLen, mid: ln.dir > 0 ? -WORLD_HALF_X + (start + b) / 2 : WORLD_HALF_X - (start + b) / 2 });
+        start = null;
+      }
     }
-    return segs.length ? segs : [ln];
+    // fallback: no clear stretch found — use the full lane (old behaviour)
+    return segs.length ? segs : [{ z: ln.z, dir: ln.dir, speed: ln.speed, len, mid: 0 }];
   }
-  LANES.forEach((lane, li) => {
+  LANES.forEach((lane) => {
     const segs = _clearStretches(lane);
     const n = 9;
     for (let i = 0; i < n; i++) {
@@ -280,60 +288,97 @@ export function createTraffic(scene, colliders = []) {
   const positions = [];
 
   // ---- FIX: Per-car speed modifiers for yielding at crossings ----
-  const carSpeedMods = cars.map(() => 1.0); // 1.0 = full speed, 0.0 = stopped
   const pv = { x: 0, z: 0, on: false };       // the vehicle the player is driving: traffic waits for it, never drives through it
   let prev = [];                               // last frame's car positions (to keep a gap to the car in front)
   const YIELD_GAP = 9, STOP_GAP = 4.8;
+  // TODO #5 (Oct 24): junction give-way — the avenues (x = -230/-90/90/230)
+  // cross the main street; traffic cars stop 30m before a junction while a
+  // life.js car is on it. The cross positions come from a provider wired in
+  // main.js (life.js keeps its own positions; no circular import).
+  let _crossTraffic = null;
+  function setCrossTrafficProvider(fn) { _crossTraffic = fn; }
+  // TODO #2 (Oct 24): runtime guard — world.colliders GROW lazily as districts
+  // stream in, so the init-time stretches can go stale. Every 0.5s rebuild the
+  // list of colliders within 80m of the player (cheap: one pass, not per car
+  // per frame). Any car that ends up inside one is hidden + frozen until clear.
+  let _nearCols = [], _colT = 1, _lastT = -1;
 
   function update(tSeconds) {
     for (const k in meshes) meshes[k].i = 0;
     positions.length = 0;
+    const dt = _lastT < 0 ? 0.016 : Math.min(0.1, Math.max(0, tSeconds - _lastT));
+    _lastT = tSeconds;
+
+    _colT += dt;
+    if (_colT >= 0.5) {
+      _colT = 0;
+      _nearCols.length = 0;
+      const r = 80;
+      for (const c of colliders) {
+        if (!isFinite(c.minX) || c.minX > c.maxX || c.minZ > c.maxZ) continue;
+        if (c.maxX < pv.x - r || c.minX > pv.x + r || c.maxZ < pv.z - r || c.minZ > pv.z + r) continue;
+        _nearCols.push(c);
+      }
+    }
+
     const prevNext = [];
     for (let ci = 0; ci < cars.length; ci++) {
       const c = cars[ci];
       const mm = meshes[c.type];
+      const L = c.lane;
+      if (c.s == null) c.s = ((c.offset % L.len) + L.len) % L.len;
+      const x0 = L.dir > 0 ? L.mid - L.len / 2 + c.s : L.mid + L.len / 2 - c.s;
 
-      // ---- FIX: Check if car should yield at crossing ----
-      let s = (c.offset + c.lane.speed * tSeconds) % len;
-      if (s < 0) s += len;
-      const x = c.lane.dir > 0 ? -WORLD_HALF_X + s : WORLD_HALF_X - s;
+      // ---- FIX: yield at zebra crossings ----
+      let go = 1;
+      const pedCheck = isPedAtCrossing(x0, L.z, L.dir);
+      if (pedCheck) go = pedCheck.shouldStop ? 0 : Math.max(0.15, pedCheck.dist / CROSSING_YIELD_RANGE);
 
-      const pedCheck = isPedAtCrossing(x, c.lane.z, c.lane.dir);
-      if (pedCheck) {
-        if (pedCheck.shouldStop) {
-          carSpeedMods[ci] = 0; // full stop
-        } else {
-          // Slow down proportionally — closer = slower
-          carSpeedMods[ci] = Math.max(0.15, pedCheck.dist / CROSSING_YIELD_RANGE);
-        }
-      } else {
-        // Smoothly return to full speed
-        carSpeedMods[ci] = Math.min(1.0, carSpeedMods[ci] + 0.05);
-      }
-      // ---- patience: wait for the player's vehicle or any car ahead in the same lane ----
+      // ---- patience: wait for the player's vehicle or any car ahead in the same stretch ----
       {
-        const L0 = c.lane, dirc = L0.dir;
         let gap = 1e9;
-        if (pv.on && Math.abs(pv.z - L0.z) < 2.6) { const d = (pv.x - x) * dirc; if (d > -1.5 && d < gap) gap = d; }
-        for (let j = 0; j < prev.length; j++) { const o = prev[j]; if (o.lane === L0 && o.ci !== ci) { const d = (o.x - x) * dirc - (o.hl + TYPES[c.type].L / 2); if (d > -0.5 && d < gap) gap = d; } }
-        if (gap < YIELD_GAP) carSpeedMods[ci] = Math.min(carSpeedMods[ci], gap < STOP_GAP ? 0 : (gap - STOP_GAP) / (YIELD_GAP - STOP_GAP));
+        if (pv.on && Math.abs(pv.z - L.z) < 2.6) { const d = (pv.x - x0) * L.dir; if (d > -1.5 && d < gap) gap = d; }
+        for (let j = 0; j < prev.length; j++) { const o = prev[j]; if (o.lane === L && o.ci !== ci) { const d = (o.x - x0) * L.dir - (o.hl + TYPES[c.type].L / 2); if (d > -0.5 && d < gap) gap = d; } }
+        if (gap < YIELD_GAP) go = Math.min(go, gap < STOP_GAP ? 0 : (gap - STOP_GAP) / (YIELD_GAP - STOP_GAP));
       }
 
-      // Apply speed modifier to this car's movement
-      // We simulate the slowdown by adjusting the effective offset
-      // (can't change c.lane.speed directly — it's shared)
-      // Instead, we store a per-car delta that accumulates
-      if (!c._yieldDelta) c._yieldDelta = 0;
-      const speedMod = carSpeedMods[ci];
-      c._yieldDelta += c.lane.speed * (1 - speedMod) * 0.016; // approx dt
+      // ---- TODO #5: junction give-way to avenue cross-traffic ----
+      if (go > 0 && _crossTraffic) {
+        const cross = _crossTraffic();
+        for (const jx of WIDE_AVENUES_X) {
+          const dJ = (jx - x0) * L.dir;                    // how far ahead the junction is
+          if (dJ <= 0 || dJ >= 30) continue;
+          for (let k = 0; k < cross.length; k++) {
+            const o = cross[k];
+            if (Math.abs(o.x - jx) > 14) continue;         // not at this junction
+            if (Math.abs(o.z) > 9) continue;               // not on the main street
+            go = 0; break;                                 // someone is crossing → give way
+          }
+          if (go === 0) break;
+        }
+      }
 
-      let sAdjusted = (c.offset + c.lane.speed * tSeconds - c._yieldDelta) % len;
-      if (sAdjusted < 0) sAdjusted += len;
-      const xAdjusted = c.lane.dir > 0 ? -WORLD_HALF_X + sAdjusted : WORLD_HALF_X - sAdjusted;
+      // ---- advance INSIDE the stretch (loop at its ends, never the whole street) ----
+      if (c._go == null) c._go = 1;
+      c._go += (go - c._go) * Math.min(1, dt * 6);          // smooth accel / brake (IDM-lite)
+      if (c._go < 0.004) c._go = 0;
+      const adv = L.speed * c._go * dt;
+      c.s += adv;
+      if (c.s >= L.len) c.s -= L.len;
+      const x = L.dir > 0 ? L.mid - L.len / 2 + c.s : L.mid + L.len / 2 - c.s;
 
-      p.set(xAdjusted, 0.02, c.lane.z);
-      q.setFromAxisAngle(up, c.lane.dir > 0 ? 0 : Math.PI);
-      const ek = Math.max(0, Math.min(1, Math.min(sAdjusted, len - sAdjusted) / 3));   // FIX (Oct 23): was /6 + min 0.001 — tiny dots. Now /3 + min 0 (clean vanish)
+      // ---- TODO #2 runtime guard: freeze + hide inside a lazily-built collider ----
+      let overlap = false;
+      if (Math.abs(x - pv.x) < 80 && Math.abs(L.z - pv.z) < 80) {
+        for (const col of _nearCols) {
+          if (x + 1.5 > col.minX && x - 1.5 < col.maxX && L.z + 3.2 > col.minZ && L.z - 3.2 < col.maxZ) { overlap = true; break; }
+        }
+      }
+      if (overlap) c.s -= adv;                              // frozen: undo this frame's advance
+
+      p.set(x, 0.02, L.z);
+      q.setFromAxisAngle(up, L.dir > 0 ? 0 : Math.PI);
+      const ek = overlap ? 0 : Math.max(0, Math.min(1, Math.min(c.s, L.len - c.s) / 3));   // shrink away at the stretch ends
       sc.setScalar(Math.max(0, ek));
       m.compose(p, q, sc);
       mm.body.setMatrixAt(mm.i, m); mm.body.setColorAt(mm.i, c.color);
@@ -341,8 +386,8 @@ export function createTraffic(scene, colliders = []) {
       if (mm.glb) mm.glb.setMatrixAt(mm.i, m);
       if (glowOn) mm.glow.setMatrixAt(mm.i, m);
       mm.i++;
-      prevNext.push({ x: xAdjusted, lane: c.lane, ci, hl: TYPES[c.type].L / 2 });
-      positions.push({ x: xAdjusted, z: c.lane.z, hl: TYPES[c.type].L / 2, hw: TYPES[c.type].W / 2, dir: c.lane.dir, speed: c.lane.speed });
+      prevNext.push({ x, lane: L, ci, hl: TYPES[c.type].L / 2 });
+      positions.push({ x, z: L.z, hl: TYPES[c.type].L / 2, hw: TYPES[c.type].W / 2, dir: L.dir, speed: L.speed * c._go });
     }
     prev = prevNext;
     for (const k in meshes) {
@@ -363,5 +408,5 @@ export function createTraffic(scene, colliders = []) {
     const on = v > 0.02;
     if (on !== glowOn) { glowOn = on; for (const k in meshes) meshes[k].glow.visible = on && meshes[k].body.visible; }
   }
-  return { update, setNight, setGlow, positions, cars, meshes, setPlayerVehicle(x, z, on) { pv.x = x; pv.z = z; pv.on = !!on; }, setVisible(v) { for (const k in meshes) { if (meshes[k].glb) meshes[k].glb.visible = v; meshes[k].body.visible = v && !meshes[k].glb; meshes[k].lights.visible = v && !meshes[k].glb; meshes[k].glow.visible = v && glowOn; } } };
+  return { update, setNight, setGlow, positions, cars, meshes, setCrossTrafficProvider, setPlayerVehicle(x, z, on) { pv.x = x; pv.z = z; pv.on = !!on; }, setVisible(v) { for (const k in meshes) { if (meshes[k].glb) meshes[k].glb.visible = v; meshes[k].body.visible = v && !meshes[k].glb; meshes[k].lights.visible = v && !meshes[k].glb; meshes[k].glow.visible = v && glowOn; } } };
 }

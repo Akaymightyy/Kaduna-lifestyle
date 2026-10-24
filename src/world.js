@@ -6,6 +6,7 @@ import { ROAD_HALF, WORLD_HALF_X, CROSSINGS, SIDE_STREETS, WIDE_AVENUES_X, WIDE_
 import { stylize, NIGHT_GLOW } from "./art/style.js";
 import { getPlace } from "./places/registry.js";
 import { buildPlaceExteriors } from "./places/exteriors.js";
+import { registerCullChunks } from "./scene_culling.js";
 const OL = (o) => stylize(new THREE.MeshLambertMaterial(o), { pat: false, ao: true, fake: false });
 const C = (hex) => new THREE.Color(hex);
 
@@ -126,7 +127,7 @@ export function buildWorld(scene) {
   world.add(ground);
 
   // ---- road ----
-  const asphalt = stylize(new THREE.MeshLambertMaterial({ color: 0x5c6068, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), { pat: true, ao: false, fake: false }); // flat planes: plain Lambert (cheapest). polygonOffset = no flicker/skipping on far roads
+  const asphalt = stylize(new THREE.MeshLambertMaterial({ color: 0x6c7078, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }), { pat: true, ao: false, fake: false }); // TODO #7 (Oct 24): was 0x5c6068 — "dark front road" complaint. flat planes: plain Lambert (cheapest). polygonOffset = no flicker/skipping on far roads
   const road = new THREE.Mesh(withPat(new THREE.PlaneGeometry(WORLD_HALF_X * 2 + 200, ROAD_HALF * 2), 13), asphalt);
   road.rotation.x = -Math.PI / 2; road.position.y = 0.01; road.receiveShadow = true;
   world.add(road);
@@ -192,6 +193,10 @@ export function buildWorld(scene) {
   const zebra = new THREE.InstancedMesh(new THREE.PlaneGeometry(3.6, 0.65).rotateX(-Math.PI / 2), white, bars.length);
   bars.forEach(([x, z], i) => { m4.makeTranslation(x, 0.03, z); zebra.setMatrixAt(i, m4); });
   world.add(zebra);
+  // TODO #4 (Oct 24): static road markings are chunk-culled (off-screen chunks
+  // set count=0 — the GPU never sees them). Registered after matrices are set.
+  registerCullChunks(dashes, { chunkSize: 40, maxDist: 240 });
+  if (zebra.count >= 24) registerCullChunks(zebra, { chunkSize: 40, maxDist: 240 });
 
   // ---- buildings with rooftops, AC units, shop fronts ----
   const palette = [0xf1e6cf, 0xe8d3b0, 0xd9a273, 0xf4f1ea, 0xcfe0c5, 0xe9c9a4, 0xf0d8c8, 0xc7d9e6, 0xe2b98f];
@@ -374,12 +379,14 @@ export function buildWorld(scene) {
       tm.setMatrixAt(i, m4);
     });
     tm.castShadow = false; tm.receiveShadow = true; world.add(tm);
+    registerCullChunks(tm, { chunkSize: 48, maxDist: 280 });   // TODO #4: chunk-cull tree trunks
     const cm = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), OL({ color: 0xffffff }), crowns.length);
     crowns.forEach(([x, y, z, s, col, flat], i) => {
       m4.compose(new THREE.Vector3(x, y, z), new THREE.Quaternion(), new THREE.Vector3(s, s * (flat === 0.5 ? 0.45 : 0.8), s));
       cm.setMatrixAt(i, m4); cm.setColorAt(i, C(col));
     });
     cm.castShadow = false; cm.receiveShadow = true; world.add(cm);
+    registerCullChunks(cm, { chunkSize: 48, maxDist: 280 });   // TODO #4: chunk-cull tree crowns
   }
 
   // ---- street lights (real PointLights everywhere) ----
@@ -405,6 +412,11 @@ export function buildWorld(scene) {
     bulbs.setMatrixAt(i, m4);
   });
   world.add(poles, heads, bulbs);
+  // TODO #4 (Oct 24): chunk-cull the static street furniture too (lamps are
+  // spread over the whole 400m street — most chunks are off-screen at once)
+  registerCullChunks(poles, { chunkSize: 40, maxDist: 260 });
+  registerCullChunks(heads, { chunkSize: 40, maxDist: 260 });
+  registerCullChunks(bulbs, { chunkSize: 40, maxDist: 260 });
 
   // Real PointLights — PERFORMANCE: use a small POOL of 6 lights that follow
   // the player to the nearest lamp positions. This gives the same "lit street"

@@ -259,7 +259,7 @@ function _buildStatic(area) {
   const padCol = area.tier === "rich" ? 0x8fbf7a : area.tier === "middle" ? 0xa9bf86 : 0xbfae85;
   _quad(L, 92, zmax - zmin + 14, area.x - 4, 0.008, (zmin + zmax) / 2, padCol, 12);
   const roadW = 124;
-  _quad(L, roadW, 6, area.x, 0.015, area.z, 0x5c6068, 13);
+  _quad(L, roadW, 6, area.x, 0.015, area.z, 0x6c7078, 13);   // TODO #7 (Oct 24): was 0x5c6068 — the front road read too dark
   _quad(L, roadW, 1.5, area.x, 0.012, area.z + 3.75, 0xd2bf9c, 9);
   _quad(L, roadW, 1.5, area.x, 0.012, area.z - 3.75, 0xd2bf9c, 9);
   for (let x = -roadW / 2 + 4; x < roadW / 2 - 3; x += 8) _quad(L, 3.5, 0.16, area.x + x, 0.02, area.z, 0xe9d36a);
@@ -354,6 +354,19 @@ function _buildArea(area) {
     const pos = getPlotPosition(area, plotNo);
     const lx = pos.x + 4.2, lz = pos.z + 4.2;
     if (_worldColliders) _worldColliders.push({ minX: lx - 0.3, maxX: lx + 0.3, minZ: lz - 0.3, maxZ: lz + 0.3, _areaId: area.id, _lamp: true });
+  }
+
+  // FIX (Oct 24 — TODO #3): tree trunk colliders — the player used to walk
+  // straight through trees. Same deterministic hash + rotated offset the
+  // renderer uses in _updateArea, so collider and trunk always agree.
+  // Tagged _areaId so _disposeArea removes them with the district.
+  for (let plotNo = 0; plotNo < area.plots; plotNo++) {
+    if (hash2(area.id, plotNo + "t") >= 0.8) continue;
+    const pos = getPlotPosition(area, plotNo);
+    const rot = pos.rot || 0, cos = Math.cos(rot), sin = Math.sin(rot);
+    const tx = pos.x + 2.9 * cos + (-2.9) * sin;
+    const tz = pos.z - 2.9 * sin + (-2.9) * cos;
+    if (_worldColliders) _worldColliders.push({ minX: tx - 0.6, maxX: tx + 0.6, minZ: tz - 0.6, maxZ: tz + 0.6, _areaId: area.id, _tree: true });
   }
 
   // static ground / road / landmark

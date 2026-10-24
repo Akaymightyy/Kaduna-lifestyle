@@ -236,7 +236,16 @@ async function _getGlbLoader() {
   const { GLTFLoader } = await import("three/examples/jsm/loaders/GLTFLoader.js");
   // The vehicle models are meshopt-compressed (~65% smaller download), so the loader needs the decoder.
   const { MeshoptDecoder } = await import("three/examples/jsm/libs/meshopt_decoder.module.js");
-  _glbLoader = new GLTFLoader();
+  // FIX (Oct 24): the vehicle GLBs reference "Textures/colormap.png", which
+  // resolved to /models/vehicles/Textures/... (404 — console spam + washed-out
+  // models). The texture actually ships at /models/city/texture/. Remap it.
+  // NOTE: setURLModifier is a LoadingManager method — give this loader its own.
+  const _mgr = new THREE.LoadingManager();
+  _mgr.setURLModifier((url) => {
+    if (url.endsWith("Textures/colormap.png")) return "/models/city/texture/colormap.png";
+    return url;
+  });
+  _glbLoader = new GLTFLoader(_mgr);
   _glbLoader.setMeshoptDecoder(MeshoptDecoder);
   return _glbLoader;
 }

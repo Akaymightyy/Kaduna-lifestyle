@@ -97,6 +97,17 @@ function clearStretches(ln, cols) {
 }
 const pickSeg = (segs, f) => { const tot = segs.reduce((a, g) => a + g.len, 0); let x = (f % 1) * tot; for (const g of segs) { if (x < g.len) return g; x -= g.len; } return segs[segs.length - 1]; };
 
+// ---- TODO #5 (Oct 24): junction give-way + IDM-lite gap keeping ----
+// _lifePos: our own vehicle positions, read by traffic.js (via a provider
+// wired in main.js) so main-street cars stop at the avenue junctions.
+// _crossProv: the other direction — set by main.js to () => traffic.positions
+// so OUR cars stop before crossing the main street.
+const _lifePos = [];
+export function lifeTrafficPositions() { return _lifePos; }
+let _crossProv = null;
+export function setLifeCrossTrafficProvider(fn) { _crossProv = fn; }
+const _snapAll = [];                                   // per-vehicle { ln, x, z } snapshot from before this frame's advance
+
 export function initLife(scene, colliders = []) {
   _scene = scene;
   _collidersRef = colliders;  // FIX (Oct 23): store for runtime guard
@@ -197,6 +208,7 @@ export function initLife(scene, colliders = []) {
     const bm = new THREE.MeshBasicMaterial({ vertexColors: true, color: 0xffe2a0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -7, polygonOffsetUnits: -7 });
     BEAM = new THREE.InstancedMesh(bg, bm, cars.length + buses.length); BEAM.frustumCulled = false; BEAM.visible = false; scene.add(BEAM); }
   SH = makeBlobShadows(scene, cars.length + buses.length + people.length);
+  for (let i = 0; i < cars.length + buses.length; i++) { _lifePos.push({ x: 0, z: 0 }); _snapAll.push({ ln: null, x: 0, z: 0 }); }
   _on = true;
 }
 
@@ -226,10 +238,35 @@ export function tickLife(px, pz, show = true) {
 
   // cars + buses
   const dir = new THREE.Vector3(), nx = new THREE.Vector3();
-  const place = (mesh, i, c) => {
+  // TODO #5: snapshot every vehicle BEFORE anyone moves this frame, so the
+  // gap check below sees a consistent picture (1-frame lag, cheap + stable)
+  for (let i = 0; i < cars.length; i++) { lanePos(cars[i].ln, cars[i].s, _p); const s = _snapAll[i]; s.ln = cars[i].ln; s.x = _p.x; s.z = _p.z; }
+  for (let i = 0; i < buses.length; i++) { lanePos(buses[i].ln, buses[i].s, _p); const s = _snapAll[cars.length + i]; s.ln = buses[i].ln; s.x = _p.x; s.z = _p.z; }
+  const place = (mesh, i, c, gi) => {
     lanePos(c.ln, c.s, _p);
     let go = 1;
     if (_pv.on) { const fx = c.ln.axis === "x" ? c.ln.dir : 0, fz = c.ln.axis === "z" ? c.ln.dir : 0, ddx = _pv.x - _p.x, ddz = _pv.z - _p.z, along = ddx * fx + ddz * fz, lat = Math.abs(ddx * fz - ddz * fx); if (along > -1.5 && along < 9 && lat < 2.8) go = along < 5 ? 0 : (along - 5) / 4; }
+    // TODO #5 (Oct 24): IDM-lite — keep a gap to the vehicle ahead in the SAME stretch
+    for (let j = 0; j < _snapAll.length; j++) {
+      if (j === gi) continue;
+      const o = _snapAll[j];
+      if (!o.ln || o.ln !== c.ln) continue;
+      const d = (c.ln.axis === "x" ? o.x - _p.x : o.z - _p.z) * c.ln.dir - 5.2;
+      if (d > -0.5 && d < 9) go = Math.min(go, d < 4.5 ? 0 : (d - 4.5) / 4.5);
+    }
+    // TODO #5 (Oct 24): give way before crossing the main street (avenues only)
+    if (go > 0 && _crossProv && c.ln.axis === "z") {
+      const dJ = (0 - _p.z) * c.ln.dir;
+      if (dJ > 0 && dJ < 30) {
+        const cross = _crossProv();
+        for (let k = 0; k < cross.length; k++) {
+          const o = cross[k];
+          if (Math.abs(o.x - _p.x) > 14) continue;       // not at this avenue
+          if (Math.abs(o.z) > 9) continue;               // not on the main street
+          go = 0; break;
+        }
+      }
+    }
     c.s += c.v * dt * go; lanePos(c.ln, c.s, _p); lanePos(c.ln, c.s + 1.5, nx);
     // FIX (Oct 23): runtime guard — if car position overlaps a nearby collider
     // (house/building/lamp/kiosk), hide it (scale to 0) so it doesn't show
@@ -244,8 +281,10 @@ export function tickLife(px, pz, show = true) {
     const yaw = Math.atan2(-(nx.z - _p.z), nx.x - _p.x);
     _q.setFromAxisAngle(_up, yaw); _m.compose(_p, _q, _s2); if (mesh === carMesh && c.t > 0) { carMesh.setMatrixAt(i, _Z); for (let k = 0; k < 3; k++) carX[k].setMatrixAt(i, k === c.t - 1 ? _m : _Z); } else mesh.setMatrixAt(i, _m); if (glbReady) { if (mesh === carMesh) { if (carG.length) carG[0].setMatrixAt(i, _m); } else if (busG) busG.setMatrixAt(i, _m); } BEAM.setMatrixAt(mesh === carMesh ? i : cars.length + i, _m);
     SH.set(mesh === carMesh ? i : cars.length + i, _p.x, _p.z, (mesh === carMesh ? 2.6 : 3.4) * ek, (mesh === carMesh ? 5.4 : 12) * ek, yaw + Math.PI / 2);
+    // publish position for traffic.js's junction give-way (main street side)
+    if (gi < _lifePos.length) { _lifePos[gi].x = _p.x; _lifePos[gi].z = _p.z; }
   };
-  cars.forEach((c, i) => place(carMesh, i, c)); buses.forEach((c, i) => place(busMesh, i, c));
+  cars.forEach((c, i) => place(carMesh, i, c, i)); buses.forEach((c, i) => place(busMesh, i, c, cars.length + i));
   carMesh.instanceMatrix.needsUpdate = true; carX.forEach((m) => { m.instanceMatrix.needsUpdate = true; }); busMesh.instanceMatrix.needsUpdate = true; carG.forEach((m) => { m.instanceMatrix.needsUpdate = true; }); if (busG) busG.instanceMatrix.needsUpdate = true;
 
   // real people for the nearest walkers

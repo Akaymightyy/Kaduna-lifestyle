@@ -29,7 +29,7 @@
 //            subscribeToMatch, pushMatchUpdate, resignMatch } from "./challenge_system.js";
 //   initChallengeSystem({ db, auth, getUserId, getUserName, getGameState, toast });
 
-import { ref, push, set, update, get, onValue, remove, serverTimestamp, onChildAdded, onChildRemoved } from "firebase/database";
+import { ref, push, set, update, get, onValue, remove, serverTimestamp, onChildAdded, onChildRemoved, runTransaction } from "firebase/database";
 
 let _db = null, _auth = null;
 let _getUserId = () => null;
@@ -102,6 +102,16 @@ export async function openChallenge({ game, stake, hostName }) {
 // ---- Accept a challenge ----
 // Player B accepts. Their stake is deducted (escrow). The match starts
 // immediately for both players. Returns matchId on success.
+//
+// BUGFIX (Oct 24 — multiplayer challenge never connects):
+// The old flow wrote status:"accepted" FIRST and only attached matchId in a
+// SECOND write. The security rules only allow open→accepted, so the second
+// write (matchId) was REJECTED — the match existed but the host never got
+// its id and both players sat on "Waiting for opponent..." forever.
+// Now: the match is created FIRST, then ONE transaction claims the challenge
+// open→accepted WITH matchId in a single write (also wins the race if two
+// players tap Accept at the same time). If the claim fails, the match is
+// deleted and the accepter's stake is refunded — no more stuck state.
 export async function acceptChallenge(challengeId) {
   if (!_db) { _toast("Challenge system not ready"); return null; }
   const uid = _getUserId();
@@ -123,23 +133,7 @@ export async function acceptChallenge(challengeId) {
     _toast("Escrow failed: " + e.message);
     return null;
   }
-  // Try to atomically claim the challenge (only one accepter wins)
-  try {
-    const updates = {
-      status: "accepted",
-      opponentUid: uid,
-      opponentName: String(_getUserName() || "Player").slice(0, 30),
-      acceptedAt: Date.now(),
-    };
-    await update(ref(_db, "challenges/" + challengeId), updates);
-  } catch (e) {
-    // Couldn't claim — refund
-    gs.state.money += ch.stake;
-    await update(ref(_db, "economy/" + uid), { balance: gs.state.money });
-    _toast("Could not accept: " + e.message);
-    return null;
-  }
-  // Create the match — game-specific initial state
+  // Create the match FIRST — game-specific initial state
   const matchRef = push(ref(_db, "matches"));
   const matchId = matchRef.key;
   // Default state (for capital_dice + tennis + penalty_shootout):
@@ -229,18 +223,53 @@ export async function acceptChallenge(challengeId) {
   }
   try {
     await set(matchRef, match);
-    // Link the match back to the challenge
-    await update(ref(_db, "challenges/" + challengeId), { matchId });
+  } catch (e) {
+    // Match write failed — refund, challenge stays "open" (nothing stuck)
+    gs.state.money += ch.stake;
+    update(ref(_db, "economy/" + uid), { balance: gs.state.money }).catch(() => {});
+    _toast("Could not create match: " + e.message);
+    return null;
+  }
+  // Claim the challenge in ONE atomic write: open → accepted + matchId.
+  // (The old two-write flow lost matchId — the rules rejected the second
+  // write, so the host never joined and both sides waited forever.)
+  try {
+    const result = await runTransaction(ref(_db, "challenges/" + challengeId), (cur) => {
+      if (!cur || cur.status !== "open") return;   // abort: someone else took it / host cancelled
+      return {
+        ...cur,
+        status: "accepted",
+        opponentUid: uid,
+        opponentName: String(_getUserName() || "Player").slice(0, 30),
+        acceptedAt: Date.now(),
+        matchId,
+      };
+    });
+    if (!result.committed) {
+      // Lost the race (or the host cancelled) — clean up + refund
+      remove(ref(_db, "matches/" + matchId)).catch(() => {});
+      gs.state.money += ch.stake;
+      update(ref(_db, "economy/" + uid), { balance: gs.state.money }).catch(() => {});
+      _toast("Challenge no longer open");
+      return null;
+    }
     _toast("🎲 Match starting! Good luck.");
     return matchId;
   } catch (e) {
-    _toast("Could not create match: " + e.message);
+    // Rules / permission failure — remove the orphan match + refund
+    remove(ref(_db, "matches/" + matchId)).catch(() => {});
+    gs.state.money += ch.stake;
+    update(ref(_db, "economy/" + uid), { balance: gs.state.money }).catch(() => {});
+    _toast("Could not accept: " + e.message);
     return null;
   }
 }
 
 // ---- Cancel an open challenge (host only) ----
-// Refunds the host's stake. Only works if status === "open" (no opponent yet).
+// Refunds the host's stake. Works while status === "open" (no opponent yet),
+// and ALSO on a legacy stuck challenge stuck at "accepted" with no matchId
+// (those could never start — the Oct 24 bugfix above stops new ones forming).
+// If a match exists, use resignMatch instead.
 export async function cancelChallenge(challengeId) {
   if (!_db) return false;
   const uid = _getUserId();
@@ -248,7 +277,7 @@ export async function cancelChallenge(challengeId) {
   const ch = snap.val();
   if (!ch) { _toast("Challenge not found"); return false; }
   if (ch.hostUid !== uid) { _toast("Only the host can cancel"); return false; }
-  if (ch.status !== "open") { _toast("Challenge already accepted — play or resign instead"); return false; }
+  if (ch.status !== "open" && !(ch.status === "accepted" && !ch.matchId)) { _toast("Challenge already accepted — play or resign instead"); return false; }
   // Refund the host
   const gs = _getGameState();
   gs.state.money += ch.stake;

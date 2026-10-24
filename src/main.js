@@ -21,7 +21,7 @@ import { ref, get, onValue, update, set } from "firebase/database";
 import { openCreator } from "./creator.js";
 import { mountPreview, setPreviewLook } from "./charpreview.js";
 import { outfitsFor, BUILDS, SHOP, SLOT_KEYS } from "./outfits.js";
-import { tickContext } from "./contextmenu.js";
+import { tickContext, showContext, isContextShown, hideContext } from "./contextmenu.js";
 import { peekWorld, initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, getActivePlace, enterPlace, enterPlaceAsVisitor, exitPlace, sendUIEvent } from "./places/manager.js";
 import { listPlaces, getPlace, updateHomeEntrance } from "./places/registry.js";
 import { initMissions, getActiveMission, getAllChapters, getDailyMissions, getWeeklyMissions, checkStep, createMissionState, claimDailyReward, claimWeeklyReward, setCelebrateCallback } from "./missions.js";
@@ -37,7 +37,7 @@ import { initSniperUI } from "./sniper_ui.js";
 import { initBowlingUI } from "./bowling_ui.js";
 import { initPoolUI } from "./pool_ui.js";
 import { initOkadaDashUI } from "./okada_dash_ui.js";
-import { initSceneCulling, tickSceneCulling } from "./scene_culling.js";
+import { initSceneCulling, tickSceneCulling, cullStats } from "./scene_culling.js";
 import { initHowToPlay, showHowToPlay } from "./how_to_play.js";
 import { initSpyMissions, getSpyMissions, getMyUnlockTag } from "./spy_missions.js";
 import { initSpyMissionsUI, renderSpyMissionsApp, openMission as openSpyMission } from "./spy_mission_ui.js";
@@ -48,7 +48,7 @@ import { initSfx, sfx, setMuted as setSfxMuted, isMuted as isSfxMuted } from "./
 import { initParticles, emitConfetti, emitDust, tickParticles } from "./particles.js";
 import { initRoadEvents, tickRoadEvents, getCurrentWeather as getRoadWeather, resetRoadEvents, trafficSpeedMultiplierAt } from "./road_events.js";
 import { addScenery, SCENERY_LABELS } from "./scenery.js";
-import { initLife, tickLife , setLifePlayerVehicle } from "./life.js";
+import { initLife, tickLife , setLifePlayerVehicle, lifeTrafficPositions, setLifeCrossTrafficProvider } from "./life.js";
 import { initLiveMap, openLiveMap, closeLiveMap, isLiveMapOn, liveMapFrame } from "./livemap.js";
 import { perfFrameStart, perfBeforeRender, perfAfterRender } from "./perf.js";
 import { initGraphics, updateSky, nightAmount, tickGraphics, tickShadows, applyQuality, autoDetectQuality, getQuality, QUALITY_PRESETS } from "./graphics.js";
@@ -547,6 +547,10 @@ addScenery(scene, world);
 initLife(scene, world.colliders);
 initActivity(scene);
 const traffic = createTraffic(scene, world.colliders);  // Oct 23: pass colliders so cars don't drive through houses
+// TODO #5 (Oct 24): junction give-way — main-street traffic and the avenue
+// cars (life.js) stop for each other where the avenues cross the main street.
+traffic.setCrossTrafficProvider(() => lifeTrafficPositions());
+setLifeCrossTrafficProvider(() => traffic.positions);
 let mmDraw = createMinimap($("mm"), world.mapShapes);
 // FEATURE 3b: init the chunk-streamed area world (roads + NPC houses + lamp posts).
 // Pass world.colliders so per-area house footprints can be added as colliders.
@@ -3314,7 +3318,6 @@ initAuth((user) => {
   // See src/challenge_system.js (Firebase data layer) +
   //     src/capital_dice.js (game logic) +
   //     src/challenge_ui.js (HUD button + creator + match screen).
-  let _activeMatchId = null;
   try {
     initChallengeSystem({
       db, auth,
@@ -3416,16 +3419,33 @@ initAuth((user) => {
     }
     // Subscribe to MY challenges so when an opponent accepts, the match
     // screen auto-opens for me too.
+    // BUGFIX (Oct 24): the old single _activeMatchId flag stayed set forever
+    // after the first match, so later challenges never auto-opened. Now every
+    // matchId is tracked in a Set, and BOTH "accepted" and "active" statuses
+    // with a matchId are handled (the challenge is claimed in one atomic
+    // write by challenge_system.js, so matchId is always there).
+    const _openedMatches = new Set();
     subscribeToMyChallenges((mine) => {
       for (const ch of mine) {
-        if (ch.status === "accepted" && ch.matchId && !_activeMatchId) {
-          // Open the match screen — this fires for both the host and the
-          // accepter when the challenge transitions to "accepted".
-          _activeMatchId = ch.matchId;
+        if ((ch.status === "accepted" || ch.status === "active") && ch.matchId && !_openedMatches.has(ch.matchId)) {
+          _openedMatches.add(ch.matchId);
           openMatchForChallenge(ch);
         }
       }
     });
+    // RESUME ON BOOT (Oct 24): if I refresh mid-match (the "backed out and the
+    // challenge vanished" report), reopen my most recent unfinished match.
+    try {
+      getMyActiveMatches().then((ms) => {
+        if (ms && ms.length) {
+          const m = ms[ms.length - 1];
+          if (!_openedMatches.has(m.id)) {
+            _openedMatches.add(m.id);
+            openMatchForChallenge({ matchId: m.id, game: m.game });
+          }
+        }
+      }).catch(() => {});
+    } catch (e) { /* resume is best-effort */ }
     console.log("[challenge] challenge system ready (🎲 button visible in HUD)");
   } catch (e) {
     console.warn("[challenge] initChallengeSystem failed:", e.message);
@@ -3976,6 +3996,21 @@ function governor(raw) {
 }
 
 let _mapMe = null;
+// TODO #8 (Oct 24): context chip everywhere — NPCs near the player get a small
+// round "Talk" chip (never covers the centre, same API home.js uses for
+// furniture). Doors + shops already have their entrance prompt + interact key,
+// so they stay as-is; vehicles spawn on the player so a "Drive" chip is moot.
+const NPC_LINES = [
+  "How far! You dey enjoy the city?",
+  "Wetin dey happen, my guy?",
+  "The price of garri don go up o!",
+  "Abeg use the zebra crossing — cars no dey wait!",
+  "God go bless your hustle.",
+  "You don visit the new mall for Barnawa?",
+  "This Kaduna heat no dey gree o!",
+  "If you see my okada man, tell am say I dey come.",
+];
+let _npcChipT = 0;
 initLiveMap({ getMe: () => _mapMe, onClose: () => { if (_mapMe) { peekWorld(false); _mapMe = null; } }, scene, camera, player, AREAS, listPlaces, getHomePos: () => window._myHomePos, getHomes: () => window._myHomes || [], limits: { x: 560, z: 400 }, extraLabels: SCENERY_LABELS.concat(districtFunLabels()),
   travelPlace: (id) => { closeLiveMap(); window.travelToPlace(id); },
   travelArea: (id) => { closeLiveMap(); window.travelToArea(id); },
@@ -4086,6 +4121,27 @@ function _frame() {
   // Update active place (NPC animations, smoke, etc.)
   updateActive(dt, now);
   tickContext(camera);
+  // TODO #8 (Oct 24): nearest NPC within ~4m gets a small "Talk" chip.
+  // Scans every 200ms, not per frame — CPU tiny, mobile-first.
+  _npcChipT -= dt;
+  if (!active && _npcChipT <= 0) {
+    _npcChipT = 0.2;
+    let best = null, bd = 16;                                   // 4m radius
+    for (const n of (npcs?.npcs || [])) {
+      if (!n.ready || !n.group || !n.group.visible) continue;
+      const dx = n.x - player.pos.x, dz = n.z - player.pos.z, d2 = dx * dx + dz * dz;
+      if (d2 < bd) { bd = d2; best = n; }
+    }
+    if (best && !isContextShown("npc-talk")) {
+      showContext({
+        key: "npc-talk", at: new THREE.Vector3(best.x, 2.3, best.z),
+        title: "Neighbour", radius: 4.5, getPlayer: () => player.pos, ttl: 2600,
+        actions: [{ icon: "💬", label: "Talk", run: () => toast("🧑 " + NPC_LINES[Math.floor(Math.random() * NPC_LINES.length)]) }],
+      });
+    } else if (!best && isContextShown("npc-talk")) {
+      hideContext("npc-talk");
+    }
+  }
   // Show entrance/exit prompt
   tickEntrancePrompt(player.pos.x, player.pos.z, _gameHour());
 
@@ -4251,7 +4307,13 @@ function _frame() {
   sendPosition(player.pos.x, player.pos.z, player.heading);
   setMyPosition(player.pos.x, player.pos.z);
   mmT += dt; if (mmT > 0.1) { mmT = 0; mmDraw(player.pos.x, player.pos.z, ctl.yaw, player.heading, traffic.positions); }
+  // FIX (Oct 24 — TODO #4): the ?perf=1 overlay only ever ticked on the
+  // live-map path — in normal gameplay perfAfterRender was never called, so
+  // the FPS box never appeared. Call it on the main path too (no-op unless
+  // ?perf=1 / localStorage kaduna-perf).
+  perfBeforeRender();
   renderer.render(scene, camera);
+  perfAfterRender(renderer, getQuality());
   requestAnimationFrame(frame);
 }
 
@@ -4323,6 +4385,6 @@ Promise.all([loadPlayer(manager, scene, game.state.look), addCity(scene, world, 
   
   frame();
   $("loading").classList.add("done");
-  window.__dbg = { ride: (id) => { initVehicles(scene, null, () => {}); return spawnRideVehicle(id, player.pos, player.heading, toast); }, player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig };
+  window.__dbg = { ride: (id) => { initVehicles(scene, null, () => {}); return spawnRideVehicle(id, player.pos, player.heading, toast); }, player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig, cullStats, trafficCars: () => traffic.positions.length, trafficPos: () => traffic.positions.slice(0, 8) };
   window.__ready = true;
 }).catch((e) => showError("Could not load the game: " + e.message));
