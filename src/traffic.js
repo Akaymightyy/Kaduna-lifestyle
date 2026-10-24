@@ -190,20 +190,39 @@ function glowGeometry(T) {
   return mergeGeometries(out);
 }
 
-export function createTraffic(scene) {
+export function createTraffic(scene, colliders = []) {
   const R = rng(777);
   const names = Object.keys(TYPES);
   const bag = []; names.forEach((n) => { for (let i = 0; i < TYPES[n].weight; i++) bag.push(n); });
   const len = WORLD_HALF_X * 2;
   const cars = [];
+  // FIX (Oct 23): apply clearStretches to traffic lanes too (same as life.js)
+  // so cars don't drive through houses/buildings on the road.
+  const _tmp = { axis: "z", fix: 0, off: 0, dir: 1, len: 0, mid: 0 };
+  const _P = new THREE.Vector3();
+  function _clearStretches(ln) {
+    const cx = ln.fix + ln.off;
+    const near = colliders.filter((c) => c.minX < c.maxX && c.maxX > cx - 30 && c.minX < cx + 30);
+    const segs = []; let start = null;
+    for (let a = 0; a <= ln.len; a += 1) {
+      const s = a;
+      const x = ln.dir > 0 ? -WORLD_HALF_X + s : WORLD_HALF_X - s;
+      let blocked = false;
+      for (const c of near) if (x + 1.5 > c.minX && x - 1.5 < c.maxX && ln.z + 3.2 > c.minZ && ln.z - 3.2 < c.maxZ) { blocked = true; break; }
+      if (!blocked && start === null) start = a;
+      if ((blocked || a >= ln.len) && start !== null) { const b = a - (blocked ? 1.5 : 0); if (b - start >= 28) segs.push({ ...ln, len: b - start - 3, mid: (start + b) / 2 }); start = null; }
+    }
+    return segs.length ? segs : [ln];
+  }
   LANES.forEach((lane, li) => {
+    const segs = _clearStretches(lane);
     const n = 9;
-    const gap = len / n;
     for (let i = 0; i < n; i++) {
+      const seg = segs[i % segs.length];
       const type = bag[Math.floor(R() * bag.length)];
       const T = TYPES[type];
       const pool = T.fixedColors || BODY_COLORS;
-      cars.push({ lane, type, offset: i * gap + (R() - 0.5) * gap * 0.35, color: new THREE.Color(pool[Math.floor(R() * pool.length)]) });
+      cars.push({ lane: seg, type, offset: i * (seg.len / n) + (R() - 0.5) * (seg.len / n) * 0.35, color: new THREE.Color(pool[Math.floor(R() * pool.length)]) });
     }
   });
   const glowMat = new THREE.MeshBasicMaterial({ map: makeGlowAtlas(), vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, opacity: 0, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
@@ -314,8 +333,8 @@ export function createTraffic(scene) {
 
       p.set(xAdjusted, 0.02, c.lane.z);
       q.setFromAxisAngle(up, c.lane.dir > 0 ? 0 : Math.PI);
-      const ek = Math.min(1, Math.min(sAdjusted, len - sAdjusted) / 6);   // shrink to nothing at the ends so cars never pop in/out of walls
-      sc.setScalar(Math.max(0.001, ek));
+      const ek = Math.max(0, Math.min(1, Math.min(sAdjusted, len - sAdjusted) / 3));   // FIX (Oct 23): was /6 + min 0.001 — tiny dots. Now /3 + min 0 (clean vanish)
+      sc.setScalar(Math.max(0, ek));
       m.compose(p, q, sc);
       mm.body.setMatrixAt(mm.i, m); mm.body.setColorAt(mm.i, c.color);
       mm.lights.setMatrixAt(mm.i, m); mm.lights.setColorAt(mm.i, white);

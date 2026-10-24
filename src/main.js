@@ -546,7 +546,7 @@ const _pShadow = makeBlobShadows(scene, 1);
 addScenery(scene, world);
 initLife(scene, world.colliders);
 initActivity(scene);
-const traffic = createTraffic(scene);
+const traffic = createTraffic(scene, world.colliders);  // Oct 23: pass colliders so cars don't drive through houses
 let mmDraw = createMinimap($("mm"), world.mapShapes);
 // FEATURE 3b: init the chunk-streamed area world (roads + NPC houses + lamp posts).
 // Pass world.colliders so per-area house footprints can be added as colliders.

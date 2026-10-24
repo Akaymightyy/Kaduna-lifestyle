@@ -51,6 +51,9 @@ const slotOwner = [];                       // which person each packed crowd sl
 let PEOPLE_COLS = [];
 
 let _scene = null, _on = false, _t = 0, _last = 0;
+let _collidersRef = [];  // FIX (Oct 23): store collider reference for runtime guard
+let _colliderRebuildT = 0;  // timer: rebuild nearby collider list every 0.5s
+let _nearbyColliders = [];  // cached list of colliders near the player
 let carX = [], BEAM = null, SH = null, carMesh = null, busMesh = null, pm = null, boats = [], plane = null;
 const cars = [], buses = [], people = [];
 const _pv = { x: 0, z: 0, on: false };             // the player's own vehicle: cars wait for it
@@ -96,6 +99,7 @@ const pickSeg = (segs, f) => { const tot = segs.reduce((a, g) => a + g.len, 0); 
 
 export function initLife(scene, colliders = []) {
   _scene = scene;
+  _collidersRef = colliders;  // FIX (Oct 23): store for runtime guard
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
   // roads: lane offset +-2.8, 3 cars per lane, 2 buses per avenue
   const lanes = [];
@@ -207,6 +211,19 @@ export function tickLife(px, pz, show = true) {
   if (BEAM) { BEAM.visible = show && NIGHT_GLOW.value > 0.05; BEAM.material.opacity = NIGHT_GLOW.value * 0.5; }
   if (!show) return;
 
+  // FIX (Oct 23): runtime guard — every 0.5s, rebuild nearby colliders list
+  // (includes lazily-built area colliders from areas_world.js). Per-frame,
+  // hide cars that are inside a collider (cars don't drive through houses).
+  _colliderRebuildT += dt;
+  if (_colliderRebuildT > 0.5) {
+    _colliderRebuildT = 0;
+    const r = 80; // only check colliders within 80m of player
+    _nearbyColliders = _collidersRef.filter((c) =>
+      c.minX < c.maxX && c.maxX > px - r && c.minX < px + r &&
+      c.maxZ > pz - r && c.minZ < pz + r
+    );
+  }
+
   // cars + buses
   const dir = new THREE.Vector3(), nx = new THREE.Vector3();
   const place = (mesh, i, c) => {
@@ -214,7 +231,15 @@ export function tickLife(px, pz, show = true) {
     let go = 1;
     if (_pv.on) { const fx = c.ln.axis === "x" ? c.ln.dir : 0, fz = c.ln.axis === "z" ? c.ln.dir : 0, ddx = _pv.x - _p.x, ddz = _pv.z - _p.z, along = ddx * fx + ddz * fz, lat = Math.abs(ddx * fz - ddz * fx); if (along > -1.5 && along < 9 && lat < 2.8) go = along < 5 ? 0 : (along - 5) / 4; }
     c.s += c.v * dt * go; lanePos(c.ln, c.s, _p); lanePos(c.ln, c.s + 1.5, nx);
-    const lt = ((c.s % c.ln.len) + c.ln.len) % c.ln.len, ek = Math.max(0, Math.min(1, Math.min(lt, c.ln.len - lt) / 3));   // FIX (Oct 23): was /6 + min 0.001 — cars became tiny dots at road ends. Now /3 (faster shrink) + min 0 (fully invisible, no dot)
+    // FIX (Oct 23): runtime guard — if car position overlaps a nearby collider
+    // (house/building/lamp/kiosk), hide it (scale to 0) so it doesn't show
+    // inside the building. Cars are assigned to clear stretches at init time,
+    // but lazily-built area colliders may not have existed then.
+    let overlap = false;
+    for (const col of _nearbyColliders) {
+      if (_p.x + 1.5 > col.minX && _p.x - 1.5 < col.maxX && _p.z + 3.2 > col.minZ && _p.z - 3.2 < col.maxZ) { overlap = true; break; }
+    }
+    const lt = ((c.s % c.ln.len) + c.ln.len) % c.ln.len, ek = overlap ? 0 : Math.max(0, Math.min(1, Math.min(lt, c.ln.len - lt) / 3));
     _s2.setScalar(ek);
     const yaw = Math.atan2(-(nx.z - _p.z), nx.x - _p.x);
     _q.setFromAxisAngle(_up, yaw); _m.compose(_p, _q, _s2); if (mesh === carMesh && c.t > 0) { carMesh.setMatrixAt(i, _Z); for (let k = 0; k < 3; k++) carX[k].setMatrixAt(i, k === c.t - 1 ? _m : _Z); } else mesh.setMatrixAt(i, _m); if (glbReady) { if (mesh === carMesh) { if (carG.length) carG[0].setMatrixAt(i, _m); } else if (busG) busG.setMatrixAt(i, _m); } BEAM.setMatrixAt(mesh === carMesh ? i : cars.length + i, _m);

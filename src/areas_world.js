@@ -345,6 +345,17 @@ function _buildArea(area) {
   for (let i = 0; i < lampCount; i++) lampMesh.setMatrixAt(i, _hide);
   _scene.add(lampMesh);
 
+  // FIX (Oct 23): add lamp post colliders at BUILD time (not in tickAreaWorld
+  // which runs per frame — that was a memory leak). Lamps are at fixed plot
+  // positions, so colliders are deterministic.
+  for (let li = 0; li < lampCount; li++) {
+    const plotNo = li * 4;
+    if (plotNo >= area.plots) break;
+    const pos = getPlotPosition(area, plotNo);
+    const lx = pos.x + 4.2, lz = pos.z + 4.2;
+    if (_worldColliders) _worldColliders.push({ minX: lx - 0.3, maxX: lx + 0.3, minZ: lz - 0.3, maxZ: lz + 0.3, _areaId: area.id, _lamp: true });
+  }
+
   // static ground / road / landmark
   const st = _buildStatic(area);
   const staticMesh = new THREE.Mesh(st.geo, _vcMat);
@@ -423,6 +434,7 @@ function _updateArea(area, playerX, playerZ, distToArea, range) {
     if (dx * dx + dz * dz > r2) continue;
     _v.set(pos.x + 4.2, 0, pos.z + 4.2); _q.identity(); _m4.compose(_v, _q, _scl);
     lampMesh.setMatrixAt(lampIdx++, _m4);
+    // NOTE: lamp colliders are added at BUILD time (above), not here per-frame
   }
   lampMesh.count = lampIdx; lampMesh.instanceMatrix.needsUpdate = true;
 }
