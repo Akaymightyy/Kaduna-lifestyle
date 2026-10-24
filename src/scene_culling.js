@@ -36,8 +36,12 @@ const _sphere = new THREE.Sphere();
 export function initSceneCulling(scene) {
   _scene = scene;
   _meshes = [];
-  // Scan for InstancedMeshes after the world + life + traffic are built
-  setTimeout(() => _scanScene(), 2000);
+  // Oct 24 FIX (cars vanishing in the main city): the old 2-second auto-scan switched frustumCulled ON for every
+  // InstancedMesh, including MOVING ones (traffic, life cars, buses, people, shadows, beams). Three.js computes an
+  // InstancedMesh bounding sphere ONCE from the instance positions at that moment, so as soon as the cars drove away
+  // from where they were at second 2 the whole mesh was culled and the cars vanished. The scan is now OFF: only
+  // static meshes registered with registerCullChunks() are culled (they never move).
+  // setTimeout(() => _scanScene(), 2000);
 }
 
 function _scanScene() {
