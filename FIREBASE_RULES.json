@@ -196,7 +196,7 @@
       ".read": "auth != null",
       "$challengeId": {
         ".read": "auth != null",
-        ".write": "auth != null && (!data.exists() || data.child('hostUid').val() === auth.uid || (data.child('status').val() === 'open' && newData.child('status').val() === 'accepted'))"
+        ".write": "auth != null && (!data.exists() || data.child('hostUid').val() === auth.uid || data.child('opponentUid').val() === auth.uid || (data.child('status').val() === 'open' && (newData.child('status').val() === 'accepted' || newData.child('status').val() === 'active')))"
       }
     },
     "matches": {
