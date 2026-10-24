@@ -255,7 +255,8 @@ export function buildWorld(scene) {
       const nearMosque = side === 1 && cx > 25 && cx < 70;
       const nearMarket = side === -1 && cx > -50 && cx < -10;
       const nearPetrol = side === 1 && cx > -120 && cx < -95;
-      if (!nearSide && !nearMosque && !nearMarket && !nearPetrol) {
+      const nearCarnival = side === 1 && cx > -32 && cx < 32;   // Murtala Square: keep the carnival gate clear (its arch sits inside the building row)
+      if (!nearSide && !nearMosque && !nearMarket && !nearPetrol && !nearCarnival) {
         const d = 12 + R() * 10;
         const h = 7 + Math.floor(R() * 5) * 3.6 + (R() < 0.12 ? 14 : 0);
         addBuilding(cx, side * (34 + d / 2), w, d, h, C(palette[Math.floor(R() * palette.length)]), side);
@@ -471,6 +472,8 @@ export function buildWorld(scene) {
       { id: "kawo_park", x: -40, z: -97, name: "KAWO PARK", icon: "🚌", color: 0xf2b134 },
       { id: "university", x: 100, z: -57, name: "POLYTECHNIC", icon: "🎓", color: 0x1d5fa8 },
       { id: "kasu", x: 160, z: 24, name: "KASU", icon: "🎓", color: 0x1f7a5a },
+      { id: "zoo", x: 200, z: 26, name: "ZOO", icon: "🦁", color: 0xb5651d },
+      { id: "carnival", x: 0, z: 40, name: "CARNIVAL", icon: "🎪", color: 0xe11d48 },
       { id: "mall_cinema", x: 180, z: 37, name: "MALL", icon: "🏬", color: 0x7a3b8f },
       { id: "hospital", x: -180, z: 57, name: "HOSPITAL", icon: "🏥", color: 0xe11d48 },
       { id: "bank", x: 50, z: 37, name: "BANK", icon: "🏦", color: 0x1a5a3a },

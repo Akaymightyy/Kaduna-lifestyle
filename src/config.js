@@ -175,6 +175,8 @@ export const MAP_LOCATIONS = [
   { name: "Murtala Square", type: "landmark", x: 0, z: 38, major: true, desc: "Sports & events ground" },
   { name: "Kaduna Polytechnic", type: "landmark", x: 60, z: -28, major: true, desc: "Centre of Learning (in Sabon Tasha)" },
   { name: "KASU University", type: "landmark", x: 160, z: 24, major: true, desc: "Kaduna State University — quiz nights, sports & campus parties" },
+  { name: "Kaduna Zoo", type: "landmark", x: 200, z: 26, major: true, desc: "Wildlife park — feed lions, snake shows & zoo tours" },
+  { name: "Kaduna Carnival", type: "landmark", x: 0, z: 40, major: true, desc: "Murtala Square festival — Ferris wheel, dance-off & fireworks" },
   { name: "Ahmadu Bello Stadium", type: "landmark", x: -100, z: 40, major: false, desc: "Football stadium (in Ungwan Sarki)" },
   { name: "Railway Station", type: "transport", x: -140, z: 0, major: true, desc: "Kaduna train station (in Kabala Costain)" },
   { name: "Lugard Hall", type: "landmark", x: 100, z: 40, major: false, desc: "Historic government building (in Barnawa)" },

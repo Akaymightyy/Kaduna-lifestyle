@@ -203,6 +203,36 @@ export function placeSpec(placeId, eid, handle, player, onDone) {
     if (eid === "debate_club") return { ...base, label: "Debating...", icon: "🗣️", anim: "point", seconds: 6, face: player.heading };
     if (eid === "campus_party") return { ...base, label: "Party time!...", icon: "🎉", anim: "dance", seconds: 9, face: player.heading };
     if (eid === "hangout") return { ...base, label: "Gisting under the mango tree...", icon: "🌳", anim: "sitwatch", seconds: 8, props: ["stool"], face: player.heading, cancelOnMove: false };
+    if (eid === "graduation") return { ...base, label: "Graduating! Confetti time!...", icon: "🎓", anim: "dance", seconds: 9, face: player.heading };
+    if (eid === "write_exam") return { ...base, label: "Writing the exam...", icon: "📝", anim: "point", seconds: 8, face: player.heading, cancelOnMove: false };
+    if (eid === "hostel_party") return { ...base, label: "Hostel block-o!...", icon: "🪩", anim: "dance", seconds: 8, face: player.heading, cancelOnMove: false };
+  }
+  if (placeId === "zoo") {
+    // Kaduna Zoo activities — walk to the enclosure, interact, watch the animals
+    if (eid === "feed_lion") return { ...base, label: "Feeding Simba the lion...", icon: "🦁", anim: "point", seconds: 6, face: player.heading };
+    if (eid === "feed_elephant") return { ...base, label: "Feeding the elephants...", icon: "🐘", anim: "point", seconds: 6, face: player.heading };
+    if (eid === "monkey_watch") return { ...base, label: "Watching the monkeys...", icon: "🐒", anim: "sitwatch", seconds: 6, props: ["stool"], face: player.heading, cancelOnMove: false };
+    if (eid === "croc_pond") return { ...base, label: "Peeping at the crocodiles...", icon: "🐊", anim: "sitwatch", seconds: 5, props: ["stool"], face: player.heading, cancelOnMove: false };
+    if (eid === "snake_show") return { ...base, label: "Braving the snake show...", icon: "🐍", anim: "point", seconds: 6, face: player.heading };
+    if (eid === "ostrich_feed") return { ...base, label: "Feeding the ostriches...", icon: "🪶", anim: "point", seconds: 5, face: player.heading };
+    if (eid === "guided_tour") return { ...base, label: "On the guided tour...", icon: "🚶", anim: "walk", seconds: 10, face: player.heading };
+    if (eid === "learn_centre") return { ...base, label: "Conservation class...", icon: "🎓", anim: "sitwatch", seconds: 7, props: ["stool"], face: player.heading, cancelOnMove: false };
+    if (eid === "post_animal") return { ...base, label: "Filming a viral video...", icon: "📹", anim: "point", seconds: 5, face: player.heading };
+    if (eid === "gift_shop") return { ...base, label: "Shopping for souvenirs...", icon: "🎁", anim: "point", seconds: 4, face: player.heading };
+    if (eid === "zoo_picnic") return { ...base, label: "Picnic on the zoo lawn...", icon: "🧺", anim: "sitwatch", seconds: 9, props: ["stool"], face: player.heading, cancelOnMove: false };
+  }
+  if (placeId === "carnival") {
+    // Kaduna Carnival activities — rides, games, dance-off mini-game, parade
+    if (eid === "ride_ferris") return { ...base, label: "Riding the Ferris wheel...", icon: "🎡", anim: "sitwatch", seconds: 9, face: player.heading, cancelOnMove: false };
+    if (eid === "ride_carousel") return { ...base, label: "On the carousel...", icon: "🎠", anim: "sitwatch", seconds: 7, face: player.heading, cancelOnMove: false };
+    if (eid === "dance_contest") return { ...base, label: "Dance-Off! Hit the beat!...", icon: "💃", anim: "dance", seconds: 4, face: player.heading, cancelOnMove: false };
+    if (eid === "watch_parade") return { ...base, label: "Watching the parade...", icon: "🎺", anim: "sitwatch", seconds: 7, face: player.heading, cancelOnMove: false };
+    if (eid === "drum_circle") return { ...base, label: "Playing the gangan...", icon: "🥁", anim: "point", seconds: 7, face: player.heading };
+    if (eid === "ring_toss") return { ...base, label: "Tossing the ring...", icon: "🎯", anim: "point", seconds: 4, face: player.heading, cancelOnMove: false };
+    if (eid === "balloon_dart") return { ...base, label: "Throwing darts...", icon: "🎈", anim: "point", seconds: 4, face: player.heading, cancelOnMove: false };
+    if (eid === "face_paint") return { ...base, label: "Getting face paint...", icon: "🎨", anim: "sitwatch", seconds: 5, props: ["stool"], face: player.heading, cancelOnMove: false };
+    if (eid === "costume_parade") return { ...base, label: "Masquerade parade!...", icon: "🥳", anim: "dance", seconds: 8, face: player.heading };
+    if (eid === "fireworks") return { ...base, label: "Watching fireworks!...", icon: "🎆", anim: "point", seconds: 6, face: player.heading, cancelOnMove: false };
   }
   if (EAT_IDS.has(eid)) return { ...base, label: "Eating...", icon: "🍛", anim: "eat", seconds: 6, props: ["stool", "table"], face: player.heading };
   if (DRINK_IDS.has(eid)) return { ...base, label: "Drinking...", icon: "🥤", anim: "drink", seconds: 3.5, face: player.heading };
