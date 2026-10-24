@@ -4,7 +4,7 @@
 //   - boats on the lake, and a plane that takes off and lands at the airport
 // Everything is instanced / merged (6 draw calls in total) and costs almost nothing on the CPU.
 import * as THREE from "three";
-import { WIDE_AVENUES_X, WIDE_CROSS_Z, MAP_HALF_X, MAP_HALF_Z } from "./config.js";
+import { WIDE_AVENUES_X, WIDE_CROSS_Z, MAP_HALF_X, MAP_HALF_Z, WORLD_HALF_X } from "./config.js";
 import { AREAS } from "./areas.js";
 import { LAKE, AIRPORT } from "./scenery.js";
 import { makeBlobShadows } from "./street.js";
@@ -108,6 +108,16 @@ let _crossProv = null;
 export function setLifeCrossTrafficProvider(fn) { _crossProv = fn; }
 const _snapAll = [];                                   // per-vehicle { ln, x, z } snapshot from before this frame's advance
 
+// where a person is now: x, z, facing yaw (walkers go to and fro along their stretch, either along x or along z)
+const _wp = { x: 0, z: 0, yaw: 0, moving: true };
+function walkXZ(p, t) {
+  if (p.chat) { _wp.x = p.cx; _wp.z = p.az; _wp.yaw = p.face; _wp.moving = false; return _wp; }
+  const ph = (t * p.sp + p.ph) / p.span, f = ph % 2, u = f < 1 ? f : 2 - f, a = -p.span + u * p.span * 2;
+  _wp.moving = true;
+  if (p.axis === "z") { _wp.x = p.ax; _wp.z = p.az + a; _wp.yaw = f < 1 ? 0 : Math.PI; } else { _wp.x = p.ax + a; _wp.z = p.az; _wp.yaw = f < 1 ? Math.PI / 2 : -Math.PI / 2; }
+  return _wp;
+}
+
 export function initLife(scene, colliders = []) {
   _scene = scene;
   _collidersRef = colliders;  // FIX (Oct 23): store for runtime guard
@@ -175,7 +185,29 @@ export function initLife(scene, colliders = []) {
       people.push(p);
     }
   }
-  const mk = (geo) => { const m = new THREE.InstancedMesh(geo, mat, N); m.frustumCulled = false; m.count = 0; scene.add(m); return m; };
+  // STREET WALKERS: people on the pavements of every avenue, cross street and the main street (not only inside districts).
+  // Each walks a collider-free stretch of the pavement (clearStretches), so nobody walks through a building or kiosk.
+  {
+    const sidewalks = [];
+    for (const ax of WIDE_AVENUES_X) for (const sg of [1, -1]) sidewalks.push({ axis: "z", fix: ax, off: sg * 10.5, dir: 1, len: MAP_HALF_Z * 2 - 30, n: 7, id: "av" + ax + sg });
+    for (const cz of WIDE_CROSS_Z) for (const sg of [1, -1]) sidewalks.push({ axis: "x", fix: cz, off: sg * 10.5, dir: 1, len: MAP_HALF_X * 2 - 30, n: 7, id: "cx" + cz + sg });
+    for (const sg of [1, -1]) sidewalks.push({ axis: "x", fix: 0, off: sg * 10.5, dir: 1, len: WORLD_HALF_X * 2 - 20, n: 12, id: "main" + sg });
+    for (const sw of sidewalks) {
+      const segs = clearStretches(sw, colliders);
+      if (segs.length === 1 && segs[0] === sw) continue;                // nowhere clear on this pavement
+      (window.__walkSegs = window.__walkSegs || []).push([sw.id, segs.length]);
+      for (let k = 0; k < sw.n; k++) {
+        const g = pickSeg(segs, (k + hash2(sw.id, "sg" + k)) / sw.n), id = sw.id + k, r = hash2(id, "type");
+        const type = r < 0.5 ? 0 : r < 0.72 ? 1 : 2, kid = type === 0 && hash2(id, "kid") < 0.12;
+        const along = g.mid, p = { type, sc: kid ? 0.62 : 0.93 + hash2(id, "h") * 0.14, skin: pick(SKINS, id, "s"), axis: sw.axis,
+          ax: sw.axis === "x" ? along : sw.fix + sw.off, az: sw.axis === "x" ? sw.fix + sw.off : along, span: Math.max(8, g.len / 2 - 3),
+          ph: hash2(id, "pp") * 100, sp: (kid ? 1.8 : 1.1) + hash2(id, "pv") * 0.7, chat: false };
+        p.top = type === 0 ? pick(SHIRTS, id, "t") : type === 1 ? pick(ROBES, id, "r") : pick(GOWNS, id, "g"); p.bot = pick(TROUS, id, "b");
+        people.push(p);
+      }
+    }
+  }
+  const mk = (geo) => { const m = new THREE.InstancedMesh(geo, mat, people.length); m.frustumCulled = false; m.count = 0; scene.add(m); return m; };
   pm = { torso: mk(PP.torso), kaftan: mk(PP.kaftan), gown: mk(PP.gown), legL: mk(PP.leg), legR: mk(PP.leg), armL: mk(PP.arm), armR: mk(PP.arm), hair: mk(PP.headHair), cap: mk(PP.headCap), bare: mk(PP.headBare) };
   PEOPLE_COLS = [[pm.torso, (p) => p.top], [pm.kaftan, (p) => p.top], [pm.gown, (p) => p.top], [pm.legL, (p) => p.bot], [pm.legR, (p) => p.bot], [pm.armL, (p) => p.top], [pm.armR, (p) => p.top], [pm.hair, (p) => p.skin], [pm.cap, (p) => p.skin], [pm.bare, (p) => p.skin]].map(([m, c]) => ({ m, c }));
   people.forEach((p, i) => {
@@ -290,21 +322,19 @@ export function tickLife(px, pz, show = true) {
   // real people for the nearest walkers
   const near = [];
   people.forEach((p, i) => {
-    let x; if (p.chat) x = p.cx; else { const ph = (_t * p.sp + p.ph) / p.span, f = ph % 2, u = f < 1 ? f : 2 - f; x = p.ax - p.span + u * p.span * 2; }
-    const dx = x - px, dz = p.az - pz, d2 = dx * dx + dz * dz;
-    if (d2 < SHOW_R * SHOW_R) near.push([d2, i, x]);
+    const w = walkXZ(p, _t), dx = w.x - px, dz = w.z - pz, d2 = dx * dx + dz * dz;
+    if (d2 < SHOW_R * SHOW_R) near.push([d2, i]);
   });
   near.sort((a, b) => a[0] - b[0]);
-  const chosen = new Map(); for (let k = 0; k < Math.min(near.length, RIGS.length); k++) chosen.set(near[k][1], near[k][2]);
+  const chosen = new Map(); for (let k = 0; k < Math.min(near.length, RIGS.length); k++) chosen.set(near[k][1], 1);
   for (const r of RIGS) if (r.who >= 0 && !chosen.has(r.who)) { r.ch.group.visible = false; r.who = -1; }
   for (const [i] of chosen) { if (RIGS.some((r) => r.who === i)) continue; const r = RIGS.find((q) => q.who < 0); if (r) r.who = i; }
   for (const r of RIGS) {
     if (r.who < 0) continue;
-    const p = people[r.who], x = chosen.get(r.who), moving = !p.chat;
+    const p = people[r.who], w = walkXZ(p, _t), moving = w.moving;
     r.ch.group.visible = show; if (!show) continue;
-    const ph = (_t * p.sp + p.ph) / p.span, f = ph % 2;
-    r.ch.group.position.set(x, 0, p.az);
-    r.ch.group.rotation.y = p.chat ? p.face : (f < 1 ? Math.PI / 2 : -Math.PI / 2);
+    r.ch.group.position.set(w.x, 0, w.z);
+    r.ch.group.rotation.y = w.yaw;
     r.ch.animate(dt, moving ? p.sp * 1.6 : 0);
   }
   const hasRig = new Set(RIGS.filter((r) => r.who >= 0).map((r) => r.who));
@@ -312,9 +342,7 @@ export function tickLife(px, pz, show = true) {
   // people (only the ones near the player are drawn)
   let nj = 0;                                    // crowd is packed into the first nj slots: far people cost nothing on the GPU
   people.forEach((p, i) => {
-    let x, z = p.az, yaw, moving = true;
-    if (p.chat) { x = p.cx; yaw = p.face; moving = false; }
-    else { const ph = (_t * p.sp + p.ph) / p.span, f = ph % 2, u = f < 1 ? f : 2 - f; x = p.ax - p.span + u * p.span * 2; yaw = f < 1 ? Math.PI / 2 : -Math.PI / 2; }
+    const wk = walkXZ(p, _t), x = wk.x, z = wk.z, yaw = wk.yaw, moving = wk.moving;
     const dx = x - px, dz = z - pz;
     const si = cars.length + buses.length + i;
     if (hasRig.has(i) || dx * dx + dz * dz > CROWD_R * CROWD_R) { SH.hide(si); return; }
