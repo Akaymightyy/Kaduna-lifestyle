@@ -269,16 +269,18 @@ function _showChallengeToast(ch, challengeId) {
   _activeToast = document.createElement("div");
   _activeToast.style.cssText =
     "position:fixed;left:50%;bottom:calc(120px + env(safe-area-inset-bottom));" +
-    "transform:translateX(-50%);background:rgba(15,77,58,.97);color:#fff;" +
+    "transform:translateX(-50%);background:rgba(15,77,58,.97);color:#fff;position:fixed;" +
     "padding:12px 16px;border-radius:14px;font:600 13px Poppins,sans-serif;" +
     "box-shadow:0 6px 20px rgba(0,0,0,.4);z-index:35;display:flex;flex-direction:column;" +
     "align-items:center;gap:8px;border:1px solid #f2b134;max-width:90vw;text-align:center;";
+  const _gName = { capital_dice: "Capital Dice", tennis: "Tennis", penalty_shootout: "Penalty Shoot-out", sniper: "Sniper Duel", bowling: "Bowling", pool: "Pool" }[ch.game] || "Capital Dice";
   _activeToast.innerHTML = `
+    <button onclick="window._ccDismiss()" aria-label="Close" style="position:absolute;top:-12px;right:-8px;width:30px;height:30px;border-radius:50%;background:#fff;color:#0f4d3a;border:2px solid #f2b134;font:800 15px Poppins,sans-serif;line-height:1;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.35);">✕</button>
     <div style="font-size:13px;font-weight:700;color:#f2b134;">
       🎲 ${ch.hostName} is challenging anyone!
     </div>
     <div style="font-size:11px;color:#9ec9b0;">
-      Capital Dice · Stake ₦${ch.stake.toLocaleString()} · Pot ₦${(ch.stake * 2).toLocaleString()}
+      ${_gName} · Stake ₦${ch.stake.toLocaleString()} · Pot ₦${(ch.stake * 2).toLocaleString()}
     </div>
     <button onclick="window._ccAccept('${challengeId}')" style="background:#4ade80;color:#000;border:none;border-radius:8px;padding:8px 18px;font:700 12px Poppins,sans-serif;cursor:pointer;">
       Accept Challenge
@@ -287,6 +289,7 @@ function _showChallengeToast(ch, challengeId) {
   document.body.appendChild(_activeToast);
   // Auto-remove after 30 seconds if no one accepts
   setTimeout(() => { if (_activeToast) { _activeToast.remove(); _activeToast = null; } }, 30000);
+  window._ccDismiss = () => { if (_activeToast) { _activeToast.remove(); _activeToast = null; } };   // just hides it for me; the host's challenge stays open
   // Wire accept
   window._ccAccept = async (id) => {
     const matchId = await acceptChallenge(id);
