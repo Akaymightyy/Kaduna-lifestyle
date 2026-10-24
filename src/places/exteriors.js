@@ -11,8 +11,9 @@ const STYLE = {                                // [width, height, depth, wall co
   hospital: [20, 12, 10, 0xeef3f6], bank: [14, 10, 10, 0xb9d9c4], stadium: [18, 8, 8, 0x8fc79f],
   river_park: [12, 5, 6, 0x9fd8f0], church: [14, 12, 12, 0xf3e6c8], barber: [8, 5, 7, 0x4a4a62],
   nightclub: [12, 7, 10, 0x4a2a6a], dealership: [20, 7, 12, 0xe8e8ec], arena: [16, 8, 10, 0xd8c067],
+  kasu: [26, 12, 4, 0x1f7a5a],
 };
-const OUTDOOR = new Set(["kawo_park", "university", "stadium", "river_park", "suya_spot"]);
+const OUTDOOR = new Set(["kawo_park", "university", "kasu", "stadium", "river_park", "suya_spot"]);
 
 export function buildPlaceExteriors(world, colliders) {
   const lam = (c, extra) => new THREE.MeshLambertMaterial(Object.assign({ color: c }, extra || {}));

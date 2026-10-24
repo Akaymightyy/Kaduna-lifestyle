@@ -15,6 +15,7 @@ import * as suya_spot_mod from "./suya_spot.js";
 import * as central_mosque_mod from "./central_mosque.js";
 import * as kawo_park_mod from "./kawo_park.js";
 import * as university_mod from "./university.js";
+import * as kasu_mod from "./kasu.js";
 import * as mall_cinema_mod from "./mall_cinema.js";
 import * as hospital_mod from "./hospital.js";
 import * as bank_mod from "./bank.js";
@@ -34,6 +35,7 @@ const MODULES = {
   central_mosque: central_mosque_mod,
   kawo_park: kawo_park_mod,
   university: university_mod,
+  kasu: kasu_mod,
   mall_cinema: mall_cinema_mod,
   hospital: hospital_mod,
   bank: bank_mod,
@@ -155,6 +157,43 @@ const PLACE_DEFS = [
       { id: "eat_cafeteria", label: "Eat at cafeteria", desc: "Cheap student meal — ₦400" },
       { id: "play_football", label: "Play football", desc: "Fun + social on the field" },
       { id: "rest_hostel", label: "Rest at hostel", desc: "Restore energy" },
+    ],
+  },
+  {
+    id: "kasu",
+    name: "KASU University",
+    type: "outdoor",
+    worldX: 160, worldZ: 30,
+    entranceX: 160, entranceZ: 24,
+    entranceFacing: Math.PI,
+    minimapIcon: "🎓",
+    minimapColor: 0x1f7a5a,
+    hours: { open: 6, close: 22 },
+    ambientSound: "campus",
+    npcList: [
+      { id: "kasu_vc", name: "Prof. Abdullahi", outfit: "kaftan", role: "vice chancellor" },
+      { id: "kasu_lect1", name: "Dr. Yakubu", outfit: "kaftan", role: "lecturer" },
+      { id: "kasu_stud1", name: "Hauwa", outfit: "casual", role: "student" },
+      { id: "kasu_vendor", name: "Mama Ngozi", outfit: "casual", role: "cafeteria cook" },
+      { id: "kasu_quiz", name: "Mr. Danjuma", outfit: "kaftan", role: "quiz master" },
+    ],
+    activities: [
+      { id: "attend_lecture", label: "🎓 Attend lecture", desc: "GNS 101 at LT1 — ₦500 stipend" },
+      { id: "study_library", label: "📚 Study at library", desc: "Hit the books — brain +10" },
+      { id: "eat_cafeteria", label: "🍝 Eat at cafeteria", desc: "Mama Ngozi's rice & stew — ₦400" },
+      { id: "bookshop", label: "📖 Buy textbook", desc: "₦600 — boosts Quiz Night winnings ×1.5" },
+      { id: "play_football", label: "⚽ Play football", desc: "Score on the KASU field" },
+      { id: "play_basketball", label: "🏀 Play basketball", desc: "Slam dunk on the court" },
+      { id: "play_volleyball", label: "🏐 Play volleyball", desc: "Spike it with the squad" },
+      { id: "sprint_race", label: "🏃 Sprint race", desc: "100m dash — beat your record" },
+      { id: "quiz_night", label: "🧠 Quiz Night", desc: "Win up to ₦6,750 in prize money!" },
+      { id: "karaoke", label: "🎤 Karaoke", desc: "Sing at KASU Arena — ₦300" },
+      { id: "talent_show", label: "🎭 Talent show", desc: "Perform & earn tips" },
+      { id: "debate_club", label: "🗣️ Debate club", desc: "Win the argument — ₦500 prize" },
+      { id: "campus_party", label: "🎉 Campus party", desc: "Turn up with DJ Zainab — ₦1000" },
+      { id: "hangout", label: "🌳 Gist under mango tree", desc: "Campus gist with friends" },
+      { id: "rest_hostel", label: "😴 Rest at hostel", desc: "Amina Hostel — energy +40" },
+      { id: "photo_mode", label: "📸 Photo Mode", desc: "Snap a KASU memory" },
     ],
   },
   {

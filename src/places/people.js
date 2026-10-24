@@ -128,6 +128,11 @@ const DIALOGUE = {
   "DJ": ["Everybody on the floor!", "This one na my new track!", "Make some noise, Kaduna!"],
   "bouncer": ["₦1000 entry. Pay at the bar.", "No fighting inside, abeg.", "VIP is ₦5000."],
   "bartender": ["What you wan drink?", "₦500 per glass.", "Chill, I dey come."],
+  "vice chancellor": ["Welcome to KASU, the Centre of Learning.", "Read your books — knowledge is power.", "Our campus is your home. Feel free.", "Aim for first class, my dear student."],
+  "bookseller": ["Textbook na ₦600. E go boost your Quiz Night oo!", "Handout dey available for every course.", "You want past questions? I get am."],
+  "quiz master": ["Welcome to Quiz Night! Win up to ₦6,750!", "Five questions. No cheating oo!", "Textbook owners dey win double here!"],
+  "guard": ["Welcome to KASU campus.", "Show your ID card, abeg.", "Campus dey safe. No worry."],
+  "cheerleader": ["KASU! KASU! We dey win!", "Come watch the match, e go sweet!", "Our team na the best!"],
 };
 const NAMED = {
   "Mama Nkechi": ["My sister, Ankara na ₦5000. Quality no be small.", "You wan buy two? I go give you better price.", "This color go fit your skin well."],
@@ -156,6 +161,13 @@ const NAMED = {
   "Alhaji Tanko": ["Make you sit down well.", "Road dey clear today."],
   "Mama Chinedu": ["Kunu and kosai! Hot and sweet!", "₦300 only."],
   "Aunty Rabi": ["Rice and stew, ₦400 only!", "Student price, no worry."],
+  "Prof. Abdullahi": ["Welcome to KASU — Centre of Learning.", "Knowledge is light, my dear student.", "Aim for first class!"],
+  "Mama Ngozi": ["Rice and beans dey hot! ₦400 only!", "You look hungry — come and chop!", "Student price, I go add extra stew."],
+  "Mr. Danjuma": ["Quiz Night starts now! ₦500 per correct answer!", "Textbook owners dey win ×1.5 here!", "Who wan become a millionaire tonight?"],
+  "DJ Zainab": ["KASU Arena, make some noise!", "This track na for you!", "Party no go finish tonight!"],
+  "Coach Emeka": ["Sprint! Faster! You fit do am!", "Basketball court dey free — come play!", "Teamwork makes the dream work!"],
+  "Mallam Bala": ["Textbook ₦600 — Quiz Night go pay you back!", "Past questions dey available!", "Buy your handout here, fresh print!"],
+  "Officer Yusuf": ["Welcome to KASU campus.", "No noise after 10pm, abeg.", "Campus dey safe, no worry."],
 };
 export function getDialogue(role, name) { const l = DIALOGUE[role] || DIALOGUE._generic; return l[Math.floor(Math.random() * l.length)]; }
 export function getNamedDialogue(name) { const l = NAMED[name]; return l ? l[Math.floor(Math.random() * l.length)] : null; }
