@@ -49,7 +49,7 @@ export function setArtQuality(q) {
 export const PAT = { NONE: 0, TILES: 1, WOOD: 2, PLASTER: 3, ZINC: 4, BLOCK: 5, ANKARA: 6, RUG: 7, CURTAIN: 8, CONCRETE: 9, GLASS: 10, SCREEN: 11, GRASS: 12, ASPHALT: 13, GLOW: 14 };
 
 const VERT_DECL = `
-varying vec3 vOP; varying vec3 vWN; varying float vWY; varying float vPat;
+varying vec3 vOP; varying vec3 vWN; varying float vWY; varying float vPat; varying vec3 vWP;
 #ifdef ART_PAT
 attribute float aPat;
 #endif
@@ -58,6 +58,7 @@ const VERT_BODY = `
 vOP = position;
 vWN = normalize(mat3(modelMatrix) * normal);
 vWY = (modelMatrix * vec4(transformed, 1.0)).y;
+vWP = (modelMatrix * vec4(transformed, 1.0)).xyz;
 #ifdef ART_PAT
 vPat = aPat;
 #else
@@ -66,7 +67,7 @@ vPat = 0.0;
 `;
 const FRAG_DECL = `
 uniform vec4 uArt;
-varying vec3 vOP; varying vec3 vWN; varying float vWY; varying float vPat;
+varying vec3 vOP; varying vec3 vWN; varying float vWY; varying float vPat; varying vec3 vWP;
 float h21(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 float vn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
   return mix(mix(h21(i), h21(i+vec2(1.,0.)), f.x), mix(h21(i+vec2(0.,1.)), h21(i+vec2(1.,1.)), f.x), f.y); }
@@ -176,6 +177,12 @@ const FRAG_BODY = `
     float kf = dot(normalize(vWN), normalize(vec3(0.45, 0.78, 0.38))) * 0.5 + 0.5;
     col *= mix(1.0, mix(0.68, 1.16, kf), uArt.w);
   #endif
+  // TODO #7 (Oct 24): near-field brightness — the road right in front of the
+  // camera read too dark ("dark front road"). Lift ambient by up to ~20%
+  // within 30m, fading out smoothly so the horizon keeps its depth.
+  // (cameraPosition is a built-in three.js fragment uniform; this is pure
+  // shader colour grading — no CSS canvas filters, see handoff RULE 06.)
+  col *= 1.0 + 0.20 * (1.0 - smoothstep(4.0, 30.0, distance(vWP, cameraPosition)));
   { float lum = dot(col, vec3(0.299, 0.587, 0.114));
     float mx = max(col.r, max(col.g, col.b)); float mn = min(col.r, min(col.g, col.b));
     col = mix(vec3(lum), col, 1.14 + 0.2 * (1.0 - (mx - mn))); }
