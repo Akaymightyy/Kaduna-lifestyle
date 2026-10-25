@@ -25,7 +25,7 @@
 
 import * as THREE from "three";
 import { db } from "../firebase.js";
-import { ref, push, query, limitToLast, onChildAdded } from "firebase/database";
+import { ref, push, update, query, limitToLast, onChildAdded } from "firebase/database";
 import { addMoney } from "../economy.js";
 
 // Money-history entry for MY OWN wallet (the wallet itself was already
@@ -195,6 +195,14 @@ function _listenSprays() {
     _seenSprays.add(id);
     if (_seenSprays.size > 200) _seenSprays = new Set(Array.from(_seenSprays).slice(-100));
     if (Date.now() - (s.ts || 0) > 45000) return;         // stale replay — ignore
+    // 🛡 SANITY CHECK (Oct 25 security fix): only accept sane, rule-shaped
+    // amounts before crediting anybody. FIREBASE_RULES.json already rejects
+    // bad sprays at the database, but old rows written before the rules
+    // (or a tampered client) could still carry minted/negative amounts —
+    // those are ignored here so nobody's wallet is touched by them.
+    const amt = s.amount | 0;
+    if (!Number.isInteger(amt) || amt <= 0 || amt > 5000000) return;
+    if (!s.fromUid || (s.toUid && s.toUid === s.fromUid)) return;  // self-spray mint attempt
     const myUid = _api && _api.getUid && _api.getUid();
     if (s.fromUid === myUid) {
       // My own spray — effects already played locally. Freeze me too if odogwu.
@@ -207,14 +215,14 @@ function _listenSprays() {
     if (!forMe && !sameRoom) return;
     if (forMe) {
       // 💸 Credit my balance + money history (transaction via economy.js)
-      addMoney(myUid, s.amount || 0, "💸 " + (s.fromName || "Someone") + " sprayed ₦" + (s.amount || 0).toLocaleString() + " on me");
-      _api.toast("💸 " + (s.fromName || "Someone") + " sprayed ₦" + (s.amount || 0).toLocaleString() + " on you!");
+      addMoney(myUid, amt, "💸 " + (s.fromName || "Someone") + " sprayed ₦" + amt.toLocaleString() + " on me");
+      _api.toast("💸 " + (s.fromName || "Someone") + " sprayed ₦" + amt.toLocaleString() + " on you!");
     }
     // Visuals for everyone in the room
     if (sameRoom || forMe) {
       const p = (_api.getPlayerPos && _api.getPlayerPos()) || { x: 0, z: 0 };
       sprayNotes(_api.scene, p.x, 0, p.z, Math.min(s.notes || 8, 60));
-      sprayFloat("💸 ₦" + (s.amount || 0).toLocaleString() + " sprayed on " + (s.toName ? "@" + s.toName : "the party") + " by @" + (s.fromName || "someone"), !!s.odogwu);
+      sprayFloat("💸 ₦" + amt.toLocaleString() + " sprayed on " + (s.toName ? "@" + s.toName : "the party") + " by @" + (s.fromName || "someone"), !!s.odogwu);
       try { window.__sfx && window.__sfx.money && window.__sfx.money(); } catch (e) {}
     }
     if (s.odogwu) odogwuEffect();
@@ -311,6 +319,8 @@ function _markChip(btn) {
 async function _doSpray() {
   if (!_pickedStack) { _api.toast("Pick a stack first 💸"); return; }
   const s = _pickedStack;
+  const myUid = _api.getUid();
+  if (!myUid) { _api.toast("Sign in to spray money 💸"); return; }
   const bal = _api.getBalance();
   if (bal < s.amount) {
     _api.toast("💔 You need ₦" + s.amount.toLocaleString() + " to spray that stack!");
@@ -323,32 +333,51 @@ async function _doSpray() {
     const p = (_api.getPeopleInRoom() || []).find((x) => x.uid === _pickedUid);
     if (!p) { _api.toast("They left the room — pick someone else"); _refreshReceivers(); return; }
     toUid = p.uid; toName = p.name;
+    if (toUid === myUid) { _api.toast("You no fit spray yourself 😅"); return; }
   }
   closeSprayUI();
-  // 1. Deduct my money instantly (same pattern as every purchase in main.js)
-  const spent = _api.spendLocal(s.amount);
-  if (!spent) { _api.toast("💔 Not enough money!"); return; }
-  // 2. Money history for me (log ONLY — the debit already happened in
-  // spendLocal; calling addMoney here too would deduct twice).
-  _logMyMoney(_api.getUid(), -s.amount, "💸 Sprayed ₦" + s.amount.toLocaleString() + (toName ? " on @" + toName : " on the party"));
-  // 3. Write the spray — receiver's client credits them + logs their side
+  // 🛡 SECURE SPRAY (Oct 25 security fix) — ONE atomic multi-path update:
+  //   1. sprays/{id} = the spray record
+  //   2. economy/{myUid}/balance = balance MINUS the spray amount
+  // Firebase applies multi-path updates all-or-nothing, and the new
+  // FIREBASE_RULES.json VALIDATES the spray server-side: amount is an
+  // integer ₦1..₦5,000,000, receiver ≠ sprayer, and the sender's Firebase
+  // balance must cover the amount. If any check fails the WHOLE update is
+  // rejected — no spray record, no debit, no minted money. The old flow
+  // trusted the phone (local spend + unvalidated write), so a cheater fit
+  // spray millions dem no get — that door is closed now.
+  const newBal = bal - s.amount;
+  const sprayId = push(ref(db, "sprays")).key;
+  if (!sprayId) { _api.toast("💔 Network wahala — try again"); return; }
   try {
-    await push(ref(db, "sprays"), {
-      fromUid: _api.getUid(), fromName: myName,
-      toUid: toUid || "", toName: toName || "",
-      amount: s.amount, notes: s.notes,
-      room: getSprayRoom(), odogwu: !!s.odogwu, ts: Date.now(),
+    // NOTE: modular SDK update() takes a REFERENCE, not the database —
+    // a root ref with a multi-path map = one atomic all-or-nothing write.
+    await update(ref(db, "/"), {
+      ["sprays/" + sprayId]: {
+        fromUid: myUid, fromName: myName,
+        toUid: toUid || "", toName: toName || "",
+        amount: s.amount, notes: s.notes,
+        room: getSprayRoom(), odogwu: !!s.odogwu, ts: Date.now(),
+      },
+      ["economy/" + myUid + "/balance"]: newBal,
     });
   } catch (e) {
-    console.warn("[spray] write failed:", e.message);
+    console.warn("[spray] rejected by server rules:", e && (e.stack || e.code || e.message));
+    _api.toast("💔 Firebase no accept the spray — make sure your balance don sync (visit anywhere to sync) then try again.");
+    return;                                        // NO local changes — nothing spent
   }
-  // 4. Local effects immediately (don't wait for the echo)
+  // Server accepted: apply the same debit locally (Firebase is the truth).
+  const gs = _api.gameState;
+  if (gs) { gs.money = newBal; if (gs.save) gs.save(); }
+  // Money history for me (log ONLY — the debit already happened above).
+  _logMyMoney(myUid, -s.amount, "💸 Sprayed ₦" + s.amount.toLocaleString() + (toName ? " on @" + toName : " on the party"));
+  // Local effects immediately (don't wait for the echo)
   const pp = toUid ? (_api.getRemotePlayerPos(toUid) || _api.getPlayerPos()) : _api.getPlayerPos();
   sprayNotes(_api.scene, pp.x, 0, pp.z, s.notes);
   sprayFloat("💸 ₦" + s.amount.toLocaleString() + " sprayed on " + (toName ? "@" + toName : "the party") + "!", !!s.odogwu);
   try { window.__sfx && window.__sfx.money && window.__sfx.money(); } catch (e) {}
   if (s.odogwu) odogwuEffect();
-  // 5. Hype: I dance after a big spray
+  // Hype: I dance after a big spray
   if (s.amount >= 50000) window._emote && window._emote("dance", 4);
   _api.updateHUD && _api.updateHUD();
 }
