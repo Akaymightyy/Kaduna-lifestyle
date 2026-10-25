@@ -199,46 +199,55 @@ export function createTraffic(scene, colliders = []) {
   const R = rng(777);
   const names = Object.keys(TYPES);
   const bag = []; names.forEach((n) => { for (let i = 0; i < TYPES[n].weight; i++) bag.push(n); });
-  const len = WORLD_HALF_X * 2;
+  // Oct 25 FIX ("cars shrinking EVERYWHERE in the middle of roads"): two causes.
+  //   1) The main-road asphalt is WORLD_HALF_X*2+200 long, but the lanes were
+  //      only WORLD_HALF_X*2 — every car wrapped around (and hid) 100m BEFORE
+  //      the road visually ends, in plain view mid-road.
+  //   2) Cars used to LOOP INSIDE short collider-free stretches, so every
+  //      stretch seam was a mid-road dive point — with the denser city the
+  //      stretches got short and the dives were constant.
+  // Now lanes span the full asphalt (wrap = at the visual end of the road, far
+  // away), cars drive the WHOLE lane, and the only dives are: a blocked span
+  // where a building genuinely stands on the road (rare — the OSM layer keeps
+  // buildings off the lanes), and the road's own two ends.
+  const len = WORLD_HALF_X * 2 + 200;
   const cars = [];
-  // FIX (Oct 23, REWRITTEN Oct 24 — TODO #1): apply clearStretches to traffic
-  // lanes so cars don't drive through houses/buildings on the road.
-  // The Oct 23 version read ln.fix + ln.off, but LANES only have { z, dir,
-  // speed } — that made the collider filter NaN and match NOTHING, so cars
-  // still crossed the whole street (through the arena etc). This version:
-  //   * filters colliders by the lane's real z range,
-  //   * walks the street and keeps only collider-free runs >= 28 m,
-  //   * returns segs that cars LOOP INSIDE (like life.js), not just spawn in.
-  function _clearStretches(ln) {
+  // Walk each lane once: mark where a collider actually stands on the road
+  // ("blocked" arcs, in lane arc-length s) and keep the clear runs for spawning.
+  function _laneSpans(ln) {
     const near = colliders.filter((c) => isFinite(c.minX) && c.minX < c.maxX && c.minZ < c.maxZ && c.maxZ > ln.z - 6 && c.minZ < ln.z + 6);
-    const segs = []; let start = null;
+    const blocked = []; let start = null;
     for (let a = 0; a <= len; a += 2) {
-      const x = ln.dir > 0 ? -WORLD_HALF_X + a : WORLD_HALF_X - a;
-      let blocked = false;
-      for (const c of near) if (x + 1.5 > c.minX && x - 1.5 < c.maxX && ln.z + 3.2 > c.minZ && ln.z - 3.2 < c.maxZ) { blocked = true; break; }
-      if (!blocked && start === null) start = a;
-      if ((blocked || a >= len) && start !== null) {
-        const b = a - (blocked ? 2 : 0);
-        const segLen = b - start - 3;
-        if (segLen >= 28) segs.push({ z: ln.z, dir: ln.dir, speed: ln.speed, len: segLen, mid: ln.dir > 0 ? -WORLD_HALF_X + (start + b) / 2 : WORLD_HALF_X - (start + b) / 2 });
-        start = null;
-      }
+      const x = ln.dir > 0 ? -len / 2 + a : len / 2 - a;
+      let hit = false;
+      for (const c of near) if (x + 1.5 > c.minX && x - 1.5 < c.maxX && ln.z + 3.2 > c.minZ && ln.z - 3.2 < c.maxZ) { hit = true; break; }
+      if (hit && start === null) start = a;
+      if ((!hit || a >= len) && start !== null) { blocked.push({ a0: start - 4.5, a1: (hit ? a : a - 2) + 4.5 }); start = null; }
     }
-    // fallback: no clear stretch found — use the full lane (old behaviour)
-    return segs.length ? segs : [{ z: ln.z, dir: ln.dir, speed: ln.speed, len, mid: 0 }];
+    // clear spans = the complement (only used to spread the spawn points)
+    const clear = []; let prev = 0;
+    for (const b of blocked) { if (b.a0 - prev >= 14) clear.push({ a0: prev, a1: b.a0 }); prev = b.a1; }
+    if (len - prev >= 14) clear.push({ a0: prev, a1: len });
+    if (!clear.length) clear.push({ a0: 8, a1: len - 8 });
+    return { blocked, clear };
   }
-  LANES.forEach((lane) => {
-    const segs = _clearStretches(lane);
-    // Oct 25: kept the original round-robin spawn spread (it spaces cars inside
-    // every stretch correctly). The visible-shrink problem is fixed by the
-    // dive-under seam handling in update() below, not by reshuffling spawns.
+  const LANES_FULL = LANES.map((ln) => {
+    const spans = _laneSpans(ln);
+    console.log("[traffic] lane z=" + ln.z + " dir=" + ln.dir + " — " + spans.blocked.length + " blocked span(s) on " + len + "m");
+    return { z: ln.z, dir: ln.dir, speed: ln.speed, len, spans };
+  });
+  LANES_FULL.forEach((L) => {
     const n = 9;
+    const tot = L.spans.clear.reduce((a, g) => a + (g.a1 - g.a0), 0);
     for (let i = 0; i < n; i++) {
-      const seg = segs[i % segs.length];
       const type = bag[Math.floor(R() * bag.length)];
       const T = TYPES[type];
       const pool = T.fixedColors || BODY_COLORS;
-      cars.push({ lane: seg, type, offset: i * (seg.len / n) + (R() - 0.5) * (seg.len / n) * 0.35, color: new THREE.Color(pool[Math.floor(R() * pool.length)]) });
+      // spread cars proportionally across the clear spans (never spawn inside a building)
+      let u = ((i + 0.5) / n + (R() - 0.5) * (0.6 / n)) * tot;
+      let s0 = L.spans.clear[0].a0 + (L.spans.clear[0].a1 - L.spans.clear[0].a0) / 2;
+      for (const g of L.spans.clear) { const gl = g.a1 - g.a0; if (u < gl) { s0 = g.a0 + u; break; } u -= gl; }
+      cars.push({ lane: L, type, offset: Math.max(8, Math.min(len - 8, s0)), color: new THREE.Color(pool[Math.floor(R() * pool.length)]) });
     }
   });
   const glowMat = new THREE.MeshBasicMaterial({ map: makeGlowAtlas(), vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, opacity: 0, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
@@ -335,7 +344,7 @@ export function createTraffic(scene, colliders = []) {
       const mm = meshes[c.type];
       const L = c.lane;
       if (c.s == null) c.s = ((c.offset % L.len) + L.len) % L.len;
-      const x0 = L.dir > 0 ? L.mid - L.len / 2 + c.s : L.mid + L.len / 2 - c.s;
+      const x0 = L.dir > 0 ? -L.len / 2 + c.s : L.len / 2 - c.s;
 
       // ---- FIX: yield at zebra crossings ----
       let go = 1;
@@ -366,14 +375,14 @@ export function createTraffic(scene, colliders = []) {
         }
       }
 
-      // ---- advance INSIDE the stretch (loop at its ends, never the whole street) ----
+      // ---- advance along the WHOLE lane (wrap only at the road's two ends) ----
       if (c._go == null) c._go = 1;
       c._go += (go - c._go) * Math.min(1, dt * 6);          // smooth accel / brake (IDM-lite)
       if (c._go < 0.004) c._go = 0;
       const adv = L.speed * c._go * dt;
       c.s += adv;
       if (c.s >= L.len) c.s -= L.len;
-      const x = L.dir > 0 ? L.mid - L.len / 2 + c.s : L.mid + L.len / 2 - c.s;
+      const x = L.dir > 0 ? -L.len / 2 + c.s : L.len / 2 - c.s;
 
       // ---- TODO #2 runtime guard: freeze + hide inside a lazily-built collider ----
       let overlap = false;
@@ -382,18 +391,22 @@ export function createTraffic(scene, colliders = []) {
           if (x + 1.5 > col.minX && x - 1.5 < col.maxX && L.z + 3.2 > col.minZ && L.z - 3.2 < col.maxZ) { overlap = true; break; }
         }
       }
-      // Oct 25 FIX (cars shrinking mid-road): the old guard froze the car and
-      // scaled it to 0 inside lazily-built colliders, and the loop seam scaled
-      // cars to 0 within 3m of the stretch ends — with the denser city, cars
-      // squished to nothing in plain view everywhere. Now a car keeps its full
-      // size and DIVES UNDER the asphalt instead (eased, never pops), keeps
-      // driving through the blocked span while hidden, and re-emerges after.
-      // Followers still brake behind its published position, so traffic reads
-      // exactly the same.
-      const edge = Math.min(c.s, L.len - c.s);              // distance to the nearest loop seam
-      const wantSink = (overlap || edge < 2.4) ? 1 : 0;
+      // Oct 25 FIX, v2 ("cars shrinking EVERYWHERE"): the previous fix replaced
+      // scale-0 with an eased dive, but the dive still fired at EVERY stretch
+      // seam — dozens of upright cars sinking/rising in plain view each minute,
+      // which still reads as "shrinking". Now the ONLY dives are: (a) this lane's
+      // precomputed blocked spans (a building genuinely on the road — rare,
+      // the OSM layer keeps buildings off the lanes), (b) the two road ends
+      // where the asphalt stops, (c) lazily-added colliders (runtime guard).
+      // The dive eases faster (dt*9) so the car is fully under before it
+      // reaches the collider edge, and the margin below (4.5m) covers the
+      // easing distance at top speed.
+      const edge = Math.min(c.s, L.len - c.s);              // distance to the road end
+      let inBlk = false;
+      for (let bi = 0; bi < L.spans.blocked.length; bi++) { const b = L.spans.blocked[bi]; if (c.s > b.a0 && c.s < b.a1) { inBlk = true; break; } }
+      const wantSink = (overlap || inBlk || edge < 2.5) ? 1 : 0;
       if (c._sk == null) c._sk = wantSink;
-      c._sk += (wantSink - c._sk) * Math.min(1, dt * 7);    // ease the dive so nothing snaps
+      c._sk += (wantSink - c._sk) * Math.min(1, dt * 9);    // ease the dive so nothing snaps
       if (c._sk > 0.995) c._sk = 1; else if (c._sk < 0.005) c._sk = 0;
 
       p.set(x, 0.02 - 2.7 * c._sk, L.z);

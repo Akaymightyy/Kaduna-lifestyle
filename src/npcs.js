@@ -6,12 +6,13 @@
 import * as THREE from "three";
 import { createCharacter } from "./characters.js";
 import { ROAD_HALF, WORLD_HALF_X, CROSSINGS, rng } from "./config.js";
+import { collide } from "./player.js";
 
 const NPC_COUNT = 3;            // reduced for perf (240 meshes per character)
 const ANIM_DISTANCE = 30;       // metres — skip animation beyond this
 const DRAW_DISTANCE = 60;       // metres — hide entirely beyond this
 
-export function createNPCs(scene) {
+export function createNPCs(scene, colliders = []) {
   const R = rng(9988);
   const npcs = [];
   let spawnIdx = 0;
@@ -60,6 +61,7 @@ export function createNPCs(scene) {
 
   // Reusable vectors to avoid per-frame allocation
   const _tmpVec = new THREE.Vector3();
+  const _npcPos = new THREE.Vector3();
 
   function update(dt, now, playerX, playerZ) {
     // Spawn one NPC per frame until all are loaded
@@ -92,6 +94,20 @@ export function createNPCs(scene) {
         // Hide entirely — saves draw calls
         n.group.visible = false;
         continue;
+      }
+      // Oct 25 FIX ("characters walk through buildings / everything is
+      // untouchable"): NPCs used to ghost straight through houses, kiosks and
+      // the PLAYER. Now they (a) push out of world colliders (only computed
+      // while near the player — far NPCs are invisible anyway) and (b) step
+      // aside when the player gets too close.
+      if (colliders.length) {
+        _npcPos.set(n.x, 0, n.z);
+        collide(_npcPos, colliders, 0.35);
+        n.x = _npcPos.x; n.z = _npcPos.z;
+      }
+      if (distSq < 0.81 && distSq > 1e-4) {           // player's 0.9 m personal bubble
+        const pd = Math.sqrt(distSq), push = (0.9 - pd) / pd;
+        n.x += dx * push; n.z += dz * push;
       }
       n.group.visible = true;
       n.group.position.set(n.x, 0, n.z);

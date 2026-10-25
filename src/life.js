@@ -97,6 +97,26 @@ function clearStretches(ln, cols) {
 }
 const pickSeg = (segs, f) => { const tot = segs.reduce((a, g) => a + g.len, 0); let x = (f % 1) * tot; for (const g of segs) { if (x < g.len) return g; x -= g.len; } return segs[segs.length - 1]; };
 
+// Oct 25 FIX ("cars shrinking everywhere"): cars used to LOOP INSIDE each clear
+// stretch, so every stretch seam — one every few dozen metres in the dense city —
+// was a mid-road dive point. Now each car drives the WHOLE lane (the wrap happens
+// at the lane's far ends, near the map edge) and only dives while actually
+// crossing a blocked arc (a building genuinely standing on the road), at the lane
+// ends, or inside a lazily-added collider (runtime guard below).
+function blockedArcs(len, segs) {
+  const arcs = []; let prev = -len / 2;
+  for (const g of segs) {
+    const g0 = g.mid - g.len / 2, g1 = g.mid + g.len / 2;
+    if (!isFinite(g0) || !isFinite(g1)) return [];   // clearStretches fallback (whole-lane seg has no mid) — nothing blocked
+    if (g0 - prev >= 6) arcs.push({ a0: prev - 4.5, a1: g0 + 4.5 });
+    if (g1 > prev) prev = g1;
+  }
+  if (len / 2 - prev >= 6) arcs.push({ a0: prev - 4.5, a1: len / 2 + 4.5 });
+  return arcs;
+}
+// arc-length s (for the full lane, in its own direction) from a world "along" coord
+const sFromAlong = (ln, along) => (((ln.dir > 0 ? along + ln.len / 2 : ln.len / 2 - along) % ln.len) + ln.len) % ln.len;
+
 // ---- TODO #5 (Oct 24): junction give-way + IDM-lite gap keeping ----
 // _lifePos: our own vehicle positions, read by traffic.js (via a provider
 // wired in main.js) so main-street cars stop at the avenue junctions.
@@ -128,9 +148,15 @@ export function initLife(scene, colliders = []) {
   for (const cz of WIDE_CROSS_Z) for (const off of [-2.8, 2.8]) lanes.push({ axis: "x", fix: cz, off, dir: off > 0 ? 1 : -1, len: MAP_HALF_X * 2 - 30 });
   lanes.forEach((full, li) => {
     const segs = clearStretches(full, colliders);
-    (window.__laneSegs = window.__laneSegs || []).push({ axis: full.axis, fix: full.fix, off: full.off, segs: segs.map((g) => [Math.round(g.mid - g.len / 2), Math.round(g.mid + g.len / 2)]) });
-    for (let k = 0; k < 3; k++) { const ln = pickSeg(segs, (k + 0.5) / 3 + hash2("cs" + li, k) * 0.1); cars.push({ ln, s: hash2("c" + li, k) * ln.len, v: 9 + hash2("v" + li, k) * 6, hue: hash2("h" + li, k) }); }
-    if (li % 2 === 0) { const ln = pickSeg(segs, hash2("bs" + li, 1)); buses.push({ ln, s: hash2("b" + li, 1) * ln.len, v: 6 + hash2("bv" + li, 1) * 2 }); }
+    full._blocked = blockedArcs(full.len, segs);          // where cars must dive (buildings on the road)
+    (window.__laneSegs = window.__laneSegs || []).push({ axis: full.axis, fix: full.fix, off: full.off, blocked: full._blocked.length, segs: segs.map((g) => [Math.round(g.mid - g.len / 2), Math.round(g.mid + g.len / 2)]) });
+    // spawn on the clear stretches (never inside a building), then drive the full lane
+    for (let k = 0; k < 3; k++) {
+      const g = pickSeg(segs, (k + 0.5) / 3 + hash2("cs" + li, k) * 0.1);
+      const along0 = (g.mid || 0) + (hash2("c" + li, k) - 0.5) * (g.len || full.len) * 0.6;
+      cars.push({ ln: full, s: sFromAlong(full, along0), v: 9 + hash2("v" + li, k) * 6, hue: hash2("h" + li, k) });
+    }
+    if (li % 2 === 0) { const g = pickSeg(segs, hash2("bs" + li, 1)); buses.push({ ln: full, s: sFromAlong(full, g.mid || 0), v: 6 + hash2("bv" + li, 1) * 2 }); }
   });
   carMesh = new THREE.InstancedMesh(carShape(), mat, cars.length); carMesh.frustumCulled = false;
   cars.forEach((c, i) => carMesh.setColorAt(i, _col.setHSL(c.hue, 0.6, 0.5)));
@@ -240,7 +266,7 @@ export function initLife(scene, colliders = []) {
     const bm = new THREE.MeshBasicMaterial({ vertexColors: true, color: 0xffe2a0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -7, polygonOffsetUnits: -7 });
     BEAM = new THREE.InstancedMesh(bg, bm, cars.length + buses.length); BEAM.frustumCulled = false; BEAM.visible = false; scene.add(BEAM); }
   SH = makeBlobShadows(scene, cars.length + buses.length + people.length);
-  for (let i = 0; i < cars.length + buses.length; i++) { _lifePos.push({ x: 0, z: 0 }); _snapAll.push({ ln: null, x: 0, z: 0 }); }
+  for (let i = 0; i < cars.length + buses.length; i++) { _lifePos.push({ x: 0, z: 0, hl: 2.6, hw: 1.3 }); _snapAll.push({ ln: null, x: 0, z: 0 }); }
   _on = true;
 }
 
@@ -278,6 +304,10 @@ export function tickLife(px, pz, show = true) {
     lanePos(c.ln, c.s, _p);
     let go = 1;
     if (_pv.on) { const fx = c.ln.axis === "x" ? c.ln.dir : 0, fz = c.ln.axis === "z" ? c.ln.dir : 0, ddx = _pv.x - _p.x, ddz = _pv.z - _p.z, along = ddx * fx + ddz * fz, lat = Math.abs(ddx * fz - ddz * fx); if (along > -1.5 && along < 9 && lat < 2.8) go = along < 5 ? 0 : (along - 5) / 4; }
+    // Oct 25 FIX: life cars never looked at the on-foot PLAYER — they drove
+    // straight through them ("everything is untouchable"). Same yield pattern
+    // as the player's vehicle: stop when the walker is on the lane ahead.
+    else { const fx = c.ln.axis === "x" ? c.ln.dir : 0, fz = c.ln.axis === "z" ? c.ln.dir : 0, ddx = _pv.x - _p.x, ddz = _pv.z - _p.z, along = ddx * fx + ddz * fz, lat = Math.abs(ddx * fz - ddz * fx); if (along > 0.5 && along < 10 && lat < 3.2) go = 0; }
     // TODO #5 (Oct 24): IDM-lite — keep a gap to the vehicle ahead in the SAME stretch
     for (let j = 0; j < _snapAll.length; j++) {
       if (j === gi) continue;
@@ -299,6 +329,22 @@ export function tickLife(px, pz, show = true) {
         }
       }
     }
+    // Oct 25 FIX ("cars entering each other"): cross-street cars used to drive
+    // straight through avenue cars at the avenue × cross-street junctions —
+    // nothing ever yielded there. Cross streets now yield to the avenues
+    // (one-way priority, so no deadlock is possible).
+    if (go > 0 && c.ln.axis === "x") {
+      for (const ax of WIDE_AVENUES_X) {
+        const dJ = (ax - _p.x) * c.ln.dir;
+        if (dJ <= 0 || dJ >= 26) continue;
+        for (let j = 0; j < _snapAll.length; j++) {
+          const o = _snapAll[j];
+          if (!o.ln || o.ln.axis !== "z") continue;      // only avenue vehicles have priority
+          if (Math.abs(o.x - ax) < 13 && Math.abs(o.z - _p.z) < 9) { go = 0; break; }
+        }
+        if (go === 0) break;
+      }
+    }
     c.s += c.v * dt * go; lanePos(c.ln, c.s, _p); lanePos(c.ln, c.s + 1.5, nx);
     // FIX (Oct 23): runtime guard — if car position overlaps a nearby collider
     // (house/building/lamp/kiosk), hide it (scale to 0) so it doesn't show
@@ -308,16 +354,18 @@ export function tickLife(px, pz, show = true) {
     for (const col of _nearbyColliders) {
       if (_p.x + 1.5 > col.minX && _p.x - 1.5 < col.maxX && _p.z + 3.2 > col.minZ && _p.z - 3.2 < col.maxZ) { overlap = true; break; }
     }
-    // Oct 25 FIX (cars shrinking mid-road): cars used to scale to 0 at the
-    // stretch seams and inside lazily-built colliders — with the denser OSM
-    // city, seams landed everywhere mid-road and cars constantly squished to
-    // nothing in plain view. Now they keep full size and DIVE UNDER the
-    // asphalt instead (eased, never pops) and re-emerge after the seam or the
-    // blocked span. The shadow fades out with the same factor while hidden.
+    // Oct 25 FIX, v2 ("cars shrinking everywhere"): the dive no longer fires at
+    // every stretch seam — only inside this lane's precomputed blocked arcs, at
+    // the lane's two far ends (near the map edge), or inside a lazily-added
+    // collider. Eases faster (dt*9) so the car is fully under before the
+    // collider edge; the 4.5m arc margin covers the easing distance.
     const lt = ((c.s % c.ln.len) + c.ln.len) % c.ln.len;
-    const wantSink = (overlap || lt < 2.4 || c.ln.len - lt < 2.4) ? 1 : 0;
+    let inBlk = false;
+    const along = c.ln.dir > 0 ? -c.ln.len / 2 + lt : c.ln.len / 2 - lt;
+    if (c.ln._blocked) for (let bi = 0; bi < c.ln._blocked.length; bi++) { const b = c.ln._blocked[bi]; if (along > b.a0 && along < b.a1) { inBlk = true; break; } }
+    const wantSink = (overlap || inBlk || lt < 2.5 || c.ln.len - lt < 2.5) ? 1 : 0;
     if (c._sk == null) c._sk = wantSink;
-    c._sk += (wantSink - c._sk) * Math.min(1, dt * 7);
+    c._sk += (wantSink - c._sk) * Math.min(1, dt * 9);
     if (c._sk > 0.995) c._sk = 1; else if (c._sk < 0.005) c._sk = 0;
     const ek = 1 - c._sk;
     _p.y = -2.7 * c._sk;
@@ -326,7 +374,8 @@ export function tickLife(px, pz, show = true) {
     _q.setFromAxisAngle(_up, yaw); _m.compose(_p, _q, _s2); if (mesh === carMesh && c.t > 0) { carMesh.setMatrixAt(i, _Z); for (let k = 0; k < 3; k++) carX[k].setMatrixAt(i, k === c.t - 1 ? _m : _Z); } else mesh.setMatrixAt(i, _m); if (glbReady) { if (mesh === carMesh) { if (carG.length) carG[0].setMatrixAt(i, _m); } else if (busG) busG.setMatrixAt(i, _m); } BEAM.setMatrixAt(mesh === carMesh ? i : cars.length + i, _m);
     SH.set(mesh === carMesh ? i : cars.length + i, _p.x, _p.z, (mesh === carMesh ? 2.6 : 3.4) * ek, (mesh === carMesh ? 5.4 : 12) * ek, yaw + Math.PI / 2);
     // publish position for traffic.js's junction give-way (main street side)
-    if (gi < _lifePos.length) { _lifePos[gi].x = _p.x; _lifePos[gi].z = _p.z; }
+    // + player push-out sizes in main.js (Oct 25: cars were "untouchable")
+    if (gi < _lifePos.length) { _lifePos[gi].x = _p.x; _lifePos[gi].z = _p.z; _lifePos[gi].hl = mesh === carMesh ? 2.6 : 4.6; _lifePos[gi].hw = mesh === carMesh ? 1.3 : 1.5; }
   };
   cars.forEach((c, i) => place(carMesh, i, c, i)); buses.forEach((c, i) => place(busMesh, i, c, cars.length + i));
   carMesh.instanceMatrix.needsUpdate = true; carX.forEach((m) => { m.instanceMatrix.needsUpdate = true; }); busMesh.instanceMatrix.needsUpdate = true; carG.forEach((m) => { m.instanceMatrix.needsUpdate = true; }); if (busG) busG.instanceMatrix.needsUpdate = true;

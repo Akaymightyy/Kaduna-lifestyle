@@ -600,7 +600,9 @@ fetchKadunaData().then((kadunaData) => {
 initOsmCity(world).then((s) => { if (s) console.log("[osmCity] city density ready"); });
 const ctl = createControls(canvas, camera, { joy: $("joy"), knob: $("knob") });
 const game = createGameState();
-const npcs = createNPCs(scene);
+// Oct 25 FIX ("characters walk through buildings"): NPCs now get the world
+// colliders so they physically push out of houses/kiosks instead of ghosting.
+const npcs = createNPCs(scene, world.colliders);
 const missionState = createMissionState();
 let _activeMission = null;
 
@@ -4409,6 +4411,20 @@ function _frame() {
         if (hitCool <= 0) { toast("Eyah! Watch the road, use the zebra"); hitCool = 2.5; }
       }
     }
+    // Oct 25 FIX ("cars are untouchable"): the avenue + cross-street cars
+    // (life.js) were NEVER checked here — the player walked straight through
+    // them. Push the player out along the smaller penetration axis (they now
+    // also brake for the walker ahead, so this is just the safety net).
+    for (const c of lifeTrafficPositions()) {
+      if (c.hl == null) continue;
+      const ox = (c.hl + 0.4) - Math.abs(player.pos.x - c.x);
+      const oz = (c.hw + 0.4) - Math.abs(player.pos.z - c.z);
+      if (ox > 0 && oz > 0) {
+        if (oz < ox) player.pos.z += (player.pos.z >= c.z ? 1 : -1) * Math.min(0.3, oz);
+        else player.pos.x += (player.pos.x >= c.x ? 1 : -1) * Math.min(0.3, ox);
+        if (hitCool <= 0) { toast("Eyah! Watch the road, use the zebra"); hitCool = 2.5; }
+      }
+    }
   }
   if (rig) {
     rig.group.position.copy(player.pos); rig.group.position.y += player.yOff || 0;
@@ -4638,6 +4654,6 @@ Promise.all([loadPlayer(manager, scene, game.state.look), addCity(scene, world, 
   
   frame();
   $("loading").classList.add("done");
-  window.__dbg = { ride: (id) => { initVehicles(scene, null, () => {}); return spawnRideVehicle(id, player.pos, player.heading, toast); }, player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig, cullStats, trafficCars: () => traffic.positions.length, trafficPos: () => traffic.positions.slice(0, 8) };
+  window.__dbg = { ride: (id) => { initVehicles(scene, null, () => {}); return spawnRideVehicle(id, player.pos, player.heading, toast); }, player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig, cullStats, trafficCars: () => traffic.positions.length, trafficPos: () => traffic.positions.slice(0, 8), lampDebug: () => ({ hasPos: Array.isArray(world.lampPositions), n: world.lampPositions ? world.lampPositions.length : -1, lights: world.lampLights.map((l) => [Math.round(l.position.x), Math.round(l.position.z)]) }) };
   window.__ready = true;
 }).catch((e) => showError("Could not load the game: " + e.message));

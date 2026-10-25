@@ -511,5 +511,9 @@ export function buildWorld(scene) {
     buildPlaceExteriors(world, colliders);
   } catch (e) { console.warn("Could not add place markers", e); }
 
-  return { world, asphalt, colliders, mapShapes, lamps: heads, lampLights, ground, buildingsMesh: buildings };
+  // Oct 25 FIX: lampPositions was only set on the inner THREE.Group (line ~435),
+  // never on THIS return object — so main.js's lamp pool saw `undefined` and the
+  // 6 night PointLights never followed the player, and osmCity's avenue lamps
+  // could never join the pool. Return it so night streets are actually lit.
+  return { world, asphalt, colliders, mapShapes, lamps: heads, lampLights, lampPositions: lampPos, ground, buildingsMesh: buildings };
 }
