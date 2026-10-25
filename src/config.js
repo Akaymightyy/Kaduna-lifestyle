@@ -34,6 +34,20 @@ export const REAL_MS_PER_GAME_HOUR = TIME_SCALE * 60 * 60 * 1000;  // 1 real hou
 export const SHOW_NIGHT = true;
 export const FIXED_HOUR = null;  // FEATURE: natural day/night cycle (was 17.5 evening-lock)
 
+// ---- CITY DENSITY (real Kaduna buildings from OpenStreetMap) ----
+// ADDITIVE + REVERSIBLE: the OSM layer only ADDS buildings/roads/props in
+// empty spaces (checked against src/world/protectedZones.js). Set enabled
+// to false and the game boots exactly like before — nothing else changes.
+// Data file is generated offline by tools/fetch-kaduna-osm.mjs. If it is
+// missing, the layer quietly skips itself (fail-safe).
+export const OSM_CITY = {
+  enabled: true,
+  dataUrl: "/data/kaduna-osm.json",
+  maxBuildings: 900,   // safety cap — nearest-to-centre footprints win
+  chunkSize: 180,      // merge cell size (draw calls + frustum culling)
+  bounds: { minX: -555, maxX: 555, minZ: -330, maxZ: 330 },
+};
+
 export const LANES = [
   { z: 2.75, dir: 1, speed: 8.5 },
   { z: 6.25, dir: 1, speed: 12.5 },

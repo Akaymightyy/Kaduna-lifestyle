@@ -69,6 +69,9 @@ import { initAreaWorld, tickAreaWorld, setAreaLampsNight, disposeAreaWorld, getR
 // (a static OSM-derived file shipped in public/data/). The main Ahmadu Bello
 // Way is filtered out (already rendered by world.js) to avoid double-render.
 import { fetchKadunaData, buildRealMap } from "./realmap.js";
+// CITY DENSITY: real Kaduna buildings from OpenStreetMap (additive + reversible,
+// everything checked against protected zones — see src/world/osmCity.js).
+import { initOsmCity } from "./world/osmCity.js";
 import { getSeat, VEHICLE_CATALOG, getVehicle, initVehicles, buyVehicle, getOwned, ownsVehicle, isRiding, getRideSpeed, getRideId, spawnRideVehicle, despawnRideVehicle, tickRideVehicle } from "./vehicles.js";
 import { extendCatalog } from "./dealership_catalog.js";
 import { buildStreetDetail, makeBlobShadows } from "./street.js";
@@ -590,6 +593,9 @@ fetchKadunaData().then((kadunaData) => {
     }
   }
 }).catch((e) => console.warn("[realmap] fetch failed:", e.message));
+// CITY DENSITY: add the real-Kaduna OSM layer after the procedural world is
+// fully built. Fail-safe: if anything goes wrong the game continues unchanged.
+initOsmCity(world).then((s) => { if (s) console.log("[osmCity] city density ready"); });
 const ctl = createControls(canvas, camera, { joy: $("joy"), knob: $("knob") });
 const game = createGameState();
 const npcs = createNPCs(scene);

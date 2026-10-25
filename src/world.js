@@ -10,7 +10,7 @@ import { registerCullChunks } from "./scene_culling.js";
 const OL = (o) => stylize(new THREE.MeshLambertMaterial(o), { pat: false, ao: true, fake: false });
 const C = (hex) => new THREE.Color(hex);
 
-function windowTexture() {
+export function windowTexture() {
   const c = document.createElement("canvas");
   c.width = c.height = 128;
   const g = c.getContext("2d");
@@ -44,7 +44,7 @@ export function labelTexture(text, w = 512, h = 128, bg = "#0f4d3a", fg = "#ffff
   return t;
 }
 
-function withPat(g, code) {
+export function withPat(g, code) {
   const n = g.attributes.position.count, a = new Float32Array(n).fill(code);
   g.setAttribute("aPat", new THREE.BufferAttribute(a, 1));
   return g;
@@ -76,7 +76,7 @@ if (uNightGlow > 0.01) {
 }
 #endif
 `;
-function addWindowGlow(mat) {
+export function addWindowGlow(mat) {
   const prev = mat.onBeforeCompile, prevKey = mat.customProgramCacheKey;
   mat.onBeforeCompile = (shader, renderer) => {
     if (prev) prev(shader, renderer);
@@ -89,7 +89,7 @@ function addWindowGlow(mat) {
   return mat;
 }
 
-function windowBox(w, h, d, color, code = 0) {
+export function windowBox(w, h, d, color, code = 0) {
   const g = new THREE.BoxGeometry(w, h, d);
   const uv = g.attributes.uv, pos = g.attributes.position, nor = g.attributes.normal;
   for (let i = 0; i < uv.count; i++) {
@@ -104,7 +104,7 @@ function windowBox(w, h, d, color, code = 0) {
   return withPat(g, code);
 }
 
-function part(w, h, d, x, y, z, hex, code = 0) {
+export function part(w, h, d, x, y, z, hex, code = 0) {
   const g = new THREE.BoxGeometry(w, h, d);
   g.translate(x, y, z);
   const c = new THREE.Color(hex);
