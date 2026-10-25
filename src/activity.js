@@ -207,6 +207,25 @@ export function placeSpec(placeId, eid, handle, player, onDone) {
     if (eid === "write_exam") return { ...base, label: "Writing the exam...", icon: "📝", anim: "point", seconds: 8, face: player.heading, cancelOnMove: false };
     if (eid === "hostel_party") return { ...base, label: "Hostel block-o!...", icon: "🪩", anim: "dance", seconds: 8, face: player.heading, cancelOnMove: false };
   }
+  if (placeId === "university") {
+    // KADPOLY campus activities — real character animations so it feels alive
+    if (eid === "study_library") return { ...base, label: "Studying in the library...", icon: "📚", anim: "sitwatch", seconds: 8, props: ["stool"], face: player.heading, cancelOnMove: false };
+    if (eid === "bookshop") return { ...base, label: "Browsing textbooks...", icon: "📖", anim: "point", seconds: 4, face: player.heading };
+    if (eid === "play_basketball") return { ...base, label: "Playing basketball...", icon: "🏀", anim: "jump", seconds: 7, face: player.heading };
+    if (eid === "play_volleyball") return { ...base, label: "Playing volleyball...", icon: "🏐", anim: "jump", seconds: 7, face: player.heading };
+    if (eid === "sprint_race") return { ...base, label: "Sprinting the 100m dash...", icon: "🏃", anim: "jump", seconds: 5, face: player.heading };
+    if (eid === "workshop_practice") return { ...base, label: "Welding in the workshop...", icon: "🔧", anim: "point", seconds: 8, face: player.heading };
+    if (eid === "fix_engine") return { ...base, label: "Fixing the engine...", icon: "🛠️", anim: "point", seconds: 7, face: player.heading };
+    if (eid === "quiz_night") return { ...base, label: "Taking the quiz...", icon: "🧠", anim: "point", seconds: 4, face: player.heading, cancelOnMove: false };
+    if (eid === "karaoke") return { ...base, label: "Singing on stage...", icon: "🎤", anim: "dance", seconds: 8, face: player.heading };
+    if (eid === "talent_show") return { ...base, label: "Performing on stage...", icon: "🎭", anim: "dance", seconds: 8, face: player.heading };
+    if (eid === "debate_club") return { ...base, label: "Debating...", icon: "🗣️", anim: "point", seconds: 6, face: player.heading };
+    if (eid === "campus_party") return { ...base, label: "Party time!...", icon: "🎉", anim: "dance", seconds: 9, face: player.heading };
+    if (eid === "hangout") return { ...base, label: "Gisting under the neem tree...", icon: "🌳", anim: "sitwatch", seconds: 8, props: ["stool"], face: player.heading, cancelOnMove: false };
+    if (eid === "graduation") return { ...base, label: "Graduating! Confetti time!...", icon: "🎓", anim: "dance", seconds: 9, face: player.heading };
+    if (eid === "write_exam") return { ...base, label: "Writing the exam...", icon: "📝", anim: "point", seconds: 8, face: player.heading, cancelOnMove: false };
+    if (eid === "hostel_party") return { ...base, label: "Hostel block-o!...", icon: "🪩", anim: "dance", seconds: 8, face: player.heading, cancelOnMove: false };
+  }
   if (placeId === "zoo") {
     // Kaduna Zoo activities — walk to the enclosure, interact, watch the animals
     if (eid === "feed_lion") return { ...base, label: "Feeding Simba the lion...", icon: "🦁", anim: "point", seconds: 6, face: player.heading };

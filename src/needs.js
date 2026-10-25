@@ -75,6 +75,14 @@ export function createGameState() {
         myHouses: state.myHouses,
         investments: state.investments,
         housesScanned: state.housesScanned,
+        // FIX (Oct 25): persist campus milestone flags so the KADPOLY/KASU
+        // textbook bonus and graduation achievement survive a page refresh.
+        // (These were silently dropped by this whitelist before — the textbook
+        // bonus vanished every reload and graduation had to be re-paid.)
+        kadpolyTextbook: state.kadpolyTextbook,
+        kadpolyGraduate: state.kadpolyGraduate,
+        kasuTextbook: state.kasuTextbook,
+        kasuGraduate: state.kasuGraduate,
         // FIX: Also persist look.created so character creator logic works correctly
         // (but Firebase is still the source of truth — checked in main.js)
       }));
