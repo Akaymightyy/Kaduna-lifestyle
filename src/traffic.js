@@ -122,7 +122,12 @@ const TYPES = {
 const BODY_COLORS = [0xf2f2ee, 0x1f2a36, 0xb7bcc4, 0xa32b2b, 0x1d5fa8, 0x2e7d4f, 0xd98e2b, 0x6b4a8a, 0x8a8f96];
 
 // ---- FIX: Pedestrian-aware traffic — cars yield at zebra crossings ----
-let _pedestrianPos = { x: 0, z: 0 };
+// Oct 25: default is now FAR AWAY. It used to default to (0,0) — the exact
+// spot of the x=0 zebra crossing — and nothing ever called setPedestrianPos,
+// so a phantom pedestrian stood on that crossing forever and EVERY lane
+// queued up permanently 5m before it (cars frozen mid-road). main.js now
+// feeds the real player position every frame (on foot only).
+let _pedestrianPos = { x: 1e9, z: 1e9 };
 const CROSSING_YIELD_RANGE = 12;   // metres — car starts slowing within this of a crossing that has a ped
 const CROSSING_STOP_RANGE = 5;    // metres — car stops completely when ped is this close to crossing center
 const CROSSING_DETECT_WIDTH = 10;  // metres — ped must be within this Z of crossing center to trigger
@@ -224,6 +229,9 @@ export function createTraffic(scene, colliders = []) {
   }
   LANES.forEach((lane) => {
     const segs = _clearStretches(lane);
+    // Oct 25: kept the original round-robin spawn spread (it spaces cars inside
+    // every stretch correctly). The visible-shrink problem is fixed by the
+    // dive-under seam handling in update() below, not by reshuffling spawns.
     const n = 9;
     for (let i = 0; i < n; i++) {
       const seg = segs[i % segs.length];
@@ -374,12 +382,23 @@ export function createTraffic(scene, colliders = []) {
           if (x + 1.5 > col.minX && x - 1.5 < col.maxX && L.z + 3.2 > col.minZ && L.z - 3.2 < col.maxZ) { overlap = true; break; }
         }
       }
-      if (overlap) c.s -= adv;                              // frozen: undo this frame's advance
+      // Oct 25 FIX (cars shrinking mid-road): the old guard froze the car and
+      // scaled it to 0 inside lazily-built colliders, and the loop seam scaled
+      // cars to 0 within 3m of the stretch ends — with the denser city, cars
+      // squished to nothing in plain view everywhere. Now a car keeps its full
+      // size and DIVES UNDER the asphalt instead (eased, never pops), keeps
+      // driving through the blocked span while hidden, and re-emerges after.
+      // Followers still brake behind its published position, so traffic reads
+      // exactly the same.
+      const edge = Math.min(c.s, L.len - c.s);              // distance to the nearest loop seam
+      const wantSink = (overlap || edge < 2.4) ? 1 : 0;
+      if (c._sk == null) c._sk = wantSink;
+      c._sk += (wantSink - c._sk) * Math.min(1, dt * 7);    // ease the dive so nothing snaps
+      if (c._sk > 0.995) c._sk = 1; else if (c._sk < 0.005) c._sk = 0;
 
-      p.set(x, 0.02, L.z);
+      p.set(x, 0.02 - 2.7 * c._sk, L.z);
       q.setFromAxisAngle(up, L.dir > 0 ? 0 : Math.PI);
-      const ek = overlap ? 0 : Math.max(0, Math.min(1, Math.min(c.s, L.len - c.s) / 3));   // shrink away at the stretch ends
-      sc.setScalar(Math.max(0, ek));
+      sc.setScalar(1);
       m.compose(p, q, sc);
       mm.body.setMatrixAt(mm.i, m); mm.body.setColorAt(mm.i, c.color);
       mm.lights.setMatrixAt(mm.i, m); mm.lights.setColorAt(mm.i, white);

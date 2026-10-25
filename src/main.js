@@ -4392,6 +4392,12 @@ function _frame() {
   // Hide traffic when inside a place (fixes "cars inside buildings" bug)
   traffic.setVisible?.(!active);
   if (traffic.setPlayerVehicle) traffic.setPlayerVehicle(player.pos.x, player.pos.z, isRiding());
+  // Oct 25 FIX (cars frozen mid-road at the x=0 crossing): setPedestrianPos was never
+  // wired, so traffic.js's default pedestrian position (0,0) — the exact spot of the
+  // x=0 zebra crossing — made every lane queue there permanently. Feed the real
+  // player position while on foot; while driving, park it far away (the player's
+  // vehicle already makes traffic yield through setPlayerVehicle).
+  if (traffic.setPedestrianPos) { const _riding = isRiding(); traffic.setPedestrianPos(_riding ? 1e9 : player.pos.x, _riding ? 1e9 : player.pos.z); }
   setLifePlayerVehicle(player.pos.x, player.pos.z, isRiding());
   if (!active) traffic.update(now);
   if (!active) npcs.update(dt, now, player.pos.x, player.pos.z);

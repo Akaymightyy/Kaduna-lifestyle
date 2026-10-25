@@ -308,8 +308,20 @@ export function tickLife(px, pz, show = true) {
     for (const col of _nearbyColliders) {
       if (_p.x + 1.5 > col.minX && _p.x - 1.5 < col.maxX && _p.z + 3.2 > col.minZ && _p.z - 3.2 < col.maxZ) { overlap = true; break; }
     }
-    const lt = ((c.s % c.ln.len) + c.ln.len) % c.ln.len, ek = overlap ? 0 : Math.max(0, Math.min(1, Math.min(lt, c.ln.len - lt) / 3));
-    _s2.setScalar(ek);
+    // Oct 25 FIX (cars shrinking mid-road): cars used to scale to 0 at the
+    // stretch seams and inside lazily-built colliders — with the denser OSM
+    // city, seams landed everywhere mid-road and cars constantly squished to
+    // nothing in plain view. Now they keep full size and DIVE UNDER the
+    // asphalt instead (eased, never pops) and re-emerge after the seam or the
+    // blocked span. The shadow fades out with the same factor while hidden.
+    const lt = ((c.s % c.ln.len) + c.ln.len) % c.ln.len;
+    const wantSink = (overlap || lt < 2.4 || c.ln.len - lt < 2.4) ? 1 : 0;
+    if (c._sk == null) c._sk = wantSink;
+    c._sk += (wantSink - c._sk) * Math.min(1, dt * 7);
+    if (c._sk > 0.995) c._sk = 1; else if (c._sk < 0.005) c._sk = 0;
+    const ek = 1 - c._sk;
+    _p.y = -2.7 * c._sk;
+    _s2.setScalar(1);
     const yaw = Math.atan2(-(nx.z - _p.z), nx.x - _p.x);
     _q.setFromAxisAngle(_up, yaw); _m.compose(_p, _q, _s2); if (mesh === carMesh && c.t > 0) { carMesh.setMatrixAt(i, _Z); for (let k = 0; k < 3; k++) carX[k].setMatrixAt(i, k === c.t - 1 ? _m : _Z); } else mesh.setMatrixAt(i, _m); if (glbReady) { if (mesh === carMesh) { if (carG.length) carG[0].setMatrixAt(i, _m); } else if (busG) busG.setMatrixAt(i, _m); } BEAM.setMatrixAt(mesh === carMesh ? i : cars.length + i, _m);
     SH.set(mesh === carMesh ? i : cars.length + i, _p.x, _p.z, (mesh === carMesh ? 2.6 : 3.4) * ek, (mesh === carMesh ? 5.4 : 12) * ek, yaw + Math.PI / 2);
