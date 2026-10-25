@@ -96,6 +96,11 @@ export function createMinimap(canvas, shapes) {
         ctx.fillStyle = "#fff"; ctx.font = "bold 10px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("🏠", hx, hz);
       }
     }
+    // ---- blue direction line along the roads ----
+    if (window._route && window._route.length > 1) {
+      ctx.save(); ctx.strokeStyle = "#2f7bff"; ctx.lineWidth = 3.2 * S; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.globalAlpha = 0.92;
+      ctx.beginPath(); window._route.forEach((q, i) => { if (i === 0) ctx.moveTo(X(q.x), Z(q.z)); else ctx.lineTo(X(q.x), Z(q.z)); }); ctx.stroke(); ctx.restore();
+    }
     // ---- dropped pin (set on the phone Map app or by tapping this minimap) ----
     if (window._markedDest) {
       const md = window._markedDest; let mx = md.x, mz = md.z;

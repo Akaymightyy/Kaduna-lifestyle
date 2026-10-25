@@ -2,6 +2,7 @@
 // drag to pan, pinch / +- to zoom, name tags on every place and district, tap a tag to travel.
 // Nothing here changes game data. Closing the map puts the normal camera, fog and controls back.
 import * as THREE from "three";
+import { tickRoute } from "./route.js";
 
 let S = null;                       // services from main.js
 let on = false;
@@ -204,6 +205,7 @@ export function liveMapFrame(dt) {
   c.position.set(st.x, st.dist * Math.sin(PITCH), st.z + st.dist * Math.cos(PITCH));
   c.lookAt(st.x, 0, st.z);
   c.updateMatrixWorld();
+  tickRoute(S.player.pos, dt);
   S.tickWorld(st.x, st.z, Math.min(560, st.dist * 1.7 + 120));      // keep districts / houses streamed in around the view
   const w = innerWidth, h = innerHeight;
   if (pinEl && window._markedDest) {

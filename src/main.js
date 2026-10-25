@@ -22,6 +22,7 @@ import { openCreator } from "./creator.js";
 import { mountPreview, setPreviewLook } from "./charpreview.js";
 import { outfitsFor, BUILDS, SHOP, SLOT_KEYS } from "./outfits.js";
 import { tickContext, showContext, isContextShown, hideContext } from "./contextmenu.js";
+import { initRoute, tickRoute } from "./route.js";
 import { peekWorld, initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, getActivePlace, enterPlace, enterPlaceAsVisitor, exitPlace, sendUIEvent } from "./places/manager.js";
 import { listPlaces, getPlace, updateHomeEntrance } from "./places/registry.js";
 import { initMissions, getActiveMission, getAllChapters, getDailyMissions, getWeeklyMissions, checkStep, createMissionState, claimDailyReward, claimWeeklyReward, setCelebrateCallback } from "./missions.js";
@@ -564,6 +565,7 @@ world.world.add(buildStreetDetail(scene, world.colliders));
 const _pShadow = makeBlobShadows(scene, 1);
 addScenery(scene, world);
 initLife(scene, world.colliders);
+initRoute(scene);
 initActivity(scene);
 const traffic = createTraffic(scene, world.colliders);  // Oct 23: pass colliders so cars don't drive through houses
 // TODO #5 (Oct 24): junction give-way — main-street traffic and the avenue
@@ -1103,6 +1105,8 @@ function _showPhoneApp(appId) {
     svg += '<circle cx="'+pmx+'" cy="'+pmz+'" r="3.5" fill="#ff6a3d" stroke="#fff" stroke-width="1.5"/>';
     // "YOU" label
     svg += '<text x="'+pmx+'" y="'+(pmz+10)+'" text-anchor="middle" font-size="5" font-weight="700" fill="#fff" style="paint-order:stroke;stroke:#000;stroke-width:1.5;">YOU</text>';
+    // blue direction line along the roads to the pin
+    if (window._route && window._route.length > 1) svg += '<polyline points="' + window._route.map((q) => toMapX(q.x).toFixed(1) + ',' + toMapZ(q.z).toFixed(1)).join(' ') + '" fill="none" stroke="#2f7bff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>';
     // dropped pin (MAP MARK)
     if (window._markedDest) { const md = window._markedDest, kx = toMapX(md.x), kz = toMapZ(md.z);
       svg += '<circle cx="'+kx+'" cy="'+kz+'" r="7" fill="#e11d48" opacity="0.28"><animate attributeName="r" values="5;10;5" dur="1.4s" repeatCount="indefinite"/></circle>';
@@ -3088,6 +3092,10 @@ window._clearMarkedDest = () => {
 };
 window.bookRide=(rideId)=>{
   const destId=window._rideDest||"";
+  // inside a building? step out first (else the ride moves you but you stay in the room), then book again
+  if (getActivePlace() && (destId === "mark:custom" || destId.startsWith("area:") || destId.startsWith("house:"))) {
+    closePhone(); exitPlace(player).then(() => window.bookRide(rideId)).catch(() => {}); return;
+  }
   if(!destId){toast("Pick a destination first");return;}
   const fareMap={walk:0,keke:300,bus:200,okada:500,taxi:1500};
   const fare=fareMap[rideId] ?? 0;
@@ -4544,6 +4552,7 @@ function _frame() {
   setMyPlace(active ? (active.id === "home" ? "home:" + (placeCtx.visitingHouse?.ownerUid || getMyUid() || "me") : active.id) : "");
   sendPosition(player.pos.x, player.pos.z, player.heading);
   setMyPosition(player.pos.x, player.pos.z);
+  tickRoute(player.pos, dt, toast);
   mmT += dt; if (mmT > 0.1) { mmT = 0; mmDraw(player.pos.x, player.pos.z, ctl.yaw, player.heading, traffic.positions); }
   // FIX (Oct 24 — TODO #4): the ?perf=1 overlay only ever ticked on the
   // live-map path — in normal gameplay perfAfterRender was never called, so
