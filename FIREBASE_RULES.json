@@ -26,24 +26,32 @@
         ".write": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
         "balance": {
           ".read": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
-          ".write": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'"
+          ".write": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 999999999"
         },
         "log": {
           ".read": "auth.uid === $uid",
           "$eventId": {
-            ".write": "auth.uid === $uid"
+            ".write": "auth.uid === $uid",
+            ".validate": "newData.child('amount').isNumber() && (!newData.child('reason').exists() || (newData.child('reason').isString() && newData.child('reason').val().length <= 140)) && newData.child('ts').isNumber()"
           }
         }
       }
     },
     "chat": {
       ".read": "auth != null",
-      ".write": "auth != null"
+      ".write": "auth != null",
+      "$msgId": {
+        ".validate": "newData.child('uid').isString() && newData.child('name').isString() && newData.child('name').val().length <= 30 && newData.child('text').isString() && newData.child('text').val().length > 0 && newData.child('text').val().length <= 400 && newData.child('ts').isNumber()"
+      }
     },
     "dms": {
       "$chatId": {
         ".read": "auth != null",
-        ".write": "auth != null"
+        ".write": "auth != null",
+        "$msgId": {
+          ".validate": "newData.child('from').isString() && newData.child('to').isString() && newData.child('text').isString() && newData.child('text').val().length > 0 && newData.child('text').val().length <= 500 && newData.child('ts').isNumber()"
+        }
       }
     },
     "announcements": {
@@ -156,7 +164,8 @@
       ".read": "auth != null",
       "$msgId": {
         ".read": "auth != null",
-        ".write": "auth != null && (!data.exists() || data.child('uid').val() === auth.uid)"
+        ".write": "auth != null && (!data.exists() || data.child('uid').val() === auth.uid)",
+        ".validate": "newData.child('uid').isString() && newData.child('name').isString() && newData.child('text').isString() && newData.child('text').val().length > 0 && newData.child('text').val().length <= 400 && newData.child('ts').isNumber()"
       }
     },
     "chats": {
@@ -222,21 +231,24 @@
       "$room": {
         ".read": "auth != null",
         "$msg": {
-          ".write": "auth != null && newData.child('uid').val() === auth.uid"
+          ".write": "auth != null && newData.child('uid').val() === auth.uid",
+          ".validate": "newData.child('uid').isString() && newData.child('name').isString() && newData.child('name').val().length <= 30 && newData.child('text').isString() && newData.child('text').val().length > 0 && newData.child('text').val().length <= 400 && newData.child('ts').isNumber()"
         }
       }
     },
     "sprays": {
       ".read": "auth != null",
       "$id": {
-        ".write": "auth != null && !data.exists() && newData.child('fromUid').val() === auth.uid"
+        ".write": "auth != null && !data.exists() && newData.child('fromUid').val() === auth.uid",
+        ".validate": "newData.hasChildren(['fromUid', 'fromName', 'amount', 'ts']) && newData.child('fromUid').val() === auth.uid && newData.child('fromName').isString() && newData.child('fromName').val().length > 0 && newData.child('fromName').val().length <= 32 && (!newData.child('toUid').exists() || (newData.child('toUid').isString() && newData.child('toUid').val() !== auth.uid)) && (!newData.child('toName').exists() || (newData.child('toName').isString() && newData.child('toName').val().length <= 32)) && newData.child('amount').isNumber() && newData.child('amount').val() === Math.floor(newData.child('amount').val()) && newData.child('amount').val() > 0 && newData.child('amount').val() <= 5000000 && (!newData.child('notes').exists() || (newData.child('notes').isNumber() && newData.child('notes').val() > 0 && newData.child('notes').val() <= 200)) && (!newData.child('room').exists() || (newData.child('room').isString() && newData.child('room').val().length <= 64)) && (!newData.child('odogwu').exists() || newData.child('odogwu').isBoolean()) && newData.child('ts').isNumber() && (root.child('economy/' + auth.uid + '/balance').val() || 0) >= newData.child('amount').val()"
       }
     },
     "invites": {
       "$uid": {
         ".read": "auth.uid === $uid",
         "$id": {
-          ".write": "auth != null"
+          ".write": "auth != null && !data.exists() && newData.child('fromUid').val() === auth.uid",
+          ".validate": "newData.child('fromUid').isString() && newData.child('fromUid').val() === auth.uid && newData.child('fromName').isString() && newData.child('fromName').val().length <= 32 && newData.child('areaId').isString() && newData.child('plotNo').isNumber() && newData.child('ownerName').isString() && newData.child('ownerName').val().length <= 32 && newData.child('ts').isNumber()"
         }
       }
     }
