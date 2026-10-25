@@ -140,6 +140,9 @@ const DIALOGUE = {
   "tour guide": ["Tour na ₦700 — you go see everything!", "Stay on the path, wetin dey cage no dey smile.", "Zoo open 9am to 6pm daily!"],
   "vet": ["All our animals dey healthy.", "Simba just finish check-up — e dey strong.", "Wildlife conservation matters, my friend."],
   "zoo vendor": ["Popcorn! Fresh popcorn! ₦300!", "Cold zobo and cookies dey too!", "No near the monkey cage with food oo!"],
+  "rector": ["Welcome to Kaduna Polytechnic — the home of technology.", "Skill acquisition na the real deal. Learn handwork!", "Our workshop dey produce the best engineers.", "Aim for distinction in your ND!"],
+  "workshop instructor": ["Safety first — wear your overall!", "Today na welding practical. No play!", "Measure twice, cut once!", "Your project must pass standard oo."],
+  "mechanic": ["Bring am make I check the engine.", "Okada, keke, motor — I fit fix anything!", "You sabi turn spanner? Come learn!"],
   "carnival MC": ["Kaduna Carnival! Make some noise!", "Dance-Off winner go chop ₦4,000!", "One more time for the drummers!"],
   "drummer": ["Feel the beat — gbam gbam gbam!", "Gangan no dey lie. Follow the rhythm.", "Come learn the talking drum!"],
   "face painter": ["You want lion face or butterfly?", "₦400 — you go fine well well!", "Carnival no complete without face paint!"],
@@ -190,6 +193,16 @@ const NAMED = {
   "Baba Ola": ["Feel the gangan rhythm!", "Drum circle starts now — join us!", "The talking drum speaks your name."],
   "Ngozi": ["Lion face or butterfly — ₦400!", "You go shine for the parade!", "Face painting — carnival special!"],
   "Eddy": ["Ring toss — ₦300 to play!", "Balloon darts! Win ₦1,200!", "Try your luck, my friend!"],
+  "Engr. Dr. Bala": ["Welcome to KADPOLY — home of technology.", "Skill + certificate = success, my dear.", "The workshop is your second classroom.", "Kadpoly students dey rule the tech world!"],
+  "Mrs. Okolo": ["Exam hall dey quiet — enter softly.", "Read your textbook, e go save you!", "No cheating — eyes right!"],
+  "Mallam Shehu": ["Textbook ₦600 — Quiz Night go pay you back!", "Engineering drawing set dey available!", "Past questions dey for every course!"],
+  "Mr. Sani": ["KADPOLY Quiz Night starts now! ₦500 per correct answer!", "Five questions — no googling oo!", "Textbook owners dey win ×1.5 here!"],
+  "DJ Bash": ["KADPOLY Arena, make some noise!", "This track na for my poly people!", "Party no go finish tonight!"],
+  "Chief Audi": ["Graduation fee ₦5,000 — come celebrate!", "Your ND/HND certificate dey ready!", "The Rector go shake your hand today!"],
+  "Bilkisu": ["Block-o tonight at Block C hostel!", "₦800 only — come with your crew!", "KADPOLY block-o no dey disappoint!"],
+  "Engr. Nuhu": ["Wear your safety boots before you enter!", "Welding practical today — clean joints na ₦900!", "Engineers no dey fear work!"],
+  "Uche": ["Your engine sabi knock o! Bring am come.", "I go teach you how to turn spanner.", "Fix engine, chop money!"],
+  "Coach Tunde": ["Sprint! Faster! You fit do am!", "The field dey free — come play ball!", "Train hard, play hard!"],
 };
 export function getDialogue(role, name) { const l = DIALOGUE[role] || DIALOGUE._generic; return l[Math.floor(Math.random() * l.length)]; }
 export function getNamedDialogue(name) { const l = NAMED[name]; return l ? l[Math.floor(Math.random() * l.length)] : null; }
