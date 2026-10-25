@@ -70,13 +70,17 @@ export const PLACE_ZONE_PADS = {
   arena: [18, 14], kasu: [26, 14], zoo: [26, 12], carnival: [28, 16],
 };
 export function addPlaceEntranceZones(listPlacesFn) {
+  // Oct 25: idempotent — both osmCity.js and cityFill.js call this, and
+  // double-registering the zones would only waste query time.
+  if (addPlaceEntranceZones._done) return;
+  addPlaceEntranceZones._done = true;
   try {
     for (const def of listPlacesFn()) {
       if (def.entranceX == null || def.entranceZ == null) continue;
       const pad = PLACE_ZONE_PADS[def.id] || [18, 14];
       addZone(def.entranceX - pad[0], def.entranceZ - pad[1], def.entranceX + pad[0], def.entranceZ + pad[1], "place_" + def.id);
     }
-  } catch (e) { console.warn("[protectedZones] place zones skipped:", e && e.message); }
+  } catch (e) { addPlaceEntranceZones._done = false; console.warn("[protectedZones] place zones skipped:", e && e.message); }
 }
 
 // ---- 5. District plot grids (areas_world.js builds houses + roads + landmark there) ----
