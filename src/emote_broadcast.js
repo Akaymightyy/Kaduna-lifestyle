@@ -37,6 +37,11 @@ export const EMOTES = {
   shrug:   { emoji: "🤷", name: "Shrug",   dur: 2 },
   thumbsup:{ emoji: "👍", name: "Thumbs Up", dur: 2 },
   peace:   { emoji: "✌️", name: "Peace",   dur: 2 },
+  // HOUSE PARTY set (Oct 25): real pose animations played on remote avatars
+  spray:   { emoji: "🤑", name: "Spray Money", dur: 3 },
+  talk:    { emoji: "💬", name: "Socialise",   dur: 4 },
+  together:{ emoji: "🕺", name: "Together",    dur: 6 },
+  bell:    { emoji: "🔔", name: "Ring Bell",   dur: 2 },
 };
 
 // Send an emote — writes to live/{uid} so all subscribed clients see it

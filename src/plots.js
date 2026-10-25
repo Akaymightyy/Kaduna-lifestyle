@@ -247,8 +247,10 @@ export function tickPlotDoors(playerX, playerZ) {
     if (lp.plotId !== plotId) {
       // Redraw the label
       const isMyHouse = p.house.ownerUid === _myUid;
-      const label = isMyHouse ? "🏠 My Home" : ("🏠 " + (p.house.ownerName || "Owner"));
-      _drawLabel(lp.canvas, lp.ctx, label, isMyHouse ? "#4ade80" : "#f2b134");
+      // HOUSE PARTY (Oct 25): a live party shows on the door sign 🎉
+      const partyLive = p.house.party && p.house.party.name && (!p.house.party.until || Date.now() < p.house.party.until);
+      const label = (isMyHouse ? "🏠 My Home" : ("🏠 " + (p.house.ownerName || "Owner"))) + (partyLive ? "  " + (p.house.party.emoji || "🎉") + " " + p.house.party.name : "");
+      _drawLabel(lp.canvas, lp.ctx, label, isMyHouse ? "#4ade80" : (partyLive ? "#f2b134" : "#f2b134"));
       lp.texture.needsUpdate = true;
       lp.plotId = plotId;
       lp.areaId = p.areaId;
@@ -269,23 +271,22 @@ export function tickPlotDoors(playerX, playerZ) {
   _nearestFriendPlot = nearest;
 
   // 6. Notify main.js about the prompt update
-  _simInfo = nearest ? {
-      areaId: nearest.areaId,
-      plotNo: nearest.plotNo,
-      ownerUid: nearest.house.ownerUid,
-      ownerName: nearest.house.ownerName || "Friend",
-      locked: nearest.house.locked,
-      dist: nearest.dist,
+  // HOUSE PARTY (Oct 25): also pass the access mode + live party so the
+  // prompt can say "Enter" (public / friends), "knock" (invite-only) and
+  // show the party banner on the door.
+  const _mkInfo = (p) => p ? {
+      areaId: p.areaId,
+      plotNo: p.plotNo,
+      ownerUid: p.house.ownerUid,
+      ownerName: p.house.ownerName || "Friend",
+      locked: p.house.locked,
+      access: p.house.access || (p.house.locked ? "invite" : "public"),
+      party: (p.house.party && p.house.party.name && (!p.house.party.until || Date.now() < p.house.party.until)) ? p.house.party : null,
+      dist: p.dist,
     } : null;
+  _simInfo = _mkInfo(nearest);
   if (_onPromptUpdate) {
-    _onPromptUpdate(nearest ? {
-      areaId: nearest.areaId,
-      plotNo: nearest.plotNo,
-      ownerUid: nearest.house.ownerUid,
-      ownerName: nearest.house.ownerName || "Friend",
-      locked: nearest.house.locked,
-      dist: nearest.dist,
-    } : null);
+    _onPromptUpdate(_mkInfo(nearest));
   }
 }
 
@@ -363,11 +364,18 @@ export function listenForKnockReplyNow(onReply) {
   });
 }
 
-// ---- Enter directly if the friend's house is unlocked ----
+// ---- Enter directly if the friend's house is open to me ----
+// HOUSE PARTY access modes (Oct 25):
+//   public  → always walk in
+//   friends → walk in (main.js double-checks friendship before calling)
+//   invite  → knock
+// Legacy houses without `access` keep the old `locked` behaviour.
 // Returns the house info needed for enterPlaceAsVisitor, or null.
 export function getUnlockedVisitInfo() {
   if (!_nearestFriendPlot) return null;
-  if (_nearestFriendPlot.house.locked) return null;
+  const h = _nearestFriendPlot.house;
+  const access = h.access || (h.locked ? "invite" : "public");
+  if (access === "invite") return null;
   return {
     ownerUid: _nearestFriendPlot.house.ownerUid,
     ownerName: _nearestFriendPlot.house.ownerName || "Friend",

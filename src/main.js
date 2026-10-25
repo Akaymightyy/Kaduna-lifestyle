@@ -11,7 +11,7 @@ import { createGameState } from "./needs.js";
 import { auth, db } from "./firebase.js";
 import { initAuth, showAuthModal, wireAuthUI, logout, isAuthed } from "./auth.js";
 import { driveStep } from "./drive.js";
-import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition, getRemotePlayers, setMyPlace, setMyLook, setBlockedUids, setMyRiding, setMyPassengerOf, getPassengerUids, getRemotePlayerData } from "./multiplayer.js";
+import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition, getRemotePlayers, setMyPlace, setMyLook, setBlockedUids, setMyRiding, setMyPassengerOf, getPassengerUids, getRemotePlayerData, getMyPlace, getPlayersInRoom } from "./multiplayer.js";
 import { startRide, travelToZone, travelToPlace, getDestinations } from "./travel.js";
 import { subscribeRichList } from "./economy.js";
 import { createNPCs } from "./npcs.js";
@@ -53,7 +53,7 @@ import { initLiveMap, openLiveMap, closeLiveMap, isLiveMapOn, liveMapFrame } fro
 import { perfFrameStart, perfBeforeRender, perfAfterRender } from "./perf.js";
 import { initGraphics, updateSky, nightAmount, tickGraphics, tickShadows, applyQuality, autoDetectQuality, getQuality, QUALITY_PRESETS } from "./graphics.js";
 import { AREAS, getArea, claimPlot, getMyHouse, canPickArea, getPlotPosition } from "./areas.js";
-import { resolvePlayerHouseKey, loadHouse, setHouseLocked, listenForKnocks, respondToKnock } from "./houses.js";
+import { resolvePlayerHouseKey, loadHouse, setHouseLocked, listenForKnocks, respondToKnock, knockOnDoor, listenForKnockReply } from "./houses.js";
 import {
   initPlotDoors,
   tickPlotDoors,
@@ -78,6 +78,22 @@ import { initBillboards, getBillboards, getBillboardPositions, getBillboardAdInf
 import { initEmoteBroadcast, sendEmote, clearEmote, EMOTES } from "./emote_broadcast.js";
 import { initMessages, searchUsers, openDM, sendMessage, sendHouseInvite, openChat, closeChat, getChatList, sendMoney, createGroup, leaveGroup, blockUser, reportUser, getChatMeta, cleanupMessages, getPresence, listenToPresence, getProfile } from "./messages.js";
 import { initEvents, tickNepa, isNepaCut, getNepaStatus, hasPowerBackup, getModifiedDrain, tickMoodlets, addMoodlet, getActiveMoodlets, getConsequences, getWalkSpeedMultiplier, MOODLET_DEFS } from "./events.js";
+// ================= HOUSE PARTY SYSTEM (Oct 25) ==================
+// Lagos-Life style social layer: player houses people can visit, live guest
+// count + "They're home" banner, FULL money spraying with 5 stack sizes +
+// Odogwu rain, house group chat, social action buttons (Ring Bell / Together /
+// Dance / Socialise / Spray), access modes (Public / Friends / Invite-only),
+// party banners (Wedding / All-White Party) and invites — all additive on top
+// of the existing houses/home/place systems (nothing rewritten).
+import { initSpray, openSprayUI, closeSprayUI, tickSprayNotes } from "./social/spray.js";
+import {
+  initHouseParty, enterHousePresence, leaveHousePresence, showHouseBanner, hideHouseBanner,
+  showLeaveButton, hideLeaveButton, guestCapForTier, openHouseSettings, partyActive,
+  doTogether, doSocialise, doDance, doSit, doRingBell, sendHouseInvite as sendDoorInvite,
+  armInvites, loadHouseMeta,
+} from "./social/house_party.js";
+import { initHouseChat, setHouseChatRoom, openHouseChat, closeHouseChat, toggleHouseChat, pingHouseChat } from "./social/house_chat.js";
+import { emotePeopleNearby } from "./places/people.js";
 import { SKILLS, CAREERS, SHIFT_TONES, initCareers, getSkills, getCareer, getCareerDef, canJoinCareer, canPromote, joinCareer, promote, doShift, trainSkill } from "./careers.js";
 import { WISH_POOL, PERKS, initWishes, getTodaysWishes, getWishPoints, getPerks, hasPerk, checkWishes, buyPerk } from "./wishes.js";
 import { POLICIES, initElection, getElection, getWeekKey, isCandidate, hasVoted, registerCandidate, vote, tallyVotes, getActivePolicy, applyPolicy } from "./election.js";
@@ -754,6 +770,8 @@ const placeCtx = {
     if (subEl) subEl.textContent = def ? (def.type === "interior" ? "Inside" : "At") : "Kaduna";
     // Show/hide place actions bar
     _renderPlaceActions(def);
+    // HOUSE PARTY (Oct 25): banner + presence + guest count + house chat room
+    _onPlaceChangedHouse(def);
   },
 };
 initPlaceManager({ scene, worldGroup: world.world, ctx: placeCtx });
@@ -826,6 +844,9 @@ window.placeAction = (eventId) => {
     enterPhotoMode();
     return;
   }
+  // HOUSE SOCIAL (Oct 25): Spray / Dance / Together / Socialise / Ring Bell /
+  // house chat / house settings / invites — routed to the house party layer.
+  if (_houseSocialAction(eventId)) return;
   const ap = getActivePlace();
   const spec = ap && rig ? placeSpec(ap.id, eventId, ap.handle, player, (ok) => { if (ok) sendUIEvent(eventId, {}); }) : null;
   if (!spec) { sendUIEvent(eventId, {}); return; }
@@ -2899,8 +2920,8 @@ window._emote = (type, duration = 3) => {
   if (isBusy()) cancelActivity();
   if (type === "sit") { startActivity(sitSpec(player, null, 25), player, rig); toast("🪑 You sat down on a stool (move to stand up)"); return; }
   rig.animate.emote(type, duration);
-  const labels = { wave: "waved", dance: "is dancing", sit: "sat down", clap: "is clapping", jump: "jumped", squat: "squatted", point: "is pointing", laugh: "is laughing", pray: "is praying" };
-  const icons = { wave: "👋", dance: "💃", sit: "🪑", clap: "👏", jump: "🦘", squat: "🏋️", point: "👆", laugh: "😂", pray: "🙏" };
+  const labels = { wave: "waved", dance: "is dancing", sit: "sat down", clap: "is clapping", jump: "jumped", squat: "squatted", point: "is pointing", laugh: "is laughing", pray: "is praying", spray: "is spraying money 💸", talk: "is socialising", together: "started a group dance!", bell: "rang the bell 🔔" };
+  const icons = { wave: "👋", dance: "💃", sit: "🪑", clap: "👏", jump: "🦘", squat: "🏋️", point: "👆", laugh: "😂", pray: "🙏", spray: "🤑", talk: "💬", together: "🕺", bell: "🔔" };
   toast(icons[type] + " " + (getMyName() || "You") + " " + (labels[type] || type) + "!");
   // Send position update so other players see the emote state
   sendPosition(player.pos.x, player.pos.z, player.heading);
@@ -3481,7 +3502,15 @@ initAuth((user) => {
   // live/{uid} = { emote, emoteDur, emoteTs }. Remote avatars render the
   // emote emoji above their name tag (handled in multiplayer.js _updateEmoteSprite).
   initEmoteBroadcast({ db, getUserId: () => getMyUid() });
-  window._emote = (type) => sendEmote(type);
+  // HOUSE PARTY FIX (Oct 25): the emote FAB must BOTH play the local bone
+  // animation (window._emote defined above handles that) AND broadcast to
+  // live/{uid} (sendEmote). The old line here REPLACED _emote with sendEmote,
+  // which silently killed local animations for every FAB emote. Now merged.
+  const _localEmote = window._emote;
+  window._emote = (type, duration = 3) => {
+    if (typeof _localEmote === "function") { try { _localEmote(type, duration); } catch (e) {} }
+    sendEmote(type);
+  };
   window._clearEmote = () => clearEmote();
   // BILLBOARD REPORT (Oct 21): lets players report inappropriate billboard
   // ads. Writes to billboardReports/{reportId} for admin review.
@@ -3509,6 +3538,41 @@ initAuth((user) => {
   });
   setMyLook(game.state.look);
   initWorldChat(user.uid, user.displayName || user.email?.split("@")[0] || "Player");
+  // ================= HOUSE PARTY SYSTEM (Oct 25) ==================
+  // House group chat (Message button) + social layer + money spraying.
+  initHouseChat(user.uid, user.displayName || user.email?.split("@")[0] || "Player");
+  initHouseParty({
+    getUid: getMyUid,
+    getName: getMyName,
+    toast,
+    updateHUD: () => updateHUD(),
+    gameState: game.state,
+    isFriend: (uid) => !!getFriends()[uid],
+  });
+  initSpray({
+    getUid: getMyUid,
+    getName: getMyName,
+    getRoom: () => getMyPlace(),
+    getBalance: () => game.state.money,
+    spendLocal: (amt) => {
+      if (game.state.money < amt) return false;
+      game.state.money -= amt; game.save?.();
+      const u = getMyUid(); if (u) update(ref(db, "economy/" + u), { balance: game.state.money });
+      return true;
+    },
+    toast,
+    updateHUD: () => updateHUD(),
+    gameState: game.state,
+    getPeopleInRoom: getPlayersInRoom,
+    scene,
+    getPlayerPos: () => ({ x: player.pos.x, z: player.pos.z }),
+    getRemotePlayerPos: (uid) => { const m = getRemotePlayers()[uid]; return m && m.group ? { x: m.group.position.x, z: m.group.position.z } : null; },
+  });
+  armInvites(user.uid, (inv) => _goToInvitedHouse(inv));
+  window.__kadunaExitPlace = () => exitPlace({ pos: player.pos, heading: player.heading });
+  window.__houseChatPing = pingHouseChat;
+  // The crew dances/gists with you (place NPCs within radius)
+  window._npcCrowdEmote = (type, dur, radius) => emotePeopleNearby(player.pos.x, player.pos.z, type, dur, radius || 12);
   initMultiplayer(scene, (count) => {
     setChatOnline(count);
     const el=$("online-count"); if(el) el.textContent=count+" here";
@@ -3604,6 +3668,7 @@ initAuth((user) => {
       { svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 4v10a3 3 0 0 0 6 0V4M6 4h12"/></svg>', label: "Squat", type: "squat", dur: 4 },
       { svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v8M8 6l4-4 4 4M5 14a7 7 0 0 0 14 0v8"/></svg>', label: "Point", type: "point", dur: 3 },
       { svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg>', label: "Laugh", type: "laugh", dur: 3 },
+      { svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 9l8 6M16 9l-8 6"/></svg>', label: "Spray Money", spray: true },
     ];
     for (const e of emotes) {
       const b = document.createElement("button");
@@ -3611,7 +3676,9 @@ initAuth((user) => {
       b.title = e.label;
       b.innerHTML = e.svg;
       b.addEventListener("click", () => {
-        window._emote(e.type, e.dur);
+        // HOUSE PARTY (Oct 25): the Spray button opens the full money-spray UI
+        if (e.spray) { try { openSprayUI(); } catch (err) {} }
+        else window._emote(e.type, e.dur);
         panel.style.display = "none";
       });
       panel.appendChild(b);
@@ -3819,7 +3886,11 @@ function _onPlotPromptUpdate(info) {
   _currentPlotInfo = info;
   if (!info) { _plotPromptKey = ""; if (_plotPromptEl) _plotPromptEl.style.display = "none"; return; }
   // Called every frame: only touch the DOM when something actually changed (was rewriting innerHTML 60x/second)
-  const key = info.areaId + "/" + info.plotNo + "/" + (info.locked ? 1 : 0) + "/" + info.ownerName;
+  // HOUSE PARTY (Oct 25): access modes — public/friends walk in, invite knocks.
+  const access = info.access || (info.locked ? "invite" : "public");
+  const _friend = !!(getFriends()[info.ownerUid]);
+  const canWalkIn = access === "public" || (access === "friends" && _friend);
+  const key = info.areaId + "/" + info.plotNo + "/" + (canWalkIn ? 1 : 0) + "/" + info.ownerName + "/" + (info.party ? info.party.id : "");
   if (key === _plotPromptKey && _plotPromptEl && _plotPromptEl.style.display === "block") return;
   _plotPromptKey = key;
   if (!_plotPromptEl) {
@@ -3834,10 +3905,13 @@ function _onPlotPromptUpdate(info) {
     document.body.appendChild(_plotPromptEl);
     _plotPromptEl.addEventListener("click", () => _onPlotPromptTap());
   }
-  if (info.locked) {
-    _plotPromptEl.innerHTML = '🏠 <b style="color:#f2b134;">' + info.ownerName + '</b>\'s Home<br><span style="color:#4ade80;font-weight:600;">Press here to knock</span>';
+  const _partyTag = info.party ? ' <span style="color:#f2b134;">' + (info.party.emoji || "🎉") + " " + info.party.name + "</span>" : "";
+  if (canWalkIn) {
+    _plotPromptEl.innerHTML = '🚪 Enter <b style="color:#f2b134;">' + info.ownerName + '</b>\'s Home' + _partyTag + ' &nbsp;<span style="color:#4ade80;font-weight:600;">Press here 🟢</span>';
+  } else if (access === "friends") {
+    _plotPromptEl.innerHTML = '🏠 <b style="color:#f2b134;">' + info.ownerName + '</b>\'s Home' + _partyTag + '<br><span style="color:#4ade80;font-weight:600;">Friends only — press here to knock</span>';
   } else {
-    _plotPromptEl.innerHTML = '🚪 Enter <b style="color:#f2b134;">' + info.ownerName + '</b>\'s Home &nbsp;<span style="color:#4ade80;font-weight:600;">Press here 🟢</span>';
+    _plotPromptEl.innerHTML = '🏠 <b style="color:#f2b134;">' + info.ownerName + '</b>\'s Home' + _partyTag + '<br><span style="color:#4ade80;font-weight:600;">Press here to knock</span>';
   }
   _plotPromptEl.style.display = "block";
 }
@@ -3851,7 +3925,9 @@ setInterval(() => {
 function _onPlotPromptTap() {
   if (!_currentPlotInfo) return;
   const info = _currentPlotInfo;
-  if (info.locked) {
+  const access = info.access || (info.locked ? "invite" : "public");
+  const canWalkIn = access === "public" || (access === "friends" && !!getFriends()[info.ownerUid]);
+  if (!canWalkIn) {
     // Knock flow
     const myName = getMyName() || "Visitor";
     knockOnNearest(myName).then((ok) => {
@@ -3948,6 +4024,137 @@ function _updateHomeMinimapMarker(x, z) {
   // The minimap draws markers from MAP_LOCATIONS. We add/update a "My Home" marker.
   // This is a lightweight approach — just store it on window for the minimap to pick up.
   window._myHomePos = { x, z };
+}
+
+// ================= HOUSE PARTY LAYER (Oct 25) =================
+// Resolves the CURRENT house whenever a place becomes active and drives the
+// banner (guest count + "They're home" + party name), presence heartbeat,
+// house chat room and house-settings state. Fully additive — the existing
+// place pipeline is untouched.
+let _houseUi = null;   // { areaId, plotNo, ownerUid, ownerName, isOwner, access, party }
+const PARTY_VENUES = ["nightclub", "carnival", "arena", "kasu", "stadium", "river_park", "kawo_park", "zoo"];
+function _onPlaceChangedHouse(def) {
+  if (!def) {
+    _houseUi = null;
+    leaveHousePresence(); hideHouseBanner(); hideLeaveButton(); closeHouseChat();
+    setHouseChatRoom(null);
+    return;
+  }
+  showLeaveButton();
+  if (def.id !== "home") {
+    _houseUi = null;
+    leaveHousePresence(); hideHouseBanner();
+    // Party venues get a room chat too (club chatter 🎉)
+    setHouseChatRoom(PARTY_VENUES.includes(def.id) ? def.id : null);
+    return;
+  }
+  const vis = placeCtx.visitingHouse || null;
+  const door = window.__homeDoorHouse || null;
+  const areaId = (vis && vis.areaId) || (door && door.areaId) || game.state.homeArea;
+  const plotNo = (vis && vis.plotNo != null) ? vis.plotNo : ((door && door.plotNo != null) ? door.plotNo : game.state.homePlot);
+  if (areaId == null || plotNo == null) { hideHouseBanner(); return; }
+  const myUid = getMyUid();
+  const isOwner = !vis;
+  loadHouseMeta(areaId, plotNo).then((meta) => {
+    meta = meta || {};
+    const ownerUid = isOwner ? myUid : vis.ownerUid;
+    const ownerName = isOwner ? (getMyName() || "You") : (vis.ownerName || meta.ownerName || "Friend");
+    const party = partyActive(meta.party) ? meta.party : null;
+    _houseUi = { areaId, plotNo, ownerUid, ownerName, isOwner, access: meta.access || (meta.locked ? "invite" : "public"), party };
+    showHouseBanner({
+      title: isOwner ? "🏠 Your Home" : "🏠 " + ownerName + "'s Home",
+      cap: guestCapForTier(meta.tier || game.state.homeTier || 2),
+      party,
+      isOwner,
+    });
+    enterHousePresence({ areaId, plotNo, ownerUid, ownerName, isOwner });
+    setHouseChatRoom(areaId + "_" + plotNo);
+  });
+}
+
+// Route the new house/party action-bar buttons (returns true when handled).
+// NOTE: "dance"/"sit"/"socialise" are only intercepted INSIDE THE HOME — venue
+// activities with the same ids (nightclub dance, etc.) keep their original
+// placeSpec behaviour. "spray"/"together"/"ring_bell"/house-chat/settings/
+// invites are handled everywhere they're declared.
+function _houseSocialAction(id) {
+  const inHome = (getActivePlace() || {}).id === "home";
+  switch (id) {
+    case "spray": openSprayUI(); return true;
+    case "together": doTogether(); return true;
+    case "ring_bell": doRingBell(); return true;
+    case "house_chat": toggleHouseChat(); return true;
+    case "house_settings": openHouseSettings(_houseUi); return true;
+    case "invite_guests": _openInvitePicker(); return true;
+    case "dance": if (inHome) { doDance(); return true; } return false;
+    case "socialise": if (inHome) { doSocialise(); return true; } return false;
+    case "sit": if (inHome) { doSit(); return true; } return false;
+    default: return false;
+  }
+}
+
+// Invite picker — phone contacts (friends) + players around you
+let _invitePanel = null;
+function _openInvitePicker() {
+  if (!_houseUi || !_houseUi.isOwner) { toast("🏠 You can only invite people to YOUR own house"); return; }
+  if (_invitePanel) { _invitePanel.remove(); _invitePanel = null; return; }
+  _invitePanel = document.createElement("div");
+  _invitePanel.id = "invite-picker";
+  _invitePanel.style.cssText = "position:fixed;left:50%;bottom:calc(76px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:60;width:min(380px,94vw);max-height:56vh;overflow-y:auto;background:#17181b;color:#f2f2f4;border:1px solid #2e7d4f;border-radius:16px;box-shadow:0 10px 34px rgba(0,0,0,.5);font-family:Poppins,sans-serif;";
+  const friends = Object.entries(getFriends());
+  const nearby = getPlayersInRoom().filter((p) => p.uid !== getMyUid());
+  const chip = (p) => '<button data-uid="' + p.uid + '" data-name="' + (p.name || "Player").replace(/"/g, "") + '" class="ivx-btn" style="background:#22242a;color:#fff;border:1px solid #33363e;border-radius:999px;padding:8px 12px;cursor:pointer;font:600 12px Poppins,sans-serif;">' + (p.emoji || "👤") + " " + (p.name || "Player").slice(0, 14) + "</button>";
+  _invitePanel.innerHTML =
+    '<div style="display:flex;align-items:center;padding:10px 12px;background:linear-gradient(135deg,#0f4d3a,#1a1a2e);">' +
+    '<div style="flex:1;font-weight:800;font-size:14px;">✉️ Invite to your place</div>' +
+    '<button id="ivx-close" style="background:none;border:none;color:#fff;font-size:18px;cursor:pointer;">✕</button></div>' +
+    '<div style="padding:8px 12px 2px;font-size:11px;color:#9fe0b8;font-weight:600;">NEARBY PLAYERS</div>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:6px;padding:4px 12px 8px;">' +
+    (nearby.length ? nearby.map((p) => chip(p)).join("") : '<span style="font-size:11px;color:#8b8e99;">Nobody around right now</span>') +
+    "</div>" +
+    '<div style="padding:2px 12px 2px;font-size:11px;color:#9fe0b8;font-weight:600;">CONTACTS (FRIENDS)</div>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:6px;padding:4px 12px 12px;">' +
+    (friends.length ? friends.map(([fUid, f]) => chip({ uid: fUid, name: f.name, emoji: "👥" })).join("") : '<span style="font-size:11px;color:#8b8e99;">No friends yet — add some from the phone 📱</span>') +
+    "</div>";
+  document.body.appendChild(_invitePanel);
+  _invitePanel.querySelector("#ivx-close").onclick = () => { _invitePanel.remove(); _invitePanel = null; };
+  for (const b of _invitePanel.querySelectorAll(".ivx-btn")) {
+    b.onclick = () => { sendDoorInvite(b.dataset.uid, b.dataset.name, _houseUi); b.style.borderColor = "#4ade80"; };
+  }
+}
+
+// Live invite accepted → travel to their door (direct enter or knock)
+async function _goToInvitedHouse(inv) {
+  try {
+    const area = getArea(inv.areaId);
+    if (!area || inv.plotNo == null) { toast("⚠️ That house is gone"); return; }
+    const pos = getPlotPosition(area, inv.plotNo);
+    player.pos.set(pos.x, 0, pos.z + 4);
+    player.heading = Math.PI;
+    toast("🏠 Traveling to @" + (inv.ownerName || "friend") + "'s place...");
+    const meta = (await loadHouseMeta(inv.areaId, inv.plotNo)) || {};
+    const access = meta.access || (meta.locked ? "invite" : "public");
+    const canWalkIn = access === "public" || (access === "friends" && getFriends()[inv.fromUid]);
+    setTimeout(async () => {
+      try {
+        if (canWalkIn) {
+          await enterPlaceAsVisitor({ ownerUid: inv.fromUid, ownerName: inv.ownerName, areaId: inv.areaId, plotNo: inv.plotNo }, { pos: player.pos, heading: player.heading });
+        } else {
+          toast("🚪 It's invite-only — knocking for you...");
+          const kid = await knockOnDoor(inv.fromUid, getMyUid(), getMyName(), inv.areaId, inv.plotNo);
+          if (kid) {
+            const unsub = listenForKnockReply(inv.fromUid, kid, (v) => {
+              if (v && v.status === "accepted") {
+                enterPlaceAsVisitor({ ownerUid: inv.fromUid, ownerName: inv.ownerName, areaId: inv.areaId, plotNo: inv.plotNo }, { pos: player.pos, heading: player.heading }).catch(() => {});
+              } else if (v && v.status === "denied") toast("🚫 " + (inv.ownerName || "They") + " said not now.");
+              else if (v === null) toast("⏳ No answer — try again later.");
+              setTimeout(() => { try { unsub(); } catch (e) {} }, 4000);
+            });
+          }
+        }
+      } catch (e) { toast("Visit failed: " + e.message); }
+    }, 700);
+  } catch (e) { console.warn("[invite] travel failed", e); }
 }
 initAdmin((user) => {
   toast("Admin access detected — welcome, " + (user.email || "Admin"));
@@ -4111,10 +4318,12 @@ function _frame() {
     const it = ctl.intent();
     const _actOn = tickActivity(dt, it.mag);        // eating / swimming / sleeping... owns the character while it runs
     if (!_actOn) {
-    const maxSpd = (ctl.jog ? 4.8 : 2.1) * (game.state.needs?.energy < 20 ? 0.5 : 1.0);
+    // ODOGWU FREEZE (Oct 25): a ₦5m spray pauses the whole party for a second
+    const _frozen = Date.now() < (window._kadunaPartyFreezeUntil || 0);
+    const maxSpd = _frozen ? 0 : (ctl.jog ? 4.8 : 2.1) * (game.state.needs?.energy < 20 ? 0.5 : 1.0);
     const target = it.mag * maxSpd;
     player.speed += (target - player.speed) * (1 - Math.exp(-dt * 9));
-    if (it.mag > 0) {
+    if (it.mag > 0 && !_frozen) {
       const want = Math.atan2(it.x, it.z);
       let d = want - player.heading; d = Math.atan2(Math.sin(d), Math.cos(d));
       player.heading += d * (1 - Math.exp(-dt * 12));
@@ -4309,6 +4518,8 @@ function _frame() {
   tickSceneCulling(camera);
   // ---- Particles tick: confetti, dust, rain (Oct 19) ----
   tickParticles(dt, camera);
+  // ---- Spray notes tick: flying naira notes from money sprays (Oct 25) ----
+  tickSprayNotes(dt);
   // ---- Road events tick: rain/weather, checkpoints, traffic jams (Oct 19) ----
   tickRoadEvents(dt);
   // ---- Plot doors tick: render doors at nearby occupied plots + detect knock range (step 2c) ----

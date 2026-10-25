@@ -420,11 +420,37 @@ function makeRig(group, model, baseY, pose = "stand") {
         const k = Math.sin(ephase * 0.6);
         turn("LeftUpLeg", 0); turn("RightUpLeg", 0); turn("LeftLeg", 0); turn("RightLeg", 0);
         arms(0.2, 1.1 + k * 0.9, 0.3, 0.6 + k * 0.6, 0.0);
+      } else if (_emoteType === "spray") {
+        // MONEY SPRAY 💸 (Lagos Life classic): right hand up high flicking
+        // notes out, left hand tossing, small bounce on the beat.
+        model.position.y = baseY + Math.abs(esw) * 0.05;
+        turn("LeftUpLeg", esw * 0.12); turn("RightUpLeg", -esw * 0.12);
+        turn("LeftLeg", 0); turn("RightLeg", 0);
+        arms(-0.4, -2.1 + esw * 0.35, 0.7, -2.5 + esw * 0.55, 0.0);
+      } else if (_emoteType === "talk") {
+        // SOCIALISE / gist pose: both hands gesturing in front of the body
+        model.position.y = baseY + Math.abs(esw) * 0.02;
+        turn("LeftUpLeg", 0); turn("RightUpLeg", 0); turn("LeftLeg", 0); turn("RightLeg", 0);
+        arms(0.45 + esw * 0.3, 0.45 - esw * 0.3, 1.05 + esw * 0.45, 1.05 - esw * 0.45, -0.15);
+      } else if (_emoteType === "together") {
+        // GROUP DANCE ("Together" button): bigger bounce, arms pumping up
+        model.position.y = baseY + Math.abs(esw) * 0.18;
+        turn("LeftUpLeg", esw * 0.35); turn("RightUpLeg", -esw * 0.35);
+        turn("LeftLeg", Math.max(0, -esw) * 0.45); turn("RightLeg", Math.max(0, esw) * 0.45);
+        arms(-1.5 + esw * 0.6, -1.5 - esw * 0.6, -2.2 + esw * 0.4, -2.2 - esw * 0.4, 0.1);
+      } else if (_emoteType === "bell") {
+        // RING BELL: right arm reaches out and presses twice
+        const k = Math.max(0, Math.sin(ephase * 1.4)) * 0.3;
+        model.position.y = baseY;
+        turn("LeftUpLeg", 0); turn("RightUpLeg", 0); turn("LeftLeg", 0); turn("RightLeg", 0);
+        arms(0.08, -1.05 + k, 0.15, -1.35 + k, 0.0);
       }
+      _applyBlend(dt);
       return;
     } else if (_emoteType) {
-      // Emote ended — reset
+      // Emote ended — reset, and blend smoothly back to stand/walk
       _emoteType = null;
+      _snapPose();
     }
     if (model.rotation.x !== 0) model.rotation.x = 0;   // lying / swimming poses tilt the model
     if (speed > 0.15) {
@@ -445,15 +471,42 @@ function makeRig(group, model, baseY, pose = "stand") {
       turn("LeftUpLeg", 0); turn("RightUpLeg", 0); turn("LeftLeg", 0); turn("RightLeg", 0);
       arms(0.02, 0.02, 0.18, 0.18);
     }
+    _applyBlend(dt);
   }
+  // ---- SMOOTH TRANSITIONS (Oct 25): instead of snapping between stand/walk/
+  // emote poses, we snapshot the current pose the moment an emote starts or
+  // ends and slerp every tracked bone toward the new pose over ~0.26 s.
+  // Characters now smoothly sit down, smoothly start/stop dancing, and
+  // smoothly raise their arm when spraying. ----
+  let _blend = 1, _snap = null;
+  const _snapPose = () => {
+    const snapped = new Map();
+    for (const list of Object.values(bones)) for (const b of list) snapped.set(b.bone, b.bone.quaternion.clone());
+    _snap = { bones: snapped, y: model.position.y, rx: model.rotation.x };
+    _blend = 0;
+  };
+  const _applyBlend = (dt) => {
+    if (_blend >= 1 || !_snap) return;
+    _blend = Math.min(1, _blend + dt / 0.26);
+    const e = _blend * _blend * (3 - 2 * _blend);        // smoothstep ease
+    const ty = model.position.y, trx = model.rotation.x;
+    model.position.y = _snap.y + (ty - _snap.y) * e;
+    model.rotation.x = _snap.rx + (trx - _snap.rx) * e;
+    for (const [bone, sq] of _snap.bones) {
+      const target = bone.quaternion.clone();
+      bone.quaternion.copy(sq).slerp(target, e);
+    }
+  };
   // FEATURE: emote system — trigger temporary pose/animation overrides
   let _emoteType = null, _emoteEnd = 0, _emoteStart = 0;
   animate.emote = (type, duration = 3) => {
+    const changed = _emoteType !== type;
     _emoteType = type;
     _emoteStart = performance.now() / 1000;
     _emoteEnd = _emoteStart + duration;
+    if (changed) _snapPose();                             // blend into the new pose
   };
-  animate.stopEmote = () => { _emoteEnd = 0; };
+  animate.stopEmote = () => { if (_emoteType) { _emoteType = null; _emoteEnd = 0; _snapPose(); } };
   animate.isEmoting = () => _emoteType !== null && performance.now() / 1000 < _emoteEnd;
   animate(0, 0);
   return animate;

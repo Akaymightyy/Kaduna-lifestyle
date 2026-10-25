@@ -263,6 +263,10 @@ function updateAvatars() {
     // EMOTE BROADCAST (Oct 21): if this remote player has an active emote,
     // show the emoji sprite above their name tag. Clears when expired.
     _updateEmoteSprite(m, d);
+    // HOUSE PARTY (Oct 25): actually PLAY the pose animation on the remote
+    // avatar's character rig (dance/sit/spray/talk/together/wave...) — not
+    // just the emoji badge. Everyone in the area sees what the person does.
+    _applyRemotePose(m, d);
     // SYNC (Oct 19): if this remote player is riding, swap their walking
     // avatar for the ACTUAL VEHICLE 3D mesh. We keep their name tag
     // floating above the vehicle so you can still tell who's inside.
@@ -383,6 +387,19 @@ function _swapRidingMesh(m, oldRiding) {
 
 export function getMyUid(){return _uid;}
 export function getMyName(){return _name;}
+// HOUSE PARTY (Oct 25): expose my current room key ("" city, "home:<uid>",
+// venue id) so the spray/chat systems can target "everyone in this room".
+export function getMyPlace(){return _myPlace || "";}
+// Remote players currently in MY room — [{ uid, name, x, z }] — used by the
+// spray UI receiver list and the invite "nearby players" flow.
+export function getPlayersInRoom() {
+  const out = [];
+  for (const [uid, d] of Object.entries(_players)) {
+    if ((d.place || "") !== (_myPlace || "")) continue;
+    out.push({ uid, name: d.name || "Player", x: d.x || 0, z: d.z || 0 });
+  }
+  return out;
+}
 // FEATURE: expose the remote-player meshes map so main.js can raycast against
 // them on tap (for the "click another user's name to DM them" flow).
 export function getRemotePlayers() { return _meshes; }
@@ -408,11 +425,34 @@ export function getRemotePlayerData(uid) { return _players[uid] || null; }
 const EMOTE_EMOJIS = {
   wave: "👋", dance: "🕺", clap: "👏", sit: "🪑", laugh: "😂",
   bow: "🙇", salute: "🫡", shrug: "🤷", thumbsup: "👍", peace: "✌️",
+  spray: "🤑", talk: "💬", together: "🕺", bell: "🔔",
 };
 const EMOTE_DURATIONS = {
   wave: 3, dance: 5, clap: 3, sit: 0, laugh: 3,
   bow: 2, salute: 2, shrug: 2, thumbsup: 2, peace: 2,
+  spray: 3, talk: 4, together: 6, bell: 2,
 };
+// ---- HOUSE PARTY (Oct 25): drive the remote avatar's bone rig with the
+// pose emote. d = live/{uid} data: { emote, emoteDur, emoteTs }.
+// dur 0 = persistent (sit) — stays until they clear it or start moving.
+// We only re-trigger when the emote identity changes (type+ts), so calling
+// this every frame is cheap.
+function _applyRemotePose(m, d) {
+  if (!m.ch || !m.ch.animate || !m.ch.animate.emote) return;
+  const type = d ? d.emote : null;
+  const ts = d ? d.emoteTs : 0;
+  const dur = d && d.emoteDur != null ? d.emoteDur : EMOTE_DURATIONS[type];
+  let active = false;
+  if (type && EMOTE_DURATIONS[type] !== undefined) {
+    if (!dur) active = true;                                   // persistent emote
+    else if (ts) active = (Date.now() - ts) / 1000 < dur + 1;  // timed emote
+  }
+  const key = active ? type + ":" + (ts || 0) : "";
+  if (key === m.lastPoseKey) return;
+  m.lastPoseKey = key;
+  if (active) m.ch.animate.emote(type, dur ? dur + 0.6 : 86400);
+  else m.ch.animate.stopEmote();
+}
 function _updateEmoteSprite(m, d) {
   const emoteType = d?.emote;
   const emoteTs = d?.emoteTs;
