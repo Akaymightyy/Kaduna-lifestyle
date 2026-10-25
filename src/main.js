@@ -73,6 +73,9 @@ import { fetchKadunaData, buildRealMap } from "./realmap.js";
 // CITY DENSITY: real Kaduna buildings from OpenStreetMap (additive + reversible,
 // everything checked against protected zones — see src/world/osmCity.js).
 import { initOsmCity } from "./world/osmCity.js";
+// Oct 25: our OWN procedural city filler (Kaduna-style buildings, no real
+// map data) — see src/world/cityFill.js.
+import { initCityFill } from "./world/cityFill.js";
 import { getSeat, VEHICLE_CATALOG, getVehicle, initVehicles, buyVehicle, getOwned, ownsVehicle, isRiding, getRideSpeed, getRideId, spawnRideVehicle, despawnRideVehicle, tickRideVehicle } from "./vehicles.js";
 import { extendCatalog } from "./dealership_catalog.js";
 import { buildStreetDetail, makeBlobShadows } from "./street.js";
@@ -597,7 +600,13 @@ fetchKadunaData().then((kadunaData) => {
 }).catch((e) => console.warn("[realmap] fetch failed:", e.message));
 // CITY DENSITY: add the real-Kaduna OSM layer after the procedural world is
 // fully built. Fail-safe: if anything goes wrong the game continues unchanged.
+// Oct 25: the real-map layer is OFF in config.js (OSM_CITY.enabled=false);
+// the city is now filled by OUR OWN procedural generator instead.
 initOsmCity(world).then((s) => { if (s) console.log("[osmCity] city density ready"); });
+// CITY FILL (Oct 25, Claude advice #3): Kaduna-style shop rows, houses and
+// walled compounds generated on boot — no real map data. Same safety
+// contract: additive only, checked against protected zones, fail-safe.
+initCityFill(world).then((s) => { if (s) console.log("[cityFill] city density ready"); });
 const ctl = createControls(canvas, camera, { joy: $("joy"), knob: $("knob") });
 const game = createGameState();
 // Oct 25 FIX ("characters walk through buildings"): NPCs now get the world

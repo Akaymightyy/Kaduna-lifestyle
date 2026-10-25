@@ -35,17 +35,33 @@ export const SHOW_NIGHT = true;
 export const FIXED_HOUR = null;  // FEATURE: natural day/night cycle (was 17.5 evening-lock)
 
 // ---- CITY DENSITY (real Kaduna buildings from OpenStreetMap) ----
-// ADDITIVE + REVERSIBLE: the OSM layer only ADDS buildings/roads/props in
-// empty spaces (checked against src/world/protectedZones.js). Set enabled
-// to false and the game boots exactly like before — nothing else changes.
-// Data file is generated offline by tools/fetch-kaduna-osm.mjs. If it is
-// missing, the layer quietly skips itself (fail-safe).
+// Oct 25: REAL-MAP LAYER IS OFF — real Kaduna map data no match our own
+// roads, so most footprints were rejected and the survivors looked
+// scattered (Claude advice #3: "Fill the city with our own buildings, not
+// the real map"). The osmCity.js module + data file stay here untouched —
+// flip enabled back to true to restore the old layer exactly as it was.
 export const OSM_CITY = {
-  enabled: true,
+  enabled: false,
   dataUrl: "/data/kaduna-osm.json",
   maxBuildings: 900,   // safety cap — nearest-to-centre footprints win
   chunkSize: 180,      // merge cell size (draw calls + frustum culling)
   bounds: { minX: -555, maxX: 555, minZ: -330, maxZ: 330 },
+};
+
+// ---- CITY FILL (Oct 25): OUR OWN procedural Kaduna-style city filler ----
+// Generated on boot by src/world/cityFill.js: shop rows + houses along the
+// avenues and cross streets, walled zinc-roof compounds along dirt lanes in
+// the open fields, sidewalks/trees/lamps on the avenues. ADDITIVE +
+// REVERSIBLE: every footprint is checked against protectedZones.js and
+// dropped if it would touch anything existing (mosque, market, petrol
+// station, keke park, place gates, district plots...). Set enabled to false
+// and the game boots exactly like before.
+export const CITY_FILL = {
+  enabled: true,
+  seed: 20261026,      // deterministic — same city every load
+  maxBuildings: 820,
+  maxCompounds: 150,
+  chunkSize: 180,      // merge cell size (draw calls + frustum culling)
 };
 
 export const LANES = [
