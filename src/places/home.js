@@ -314,8 +314,24 @@ export async function build(scene, ctx) {
     pl.pos.set((item.x || 0) + Math.sin(item.rot || 0) * 0.05, 0, (item.z || 0) + Math.cos(item.rot || 0) * 0.05);
     pl.heading = item.rot || 0;
     _sittingIdx = idx;
+    // HOUSE PARTY (Oct 25): sitting on the right furniture restores needs —
+    // Dining Table → +Hunger +Energy, Sofa → +Social +Fun, Bed → +Energy.
+    let comfort = "";
+    try {
+      const id = item.id || "";
+      const N = (ctx.game && ctx.game.state && ctx.game.state.needs) || null;
+      if (N) {
+        const bumps = [];
+        if (id.includes("dining")) bumps.push(["hunger", 15], ["energy", 10]);
+        else if (id.includes("sofa")) bumps.push(["social", 20], ["fun", 12]);
+        else if (id.includes("chair") || id.includes("stool") || id.includes("bench")) bumps.push(["social", 8]);
+        else if (id.includes("bed") || id.includes("mattress")) bumps.push(["energy", 10]);
+        for (const [k, v] of bumps) { N[k] = Math.min(100, (N[k] || 0) + v); comfort += ", " + k + " +" + v; }
+        if (bumps.length) { ctx.game.save && ctx.game.save(); ctx.updateHUD && ctx.updateHUD(); }
+      }
+    } catch (e) {}
     try { window._emote && window._emote("sit"); } catch (e) {}
-    ctx.toast("🪑 Sitting — move the joystick to stand up");
+    ctx.toast("🪑 Sitting" + comfort + " — move the joystick to stand up");
   }
 
   // tap on a furniture piece -> its menu (a tap, not a camera drag)

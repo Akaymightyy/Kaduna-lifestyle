@@ -202,6 +202,8 @@ const PLACE_DEFS = [
       { id: "kasu_quiz", name: "Mr. Danjuma", outfit: "kaftan", role: "quiz master" },
     ],
     activities: [
+      { id: "spray", label: "💸 Spray Money", desc: "Odogwu campus vibes" },
+      { id: "together", label: "🕺 Together", desc: "Campus-wide dance!" },
       { id: "attend_lecture", label: "🎓 Attend lecture", desc: "GNS 101 at LT1 — ₦500 stipend" },
       { id: "study_library", label: "📚 Study at library", desc: "Hit the books — brain +10" },
       { id: "eat_cafeteria", label: "🍝 Eat at cafeteria", desc: "Mama Ngozi's rice & stew — ₦400" },
@@ -274,6 +276,8 @@ const PLACE_DEFS = [
       { id: "carn_booth", name: "Eddy", outfit: "casual", role: "booth attendant" },
     ],
     activities: [
+      { id: "spray", label: "💸 Spray Money", desc: "Rain on the whole carnival!" },
+      { id: "together", label: "🕺 Together", desc: "Everybody dance at once!" },
       { id: "ride_ferris", label: "🎡 Ferris wheel", desc: "See the whole city! — ₦1000" },
       { id: "ride_carousel", label: "🎠 Carousel ride", desc: "Classic fun — ₦500" },
       { id: "dance_contest", label: "💃 Carnival Dance-Off", desc: "Hit the beat! Win up to ₦4,000!" },
@@ -371,6 +375,8 @@ const PLACE_DEFS = [
       { id: "player1", name: "Ahmed", outfit: "casual", role: "footballer" },
     ],
     activities: [
+      { id: "spray", label: "💸 Spray Money", desc: "Celebrate like a senator" },
+      { id: "together", label: "🕺 Together", desc: "Stand united, dance united" },
       { id: "watch_match", label: "Watch a match", desc: "Fun +30 — ₦500" },
       { id: "play_match", label: "Join a match", desc: "Earn ₦1000 if you win" },
       { id: "buy_ticket", label: "Buy season ticket", desc: "₦5000 — discounts" },
@@ -460,6 +466,8 @@ const PLACE_DEFS = [
     ],
     activities: [
       { id: "dance", label: "Dance", desc: "Fun +30, energy -10 — ₦1000" },
+      { id: "spray", label: "💸 Spray Money", desc: "Make it rain in the club!" },
+      { id: "together", label: "🕺 Together", desc: "Whole club dances!" },
       { id: "buy_drink", label: "Buy a drink", desc: "Social +10 — ₦500" },
       { id: "socialize", label: "Socialize", desc: "Meet people — social +20" },
       { id: "vip", label: "Book VIP table", desc: "₦5000 — fun +40, social +30" },
@@ -478,6 +486,17 @@ const PLACE_DEFS = [
     ambientSound: null,
     npcList: [],
     activities: [
+      // HOUSE SOCIAL BAR (Oct 25) — Lagos-Life style house party buttons
+      { id: "spray", label: "💸 Spray", desc: "Make it rain on somebody" },
+      { id: "dance", label: "💃 Dance", desc: "Show your moves" },
+      { id: "together", label: "🕺 Together", desc: "Everybody dance!" },
+      { id: "socialise", label: "🗣️ Socialise", desc: "Gist with the house" },
+      { id: "house_chat", label: "💬 Message", desc: "House group chat" },
+      { id: "ring_bell", label: "🔔 Ring Bell", desc: "Ding dong!" },
+      { id: "sit", label: "🪑 Sit", desc: "Take a seat" },
+      { id: "invite_guests", label: "✉️ Invite", desc: "Invite friends over" },
+      { id: "house_settings", label: "⚙️ Settings", desc: "Who can enter + throw a party" },
+      // Original home needs actions
       { id: "sleep", label: "Sleep (energy +40)", desc: "Rest in your bed" },
       { id: "eat_home", label: "Eat from fridge (hunger +30)", desc: "Grab food from the fridge" },
       { id: "tv", label: "Watch TV (fun +20)", desc: "Relax and watch TV" },

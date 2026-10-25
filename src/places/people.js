@@ -90,7 +90,40 @@ export async function spawnPeople(group, specs) {
     people.length = 0; _spawnQueue.length = 0;
   }
   function getPersonById(id) { return people.find((p) => p.id === id) || null; }
+  // HOUSE PARTY (Oct 25): register spawned people so the crowd can be made to
+  // dance/gist together ("Together" / big sprays). Purged lazily when the
+  // place that owns them is disposed (group removed from its parent).
+  for (const p of people) _livePeople.add(p);
   return { people, update, dispose, getPersonById };
+}
+// ---- live place-NPC registry (weak-ish: purged on access) ----
+const _livePeople = new Set();
+function _purgeLivePeople() {
+  for (const p of _livePeople) {
+    if (!p.group || !p.group.parent) _livePeople.delete(p);
+  }
+}
+// HOUSE PARTY (Oct 25): trigger a pose emote on every place NPC within radius
+// of (x, z) — e.g. the whole room starts dancing when "Together" is pressed
+// or a big money spray lands.
+export function emotePeopleNearby(x, z, type, dur, radius = 12) {
+  _purgeLivePeople();
+  const r2 = radius * radius;
+  for (const p of _livePeople) {
+    if (!p.ready || !p.animate || !p.animate.emote) continue;
+    const dx = p.x - x, dz = p.z - z;
+    if (dx * dx + dz * dz > r2) continue;
+    try { p.animate.emote(type, dur || 4); } catch (e) {}
+  }
+}
+export function countPeopleNearby(x, z, radius = 12) {
+  _purgeLivePeople();
+  let n = 0; const r2 = radius * radius;
+  for (const p of _livePeople) {
+    const dx = p.x - x, dz = p.z - z;
+    if (dx * dx + dz * dz <= r2) n++;
+  }
+  return n;
 }
 function _hash(s) { let h = 0; for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0; return h; }
 
