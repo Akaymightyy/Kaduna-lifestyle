@@ -92,6 +92,18 @@
           },
           "colors": {
             ".write": "auth != null && root.child('houses/' + $areaId + '/' + $plotNo + '/ownerUid').val() === auth.uid"
+          },
+          "presence": {
+            ".read": "auth != null",
+            "$uid": {
+              ".write": "auth != null && auth.uid === $uid"
+            }
+          },
+          "access": {
+            ".write": "auth != null && root.child('houses/' + $areaId + '/' + $plotNo + '/ownerUid').val() === auth.uid"
+          },
+          "party": {
+            ".write": "auth != null && root.child('houses/' + $areaId + '/' + $plotNo + '/ownerUid').val() === auth.uid"
           }
         }
       }
@@ -203,6 +215,29 @@
       "$matchId": {
         ".read": "auth != null && data.child('players/' + auth.uid).val() != null",
         ".write": "auth != null && (!data.exists() || data.child('players/' + auth.uid).val() != null)"
+      }
+    },
+    "houseChat": {
+      ".read": "auth != null",
+      "$room": {
+        ".read": "auth != null",
+        "$msg": {
+          ".write": "auth != null && newData.child('uid').val() === auth.uid"
+        }
+      }
+    },
+    "sprays": {
+      ".read": "auth != null",
+      "$id": {
+        ".write": "auth != null && !data.exists() && newData.child('fromUid').val() === auth.uid"
+      }
+    },
+    "invites": {
+      "$uid": {
+        ".read": "auth.uid === $uid",
+        "$id": {
+          ".write": "auth != null"
+        }
       }
     }
   }
