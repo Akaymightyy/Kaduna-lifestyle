@@ -107,6 +107,14 @@ function buildOsmCity(world, data) {
     if (hit) { dropBy[hit] = (dropBy[hit] || 0) + 1; stats.rejected++; continue; }
     kept.push(b);
   }
+  // Oct 25: only keep buildings that belong to a real neighbourhood (>= 8 other buildings within 45 m).
+  // Lone roofs scattered in empty fields looked like floating houses, so they are dropped.
+  { const near2 = 45 * 45, all = kept.slice();
+    for (let i = kept.length - 1; i >= 0; i--) {
+      let n = 0; const a = kept[i];
+      for (const o of all) { if (o !== a && (o[0] - a[0]) ** 2 + (o[1] - a[1]) ** 2 < near2 && ++n >= 8) break; }
+      if (n < 8) { kept.splice(i, 1); dropBy.lone = (dropBy.lone || 0) + 1; }
+    } }
   const topDrops = Object.entries(dropBy).sort((a, b) => b[1] - a[1]).slice(0, 5)
     .map(([t, n]) => t + ":" + n).join(", ");
   console.log("[osmCity] drops by zone → " + topDrops);
@@ -116,6 +124,7 @@ function buildOsmCity(world, data) {
     kept.length = OSM_CITY.maxBuildings;
   }
 
+  window.__osmKept = kept.map((b) => [Math.round(b[0]), Math.round(b[1])]);   // debug: where the neighbourhoods are
   // ---- 2. Generate: per-chunk merged geometry (walls share the window material) ----
   const cell = OSM_CITY.chunkSize;
   const chunks = new Map();                      // "cx,cz" -> { wallGeos: [], detGeos: [] }
@@ -129,6 +138,8 @@ function buildOsmCity(world, data) {
     const list = chunks.get(((x / cell) | 0) + "," + ((z / cell) | 0)) || { wallGeos: [], detGeos: [] };
     chunks.set(((x / cell) | 0) + "," + ((z / cell) | 0), list);
 
+    // paved compound apron around the house, so neighbourhoods read as plots, not floating roofs
+    list.detGeos.push(rot(part(w + 2.6, 0.06, d + 2.6, 0, 0.03, 0, 0xcdbb94, 9)));
     // walls with the tiled window picture (same pipeline as the street rows)
     list.wallGeos.push(rot(windowBox(w, h, d, color)));
     // stone plinth
