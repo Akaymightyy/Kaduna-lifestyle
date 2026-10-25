@@ -140,8 +140,15 @@ function buildOsmCity(world, data) {
 
     // paved compound apron around the house, so neighbourhoods read as plots, not floating roofs
     list.detGeos.push(rot(part(w + 2.6, 0.06, d + 2.6, 0, 0.03, 0, 0xcdbb94, 9)));
-    // walls with the tiled window picture (same pipeline as the street rows)
-    list.wallGeos.push(rot(windowBox(w, h, d, color)));
+    // walls with the tiled window picture (same pipeline as the street rows).
+    // Oct 25 FIX ("buildings half-buried / scattered objects"): windowBox is a
+    // CENTERED box (y spans -h/2..+h/2) — the street rows lift it by h/2 before
+    // placing (see world.js addBuilding), but this module forgot the lift, so
+    // every OSM building was half underground while its parapet/cornice/gable/
+    // roof props (all positioned for a wall top at y=h) floated h/2 above it.
+    // One lift repairs the whole look — every other piece below is already
+    // written for a 0..h wall.
+    list.wallGeos.push(rot(windowBox(w, h, d, color).translate(0, h / 2, 0)));
     // stone plinth
     list.detGeos.push(rot(part(w + 0.5, 0.7, d + 0.5, 0, 0.35, 0, base, 5)));
     if (gable) {
@@ -154,10 +161,13 @@ function buildOsmCity(world, data) {
       list.wallGeos.push(rot(windowBox(w + 0.3, 0.5, d + 0.3, new THREE.Color(0xb5a68b)).translate(0, h + 0.25, 0)));
       list.detGeos.push(rot(part(w + 0.9, 0.3, d + 0.9, 0, h - 0.15, 0, light, 9)));
       if (R() < 0.55) list.detGeos.push(rot(part(w + 0.7, 0.3, d + 0.7, 0, h + 0.55, 0, zinc, 4)));
-      // rooftop props on flat roofs
+      // rooftop props on flat roofs. Oct 25 FIX: they sat h+0.9 / h+0.65 with a
+      // visible gap under them (floating boxes), and used footprint-sized
+      // offsets that could hang OFF a rotated roof. Now they sit ON the roof
+      // (base at y=h, the geometry is base-origin) with a small centred jitter.
       if (w * d > 70 && h > 4) {
-        if (R() < 0.5) tanks.push([x + (R() - 0.5) * w * 0.5, h + 0.9, z + (R() - 0.5) * d * 0.5]);
-        else if (R() < 0.5) acs.push([x + (R() - 0.5) * w * 0.4, h + 0.65, z + (R() - 0.5) * d * 0.4]);
+        if (R() < 0.5) tanks.push([x + (R() - 0.5) * 1.6, h + 0.02, z + (R() - 0.5) * 1.6]);
+        else if (R() < 0.5) acs.push([x + (R() - 0.5) * 1.2, h + 0.02, z + (R() - 0.5) * 1.2]);
       }
     }
     // collider (AABB of the oriented box) — new buildings are solid
@@ -205,7 +215,7 @@ function buildOsmCity(world, data) {
   stats.roadPieces = buildSideRoads(group, data);
 
   // ---- 6. Avenue sidewalks + kerbs + trees + lamps (better roads, Phase 3) ----
-  buildAvenueDressing(group, world);
+  buildAvenueDressing(group, world, R);
 
   return stats;
 }
@@ -253,7 +263,7 @@ function buildSideRoads(group, data) {
 // Sidewalks + kerbs + neem trees + lamp posts along the four avenues — the
 // existing avenues are bare asphalt strips; this makes them feel like real
 // Kaduna streets without touching any gameplay road logic.
-function buildAvenueDressing(group, world) {
+function buildAvenueDressing(group, world, R) {
   const paveGeos = [], kerbGeos = [];
   const treePts = [], lampPts = [];
   const zFrom = 20, zTo = MAP_HALF_Z - 20;
@@ -306,9 +316,9 @@ function buildAvenueDressing(group, world) {
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion();
     treePts.forEach(([x, z], i) => {
       m4.compose(new THREE.Vector3(x, 0, z), q, new THREE.Vector3(0.24, 2.6, 0.24)); tm.setMatrixAt(i, m4);
-      const s = 2.2 + Math.random() * 0.6;
+      const s = 2.2 + R() * 0.6;                      // FIX: was Math.random() — same city looks different on every load
       m4.compose(new THREE.Vector3(x, 3.4, z), q, new THREE.Vector3(s, s * 0.8, s)); cm.setMatrixAt(i, m4);
-      cm.setColorAt(i, new THREE.Color(Math.random() < 0.5 ? 0x3d8c3a : 0x4f9c43));
+      cm.setColorAt(i, new THREE.Color(R() < 0.5 ? 0x3d8c3a : 0x4f9c43));
     });
     tm.castShadow = false; cm.castShadow = false;
     group.add(tm, cm);
