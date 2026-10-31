@@ -4332,9 +4332,12 @@ function _frame() {
     if (k["a"] || k["arrowleft"]) steer -= 1;
     if (k["d"] || k["arrowright"]) steer += 1;
     // ONE driving rule for car, model and camera (drive.js): forward = (sin h, cos h), right button turns right.
+    // EVERY vehicle now drives the Kay Super Racing way. KSR cars use their own stats; the rest get stats from their ride speed.
     const _kv = getVehicle(getRideId());
-    if (_kv && _kv.ksr) ksrDriveStep(player, { steer, throttle }, dt, _kv.stats);   // KSR cars drive like in Kay Super Racing
-    else { player.kvel = null; driveStep(player, { steer, throttle }, dt, maxVehSpd); }
+    const _heavy = _kv && (_kv.id === "bus" || _kv.id === "suv" || _kv.id === "jeep");
+    const _ks = (_kv && _kv.stats) || (_kv && (_kv._st || (_kv._st = { top: _kv.speed * 3.2 / 0.3 * 1.15, accel: _kv.speed * 3.2 / 0.3 * 0.5, steer: _heavy ? 1.7 : 2.0, drift: 1.7 })));
+    if (_ks) ksrDriveStep(player, { steer, throttle }, dt, _ks);
+    else driveStep(player, { steer, throttle }, dt, maxVehSpd);
     // camera swings round behind the vehicle while it moves (like a real driving game)
     if (player.speed > 0.8) {
       let dy = (player.heading + Math.PI) - ctl.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
