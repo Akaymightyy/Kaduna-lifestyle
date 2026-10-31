@@ -7,6 +7,7 @@
 // Vehicles with a `glbPath` load a real 3D GLB model (Ferrari, Jeep, Danfo Bus, Keke).
 // Others use simplified box-geometry builders.
 
+import { KSR_CATALOG, buildKsrMesh } from "./ksr_cars.js";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { db } from "./firebase.js";
@@ -35,6 +36,7 @@ export const VEHICLE_CATALOG = [
     glbPath: "/models/vehicles/ferrari.glb", fit: { s: 1.0, cx: 0, cz: 0.02, minY: 0, rotY: -Math.PI / 2 } },
   { id: "luxury",  seat: { f: 0.3, y: 0.5, s: 0.4 }, name: "Luxury Sedan",         emoji: "🚘",   price: 1000000,speed: 6.5, desc: "VIP ride. Big oga energy." },
 ];
+for (const k of KSR_CATALOG) VEHICLE_CATALOG.push(k);   // the 12 Kay Super Racing cars
 
 // Where the driver sits (metres from the middle): f = forward (+X local), y = height of the seat above the ground,
 // s = towards the driver's side (left, -Z local). The character is positioned at (s, y, f) in avatar-group space
@@ -299,9 +301,10 @@ export async function spawnRideVehicle(vehicleId, playerPos, playerHeading, toas
   if (!v) return false;
 
   let mesh = null, own = null;
+  if (v.ksr) mesh = buildKsrMesh(vehicleId);
 
   // Try GLB model first (if the vehicle has one)
-  if (v.glbPath) {
+  if (!mesh && v.glbPath) {
     if (toastFn) toastFn("Loading " + v.name + " model...");
     const glbModel = await _loadGlbModel(vehicleId, v);
     if (glbModel) mesh = fitModel(glbModel.clone(true), v.fit);
@@ -365,6 +368,7 @@ export async function buildRemoteVehicleMesh(vehicleId) {
   const v = getVehicle(vehicleId);
   if (!v) return null;
   let mesh = null;
+  if (v.ksr) return buildKsrMesh(vehicleId);
   // Try GLB first
   if (v.glbPath) {
     try {
