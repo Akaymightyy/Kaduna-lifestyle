@@ -76,16 +76,22 @@ export async function buyVehicle(vehicleId, gameState, toast) {
   if (!v) { toast?.("Unknown vehicle"); return false; }
   if (ownsVehicle(vehicleId)) { toast?.("You already own " + v.name); return false; }
   if ((gameState.money || 0) < v.price) { toast?.("Not enough money — need ₦" + v.price.toLocaleString()); return false; }
+  const before = gameState.money;
   try {
-    // Deduct money + write to Firebase
-    gameState.money -= v.price;
-    await update(ref(db, "economy/" + _uid), { balance: gameState.money });
-    await set(ref(db, "players/" + _uid + "/vehicles/" + vehicleId), true);
+    // ONE atomic write: money and the vehicle go together or not at all
+    const newBal = Math.max(0, Math.floor(before - v.price));
+    await update(ref(db, "/"), {
+      ["economy/" + _uid + "/balance"]: newBal,
+      ["players/" + _uid + "/vehicles/" + vehicleId]: true,
+    });
+    gameState.money = newBal;
+    _owned[vehicleId] = true;
     toast?.("🎉 Bought " + v.name + "! Find it in your Garage.");
     return true;
   } catch (e) {
-    console.warn("[vehicles] buy failed:", e.message);
-    toast?.("Buy failed — try again");
+    gameState.money = before;            // nothing was taken
+    console.warn("[vehicles] buy failed:", e && e.message);
+    toast?.("Buy failed: " + String((e && (e.code || e.message)) || "unknown").slice(0, 80));
     return false;
   }
 }
