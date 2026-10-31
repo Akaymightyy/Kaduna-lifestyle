@@ -158,6 +158,7 @@ async function _handleTestDrive() {
     _testDriveTimer = setTimeout(() => {
       if (isRiding()) {
         despawnRideVehicle();
+        import("./vehicle_controls.js").then((m) => m.resetVehInput()).catch(() => {}); // KSR: release pedals
         _ctx?.toast("🚶 Test drive over — back to walking");
       }
     }, 60000);

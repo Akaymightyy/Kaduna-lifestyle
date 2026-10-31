@@ -11,6 +11,7 @@ import { createGameState } from "./needs.js";
 import { auth, db } from "./firebase.js";
 import { initAuth, showAuthModal, wireAuthUI, logout, isAuthed } from "./auth.js";
 import { driveStep, ksrDriveStep } from "./drive.js";
+import { vehInput, ensureVehicleControls, setVehicleControlsVisible, resetVehInput } from "./vehicle_controls.js";
 import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition, getRemotePlayers, setMyPlace, setMyLook, setBlockedUids, setMyRiding, setMyPassengerOf, getPassengerUids, getRemotePlayerData, getMyPlace, getPlayersInRoom } from "./multiplayer.js";
 import { startRide, travelToZone, travelToPlace, getDestinations } from "./travel.js";
 import { subscribeRichList } from "./economy.js";
@@ -195,48 +196,15 @@ function _armBeforeUnload(uid) {
   });
 }
 
-// ---- FEATURE: Vehicle driving controls (on-screen buttons) ----
-// When riding, dedicated left/right/accelerate/brake buttons appear.
-// These set window._vehBtnSteer / window._vehBtnThrottle which the
-// movement loop reads in addition to the joystick + keyboard.
+// ---- KSR-STYLE VEHICLE CONTROLS (Oct 31) ----
+// The old home-made ACCELERATE/BRAKE buttons used +1/-1 counters that drifted
+// when a pointerup was missed, so ACCEL got stuck on and BRAKE could not cancel
+// it. They were replaced by the Kay Super Racing pointer-capture button system
+// (src/vehicle_controls.js): stick = steering only, GAS/BRAKE = hold buttons
+// that can never stick, everything releases on blur/tab-hide/dismount.
 let _vehControlsEl = null;
 function _ensureVehicleControls() {
-  if (_vehControlsEl) return;
-  _vehControlsEl = document.createElement("div");
-  _vehControlsEl.id = "vehicle-controls";
-  _vehControlsEl.style.cssText =
-    "position:fixed;inset:0;z-index:28;pointer-events:none;display:none;";
-  // Acceleration (big green button, bottom-right) — hold to add speed
-  const accelBtn = document.createElement("button");
-  accelBtn.innerHTML = '<div style="line-height:1;font-size:28px;">▲</div><div style="font:800 8px Poppins,sans-serif;margin-top:2px">ACCELERATE</div>';
-  accelBtn.style.cssText = "position:absolute;right:20px;bottom:calc(130px + env(safe-area-inset-bottom));" +
-    "width:80px;height:80px;border-radius:50%;background:#4ade80;color:#000;border:3px solid #fff;display:flex;flex-direction:column;align-items:center;justify-content:center;" +
-    "font-size:28px;font-weight:700;cursor:pointer;pointer-events:auto;touch-action:none;" +
-    "box-shadow:0 4px 12px rgba(0,0,0,.4);user-select:none;-webkit-user-select:none;";
-  // Brake (red button, left of accelerate) — press to stop
-  const brakeBtn = document.createElement("button");
-  brakeBtn.innerHTML = '<div style="line-height:1;font-size:24px;">■</div><div style="font:800 9px Poppins,sans-serif">BRAKE</div>';
-  brakeBtn.style.cssText = "position:absolute;right:110px;bottom:calc(130px + env(safe-area-inset-bottom));" +
-    "width:64px;height:64px;border-radius:50%;background:#e11d48;color:#fff;border:3px solid #fff;display:flex;flex-direction:column;align-items:center;justify-content:center;" +
-    "font-size:24px;font-weight:700;cursor:pointer;pointer-events:auto;touch-action:none;" +
-    "box-shadow:0 4px 12px rgba(0,0,0,.4);user-select:none;-webkit-user-select:none;";
-  // NOTE: Left/right steering buttons REMOVED (Oct 21). Steering now comes
-  // from the analog joystick only (left/right on the joystick = steer).
-  // This is cleaner + more intuitive — like real driving games.
-  // Wire up pointer events for each button
-  const wireBtn = (el, steerVal, throttleVal) => {
-    const start = (e) => { e.preventDefault(); if (steerVal !== undefined) window._vehBtnSteer = (window._vehBtnSteer || 0) + steerVal; if (throttleVal !== undefined) window._vehBtnThrottle = (window._vehBtnThrottle || 0) + throttleVal; el.style.transform = el.style.transform.replace("scale(1)", "scale(0.92)"); };
-    const end = (e) => { e.preventDefault(); if (steerVal !== undefined) window._vehBtnSteer = (window._vehBtnSteer || 0) - steerVal; if (throttleVal !== undefined) window._vehBtnThrottle = (window._vehBtnThrottle || 0) - throttleVal; el.style.transform = el.style.transform.replace("scale(0.92)", "scale(1)"); };
-    el.addEventListener("pointerdown", start);
-    el.addEventListener("pointerup", end);
-    el.addEventListener("pointercancel", end);
-    el.addEventListener("pointerleave", end);
-  };
-  wireBtn(accelBtn, undefined, 1);     // accelerate (hold to add speed)
-  wireBtn(brakeBtn, undefined, -1);    // brake (press to stop — no reverse)
-  _vehControlsEl.appendChild(accelBtn);
-  _vehControlsEl.appendChild(brakeBtn);
-  document.body.appendChild(_vehControlsEl);
+  _vehControlsEl = ensureVehicleControls();
 }
 // ---- PASSENGER "Get off ride" button (Oct 19) ----
 let _getoffBtnEl = null;
@@ -2796,6 +2764,7 @@ window._rideVehicle = async (vehicleId) => {
 // FEATURE: Dismount vehicle (despawn mesh + remove speed boost)
 window._dismountVehicle = () => {
   despawnRideVehicle();
+  resetVehInput();  // KSR: never carry a held pedal into the next ride
   toast("🚶 Dismounted. Walking now.");
   try { sfx.engine(false); } catch (e) {}
   setMyRiding(null);  // SYNC: tell other players I'm on foot again
@@ -4310,27 +4279,29 @@ function _frame() {
   // PASSENGER (Oct 19): if I'm a passenger, hide driving controls — the
   // driver controls the bike. Show a "Get off ride" button instead.
   if (_myPassengerUid) {
-    if (_vehControlsEl) _vehControlsEl.style.display = "none";
+    setVehicleControlsVisible(false);
     if (_getoffBtnEl) _getoffBtnEl.style.display = "block";
     _tickPassenger(dt);  // follow the driver's position
   } else {
     if (_getoffBtnEl) _getoffBtnEl.style.display = "none";
-    if (_vehControlsEl) _vehControlsEl.style.display = _riding ? "block" : "none";
+    setVehicleControlsVisible(!!_riding);
   }
   if (_riding) {
-    // FEATURE: VEHICLE CONTROL — dedicated driving buttons + joystick + keyboard
-    // _vehBtnSteer / _vehBtnThrottle are set by the on-screen driving buttons.
-    // Joystick left/right also steers; joystick up/down also throttles.
-    // Keyboard WASD/arrows also work.
-    const maxVehSpd = getRideSpeed() * 3.2;   // top speed (bigger = faster cars); ACCEL ramps up to it
-    let steer = (window._vehBtnSteer || 0) + (Math.abs(ctl.joyX || 0) > 0.08 ? ctl.joyX : 0);
-    const _jy = Math.abs(ctl.joyY || 0) > 0.35 ? ctl.joyY : 0;   // dead-zone so steering with the stick never taps gas/brake
-    let throttle = (window._vehBtnThrottle || 0) + _jy;
+    // KSR-STYLE VEHICLE CONTROL (Oct 31, copied from Kay Super Racing):
+    //   * analog stick = STEERING ONLY (pushing it forward no longer drives — that
+    //     was the old bug), GAS button = throttle, BRAKE button = stop/drift.
+    //   * buttons use KSR's pointer-capture pattern so they can never get stuck on.
+    //   * keyboard WASD/arrows still work (W=gas, S=brake, A/D=steer).
+    const maxVehSpd = getRideSpeed() * 3.2;   // top speed (bigger = faster cars); GAS ramps up to it
+    let steer = (Math.abs(ctl.joyX || 0) > 0.08 ? ctl.joyX : 0);
+    let throttle = (vehInput.gas ? 1 : 0) - (vehInput.brake ? 1 : 0);
     const k = ctl.keys || {};
     if (k["w"] || k["arrowup"]) throttle += 1;
     if (k["s"] || k["arrowdown"]) throttle -= 1;
     if (k["a"] || k["arrowleft"]) steer -= 1;
     if (k["d"] || k["arrowright"]) steer += 1;
+    throttle = Math.max(-1, Math.min(1, throttle));
+    steer = Math.max(-1, Math.min(1, steer));
     // ONE driving rule for car, model and camera (drive.js): forward = (sin h, cos h), right button turns right.
     // EVERY vehicle now drives the Kay Super Racing way. KSR cars use their own stats; the rest get stats from their ride speed.
     const _kv = getVehicle(getRideId());
@@ -4363,7 +4334,7 @@ function _frame() {
   }
   const active = getActivePlace();
   // SAFETY: auto-dismount vehicle when entering a place (can't ride inside a shop)
-  if (active && isRiding()) { despawnRideVehicle(); toast("🚶 Dismounted (entered building)"); }
+  if (active && isRiding()) { despawnRideVehicle(); resetVehInput(); toast("🚶 Dismounted (entered building)"); }
   if (!active && !isBusy()) collide(player.pos, world.colliders);
   // If we're inside a place, also collide with the place's local colliders
   if (active?.handle?.colliders && !isBusy()) {
