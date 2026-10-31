@@ -10,7 +10,7 @@ import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAIL
 import { createGameState } from "./needs.js";
 import { auth, db } from "./firebase.js";
 import { initAuth, showAuthModal, wireAuthUI, logout, isAuthed } from "./auth.js";
-import { driveStep } from "./drive.js";
+import { driveStep, ksrDriveStep } from "./drive.js";
 import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition, getRemotePlayers, setMyPlace, setMyLook, setBlockedUids, setMyRiding, setMyPassengerOf, getPassengerUids, getRemotePlayerData, getMyPlace, getPlayersInRoom } from "./multiplayer.js";
 import { startRide, travelToZone, travelToPlace, getDestinations } from "./travel.js";
 import { subscribeRichList } from "./economy.js";
@@ -4332,7 +4332,9 @@ function _frame() {
     if (k["a"] || k["arrowleft"]) steer -= 1;
     if (k["d"] || k["arrowright"]) steer += 1;
     // ONE driving rule for car, model and camera (drive.js): forward = (sin h, cos h), right button turns right.
-    driveStep(player, { steer, throttle }, dt, maxVehSpd);
+    const _kv = getVehicle(getRideId());
+    if (_kv && _kv.ksr) ksrDriveStep(player, { steer, throttle }, dt, _kv.stats);   // KSR cars drive like in Kay Super Racing
+    else { player.kvel = null; driveStep(player, { steer, throttle }, dt, maxVehSpd); }
     // camera swings round behind the vehicle while it moves (like a real driving game)
     if (player.speed > 0.8) {
       let dy = (player.heading + Math.PI) - ctl.yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy));

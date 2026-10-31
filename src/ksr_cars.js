@@ -16,6 +16,7 @@ export const KSR_PREFIX = "ksr_";
 export const KSR_CATALOG = CARS.map(c => ({
   id: KSR_PREFIX + c.id, ksr: true, ksrId: c.id,
   name: c.name.replace(/\b(\w)(\w*)/g, (m, a, b) => a + b.toLowerCase()) + " (KSR)",
+  stats: { top: c.stats.top, accel: c.stats.accel, steer: c.stats.steer, drift: c.stats.drift },
   emoji: EMOJI[c.id] || "🏎️", price: c.price, speed: speedOf(c.stats.top),
   desc: c.desc.replace(/ Press F to take off and fly over the city!/, " (flying coming soon)"),
 }));

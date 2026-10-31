@@ -44,3 +44,40 @@ export function driveStep(player, input, dt, maxSpd) {
   player.pos.x += Math.sin(player.heading) * player.speed * dt;
   player.pos.z += Math.cos(player.heading) * player.speed * dt;
 }
+
+// ---- KSR-style driving (Oct 31): the same feel as Kay Super Racing, used by the ksr_* cars. ----
+// Velocity-based: the car has its own velocity vector and "grip" pulls it toward where the nose points, so it
+// slides a little in corners. Hold BRAKE while steering at speed = DRIFT (low grip). Brake never reverses.
+// KSR numbers are for a big open track, so speeds are scaled down (KS) to suit city streets.
+const KS = 0.3;
+export function ksrDriveStep(player, input, dt, st) {
+  const steer = Math.max(-1, Math.min(1, input.steer || 0));
+  const thr = Math.max(-1, Math.min(1, input.throttle || 0));
+  const k = player.kvel || (player.kvel = { x: Math.sin(player.heading) * (player.speed || 0), z: Math.cos(player.heading) * (player.speed || 0) });
+  const fx = Math.sin(player.heading), fz = Math.cos(player.heading);
+  let fwd = k.x * fx + k.z * fz;
+  const max = st.top * KS;
+  if (thr > 0) {
+    const a = st.accel * KS * Math.max(0, Math.min(1, 1 - fwd / (max * thr)));
+    k.x += fx * a * dt; k.z += fz * a * dt;
+  }
+  const drifting = thr < 0 && Math.abs(steer) > 0.3 && fwd > max * 0.4;
+  if (thr < 0 && fwd > 0) {
+    const b = Math.min(fwd, 58 * KS * (drifting ? 0.3 : 1) * Math.min(1, -thr * 1.5) * dt);
+    k.x -= fx * b; k.z -= fz * b;
+  }
+  fwd = k.x * fx + k.z * fz;
+  // steering: needs some speed, gets lazier at very high speed (same curve as KSR)
+  const grip = Math.max(0, Math.min(1, Math.abs(fwd) / (16 * KS)));
+  player.steerSm = (player.steerSm || 0) + (steer - (player.steerSm || 0)) * (1 - Math.exp(-dt * 10));
+  player.heading -= player.steerSm * st.steer * grip / (1 + Math.abs(fwd) / (85 * KS)) * dt * (drifting ? 1.5 : 1);
+  // drag (rolls to a stop when you let go) and grip: velocity swings round to the nose direction
+  const dr = Math.exp(-(thr > 0 || drifting ? 0.14 : 0.5) * dt); k.x *= dr; k.z *= dr;
+  const nfx = Math.sin(player.heading), nfz = Math.cos(player.heading);
+  const sp = Math.hypot(k.x, k.z), g = 1 - Math.exp(-(drifting ? st.drift : 7.5) * dt);
+  const dir = (k.x * nfx + k.z * nfz) >= 0 ? 1 : -1;
+  k.x += (nfx * sp * dir - k.x) * g; k.z += (nfz * sp * dir - k.z) * g;
+  if (Math.hypot(k.x, k.z) < 0.08 && thr <= 0) { k.x = 0; k.z = 0; }
+  player.pos.x += k.x * dt; player.pos.z += k.z * dt;
+  player.speed = Math.max(0, k.x * nfx + k.z * nfz);
+}
