@@ -27,7 +27,7 @@
         "balance": {
           ".read": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
           ".write": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
-          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 999999999"
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 999999999999999"
         },
         "log": {
           ".read": "auth.uid === $uid",
