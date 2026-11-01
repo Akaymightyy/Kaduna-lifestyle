@@ -23,6 +23,7 @@ function _reloadForAccount(uid) {
   location.reload();
 }
 function _endFresh() { _freshBusy = false; if (_needReload) _reloadForAccount(_needReload); }
+function _authReady() { window.__authReady = true; try { window.dispatchEvent(new Event("kaduna-auth-ready")); } catch (e) {} }
 let _freshLogin = false;      // true when the player just typed their details this visit -> skip the welcome screen
 export function initAuth(onAuth) {
   _onAuth = onAuth;
@@ -45,11 +46,13 @@ export function initAuth(onAuth) {
           const wasNewLife = await _applyPendingNewLife(user);
           if (_onAuth) _onAuth(user);                       // the game loads behind the welcome screen
           if (!_freshLogin && !wasNewLife) showWelcome(user); // returning player: Continue / New life / Log out
+          _authReady();
         }
       } else {
         isAuthed = false;
         hideWelcome();
         showAuthModal();
+        _authReady();
       }
     });
   });

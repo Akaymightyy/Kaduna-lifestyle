@@ -10,7 +10,7 @@ import { createMinimap } from "./minimap.js";
 import { addCity } from "./city.js";
 import { WIDE_AVENUES_X, WIDE_CROSS_Z, MAP_HALF_X, MAP_HALF_Z } from "./config.js";
 import { TIPS, NEEDS, FOOD_ITEMS, JOBS, RANKS, ZONES, RIDES, MAP_LOCATIONS, DAILY_QUESTS, DAILY_REWARDS, TIME_SCALE, REAL_MS_PER_GAME_HOUR, FIXED_HOUR, SHOW_NIGHT } from "./config.js";
-import { createGameState } from "./needs.js";
+import { createGameState, getGameUid } from "./needs.js";
 import { auth, db } from "./firebase.js";
 import { initAuth, showAuthModal, wireAuthUI, logout, isAuthed } from "./auth.js";
 import { driveStep, ksrDriveStep } from "./drive.js";
@@ -721,13 +721,27 @@ function applyTime() {
 }
 
 const player = { pos: new THREE.Vector3(-9,0,11), heading: Math.PI, speed: 0 };
-// START-POSITION FIX (Nov 1): the game used to restore the last saved spot, which could be a club doorway or a
-// wall, so the first thing you saw was a black half-screen from inside a building. Now every visit starts at the
-// normal safe spawn. (The position is still saved below in case we want a safe "continue" later.)
+// CONTINUE WHERE YOU STOPPED (Nov 1): the last outside position is saved per account and restored when the world is
+// ready - but only if it is a safe spot (inside the map, not inside a building, not at a place door). Anything odd = normal spawn.
 let _posSaveT = 0;
+const _posKey = () => "kaduna-pos-" + (getGameUid() || "x");
 function savePos(dt) {
   _posSaveT += dt; if (_posSaveT < 2) return; _posSaveT = 0;
-  try { localStorage.setItem("kaduna-pos", JSON.stringify({ x: +player.pos.x.toFixed(1), z: +player.pos.z.toFixed(1), h: +player.heading.toFixed(2) })); } catch (e) {}
+  try { localStorage.setItem(_posKey(), JSON.stringify({ x: +player.pos.x.toFixed(1), z: +player.pos.z.toFixed(1), h: +player.heading.toFixed(2) })); } catch (e) {}
+}
+function restoreSavedPos() {
+  try {
+    const sp = JSON.parse(localStorage.getItem(_posKey()));
+    if (!sp || !Number.isFinite(sp.x) || !Number.isFinite(sp.z)) return;
+    if (Math.abs(sp.x) > MAP_HALF_X - 8 || Math.abs(sp.z) > MAP_HALF_Z - 8) return;
+    for (const pl of listPlaces()) {                                   // never start on a doorstep
+      for (const [ex, ez] of [[pl.entranceX, pl.entranceZ], [pl.worldX, pl.worldZ]]) if (Number.isFinite(ex) && Number.isFinite(ez) && Math.hypot(sp.x - ex, sp.z - ez) < 14) return;
+    }
+    const probe = new THREE.Vector3(sp.x, 0, sp.z);
+    collide(probe, world.colliders);
+    if (Math.hypot(probe.x - sp.x, probe.z - sp.z) > 0.3) return;      // it was inside something solid
+    player.pos.set(sp.x, 0, sp.z); if (Number.isFinite(sp.h)) player.heading = sp.h;
+  } catch (e) {}
 }
 let rig; let toastT=0;
 function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("show"),2000);
@@ -4660,11 +4674,15 @@ Promise.all([loadPlayer(manager, scene, game.state.look), addCity(scene, world, 
   rig = r; rig.group.castShadow = true;
   if (rig.recolor) rig.recolor(game.state.look); // in case the account outfit arrived while loading
   setProgress(1);
+  restoreSavedPos();
   ctl.yaw = player.heading + Math.PI;
   updateHUD();
   
   frame();
-  $("loading").classList.add("done");
+  // Keep the green loading screen up until the login / "Continue" screen is ready (before, the empty world showed for ~5s).
+  const _hideLoading = () => $("loading").classList.add("done");
+  if (window.__authReady || window.__bypassAuth) _hideLoading();
+  else { window.addEventListener("kaduna-auth-ready", _hideLoading, { once: true }); setTimeout(_hideLoading, 20000); }
   window.__dbg = { ride: (id) => { initVehicles(scene, null, () => {}); return spawnRideVehicle(id, player.pos, player.heading, toast); }, player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig, cullStats, trafficCars: () => traffic.positions.length, trafficPos: () => traffic.positions.slice(0, 8), col: () => collisionStats(), probe: (x, z, r) => probeBlocked(x, z, r), probeBox: (x, z, r) => firstHit(x, z, r), vehBox: (id) => vehBoxOf(id), lampDebug: () => ({ hasPos: Array.isArray(world.lampPositions), n: world.lampPositions ? world.lampPositions.length : -1, lights: world.lampLights.map((l) => [Math.round(l.position.x), Math.round(l.position.z)]) }) };
   window.__ready = true;
 }).catch((e) => showError("Could not load the game: " + e.message));
