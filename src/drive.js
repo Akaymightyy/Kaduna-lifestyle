@@ -53,31 +53,35 @@ const KS = 0.3;
 export function ksrDriveStep(player, input, dt, st) {
   const steer = Math.max(-1, Math.min(1, input.steer || 0));
   const thr = Math.max(-1, Math.min(1, input.throttle || 0));
-  const k = player.kvel || (player.kvel = { x: Math.sin(player.heading) * (player.speed || 0), z: Math.cos(player.heading) * (player.speed || 0) });
+  const k = player.kvel || (player.kvel = { x: 0, z: 0 });   // a fresh ride always starts standing still
   const fx = Math.sin(player.heading), fz = Math.cos(player.heading);
   let fwd = k.x * fx + k.z * fz;
-  const max = st.top * KS;
+  // NITRO tank: burns while held, refills slowly
+  if (player.nitro == null) player.nitro = 1;
+  const boosting = !!input.boost && thr > 0 && player.nitro > 0.02;
+  player.nitro = boosting ? Math.max(0, player.nitro - 0.26 * dt) : Math.min(1, player.nitro + 0.05 * dt);
+  const max = st.top * KS * (boosting ? 1.22 : 1);
   if (thr > 0) {
-    const a = st.accel * KS * Math.max(0, Math.min(1, 1 - fwd / (max * thr)));
+    const a = st.accel * KS * (boosting ? 1.6 : 1) * Math.max(0, Math.min(1, 1 - fwd / max));
     k.x += fx * a * dt; k.z += fz * a * dt;
   }
-  const drifting = thr < 0 && Math.abs(steer) > 0.3 && fwd > max * 0.4;
-  if (thr < 0 && fwd > 0) {
-    const b = Math.min(fwd, 58 * KS * (drifting ? 0.3 : 1) * Math.min(1, -thr * 1.5) * dt);
+  const drifting = !!input.drift && fwd > st.top * KS * 0.3;
+  if (thr < 0) {   // BRAKE: stops the car (never reverses), hard
+    const b = Math.min(Math.max(0, fwd), 70 * KS * dt * 1.6);
     k.x -= fx * b; k.z -= fz * b;
   }
   fwd = k.x * fx + k.z * fz;
-  // steering: needs some speed, gets lazier at very high speed (same curve as KSR)
   const grip = Math.max(0, Math.min(1, Math.abs(fwd) / (16 * KS)));
   player.steerSm = (player.steerSm || 0) + (steer - (player.steerSm || 0)) * (1 - Math.exp(-dt * 10));
   player.heading -= player.steerSm * st.steer * grip / (1 + Math.abs(fwd) / (85 * KS)) * dt * (drifting ? 1.5 : 1);
-  // drag (rolls to a stop when you let go) and grip: velocity swings round to the nose direction
-  const dr = Math.exp(-(thr > 0 || drifting ? 0.14 : 0.5) * dt); k.x *= dr; k.z *= dr;
+  // NO gas = the car slows down properly (no free-rolling). Gas = only light drag.
+  const dr = Math.exp(-(thr > 0 ? 0.14 : thr < 0 ? 1.0 : 1.2) * dt * (drifting ? 0.4 : 1));
+  k.x *= dr; k.z *= dr;
   const nfx = Math.sin(player.heading), nfz = Math.cos(player.heading);
   const sp = Math.hypot(k.x, k.z), g = 1 - Math.exp(-(drifting ? st.drift : 7.5) * dt);
   const dir = (k.x * nfx + k.z * nfz) >= 0 ? 1 : -1;
   k.x += (nfx * sp * dir - k.x) * g; k.z += (nfz * sp * dir - k.z) * g;
-  if (Math.hypot(k.x, k.z) < 0.08 && thr <= 0) { k.x = 0; k.z = 0; }
+  if (thr <= 0 && Math.hypot(k.x, k.z) < 0.6) { k.x = 0; k.z = 0; }   // creeping speeds snap to a full stop
   player.pos.x += k.x * dt; player.pos.z += k.z * dt;
   player.speed = Math.max(0, k.x * nfx + k.z * nfz);
 }

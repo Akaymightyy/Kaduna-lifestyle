@@ -4294,10 +4294,12 @@ function _frame() {
     //   * keyboard WASD/arrows still work (W=gas, S=brake, A/D=steer).
     const maxVehSpd = getRideSpeed() * 3.2;   // top speed (bigger = faster cars); GAS ramps up to it
     let steer = (Math.abs(ctl.joyX || 0) > 0.08 ? ctl.joyX : 0);
-    let throttle = (vehInput.gas ? 1 : 0) - (vehInput.brake ? 1 : 0);
     const k = ctl.keys || {};
-    if (k["w"] || k["arrowup"]) throttle += 1;
-    if (k["s"] || k["arrowdown"]) throttle -= 1;
+    const _gas = vehInput.gas || k["w"] || k["arrowup"], _brk = vehInput.brake || k["s"] || k["arrowdown"];
+    let throttle = _brk ? -1 : (_gas ? 1 : 0);   // BRAKE always wins over gas
+    const _drift = !!(vehInput.drift || k[" "]), _boost = !!(vehInput.boost || k["shift"]);
+    if (!player._wasRiding) { player.kvel = null; player.speed = 0; }   // fresh ride: never inherit an old velocity (this was the "drives by itself" bug)
+    player._wasRiding = true;
     if (k["a"] || k["arrowleft"]) steer -= 1;
     if (k["d"] || k["arrowright"]) steer += 1;
     throttle = Math.max(-1, Math.min(1, throttle));
@@ -4307,7 +4309,7 @@ function _frame() {
     const _kv = getVehicle(getRideId());
     const _heavy = _kv && (_kv.id === "bus" || _kv.id === "suv" || _kv.id === "jeep");
     const _ks = (_kv && _kv.stats) || (_kv && (_kv._st || (_kv._st = { top: _kv.speed * 3.2 / 0.3 * 1.15, accel: _kv.speed * 3.2 / 0.3 * 0.5, steer: _heavy ? 1.7 : 2.0, drift: 1.7 })));
-    if (_ks) ksrDriveStep(player, { steer, throttle }, dt, _ks);
+    if (_ks) ksrDriveStep(player, { steer, throttle, drift: _drift, boost: _boost }, dt, _ks);
     else driveStep(player, { steer, throttle }, dt, maxVehSpd);
     // camera swings round behind the vehicle while it moves (like a real driving game)
     if (player.speed > 0.8) {
@@ -4315,6 +4317,7 @@ function _frame() {
       ctl.yaw += dy * (1 - Math.exp(-dt * 1.8));
     }
   } else {
+    player._wasRiding = false; player.kvel = null;
     // NORMAL WALKING (existing camera-relative control scheme)
     const it = ctl.intent();
     const _actOn = tickActivity(dt, it.mag);        // eating / swimming / sleeping... owns the character while it runs

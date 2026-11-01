@@ -16,10 +16,10 @@
 //   resetVehInput()      — force-release everything (call on dismount)
 //   setVehicleControlsVisible(v) — show/hide the overlay
 
-export const vehInput = { steer: 0, gas: 0, brake: 0 };
+export const vehInput = { steer: 0, gas: 0, brake: 0, drift: 0, boost: 0 };
 
 let _root = null;
-const held = new Map(); // pointerId -> "gas" | "brake"
+const held = new Map(); // pointerId -> "gas" | "brake" | "drift" | "boost"
 
 function recompute(action) {
   let on = 0;
@@ -72,15 +72,22 @@ export function ensureVehicleControls() {
     "position:absolute;right:110px;bottom:calc(130px + env(safe-area-inset-bottom));" +
     "width:64px;height:64px;background:#e11d48;");
 
+  // DRIFT (purple) and NITRO (blue) — same as Kay Super Racing.
+  const driftBtn = makeBtn("DRIFT", "", "drift",
+    "position:absolute;right:110px;bottom:calc(210px + env(safe-area-inset-bottom));width:58px;height:58px;background:#7c3aed;font-size:11px;");
+  const nitroBtn = makeBtn("NITRO", "", "boost",
+    "position:absolute;right:26px;bottom:calc(224px + env(safe-area-inset-bottom));width:62px;height:62px;background:#0284c7;font-size:11px;");
   _root.appendChild(gasBtn);
   _root.appendChild(brakeBtn);
+  _root.appendChild(driftBtn);
+  _root.appendChild(nitroBtn);
   document.body.appendChild(_root);
 
   // KSR reset: if the tab loses focus or is hidden mid-press, release everything
   // (a finger held across a background/foreground must not stay "on").
   const reset = () => {
     held.clear();
-    vehInput.gas = 0; vehInput.brake = 0;
+    vehInput.gas = 0; vehInput.brake = 0; vehInput.drift = 0; vehInput.boost = 0;
     _root.querySelectorAll(".on").forEach((n) => { n.classList.remove("on"); n.style.transform = "scale(1)"; });
   };
   addEventListener("blur", reset);
@@ -94,6 +101,6 @@ export function setVehicleControlsVisible(v) {
 
 export function resetVehInput() {
   held.clear();
-  vehInput.gas = 0; vehInput.brake = 0; vehInput.steer = 0;
+  vehInput.gas = 0; vehInput.brake = 0; vehInput.steer = 0; vehInput.drift = 0; vehInput.boost = 0;
   if (_root) _root.querySelectorAll(".on").forEach((n) => { n.classList.remove("on"); n.style.transform = "scale(1)"; });
 }
