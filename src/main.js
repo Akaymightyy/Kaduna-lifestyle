@@ -3461,11 +3461,21 @@ initAuth((user) => {
     // with a matchId are handled (the challenge is claimed in one atomic
     // write by challenge_system.js, so matchId is always there).
     const _openedMatches = new Set();
+    // STALE MATCH FIX (Nov 1): old finished / abandoned matches kept popping up "You lose" every time the game
+    // loaded. A match only auto-opens if it still exists, has no winner, and was touched in the last 20 minutes.
+    const _matchIsLive = async (id) => {
+      try {
+        const m = (await get(ref(db, "matches/" + id))).val();
+        if (!m || m.winnerUid || m.status === "finished" || m.status === "done") return false;
+        const t = m.updatedAt || m.createdAt || 0;
+        return Date.now() - t < 20 * 60 * 1000;
+      } catch (e) { return false; }
+    };
     subscribeToMyChallenges((mine) => {
       for (const ch of mine) {
         if ((ch.status === "accepted" || ch.status === "active") && ch.matchId && !_openedMatches.has(ch.matchId)) {
           _openedMatches.add(ch.matchId);
-          openMatchForChallenge(ch);
+          _matchIsLive(ch.matchId).then((ok) => { if (ok) openMatchForChallenge(ch); });
         }
       }
     });
@@ -3477,7 +3487,7 @@ initAuth((user) => {
           const m = ms[ms.length - 1];
           if (!_openedMatches.has(m.id)) {
             _openedMatches.add(m.id);
-            openMatchForChallenge({ matchId: m.id, game: m.game });
+            _matchIsLive(m.id).then((ok) => { if (ok) openMatchForChallenge({ matchId: m.id, game: m.game }); });
           }
         }
       }).catch(() => {});
