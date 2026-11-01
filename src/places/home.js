@@ -135,6 +135,7 @@ export async function build(scene, ctx) {
     _ownerUidForStorage = ctx.visitingHouse.ownerUid;
     _visitorName = ctx.visitingHouse.ownerName || "Friend";
   }
+  let _collReady = false;     // set once the colliders array exists (the furniture loads before it)
   let _placedFurniture = [];
   let _furnitureGroup = new THREE.Group();
   group.add(_furnitureGroup);
@@ -228,16 +229,21 @@ export async function build(scene, ctx) {
   // disables its own collider (c.off) so the sit teleport isn't undone, and it
   // re-enables the moment you stand up (see _proximityTick).
   const _NON_SOLID = new Set(["rug_large", "prayer_mat", "painting", "photo_frame"]);
+  // BUGFIX (Nov 1): this used to run BEFORE `const colliders` existed (the furniture is loaded first), which threw
+  // "Cannot access 'colliders' before initialization" - so NO furniture ever became solid. Now it waits for the flag
+  // and is called again right after the colliders array is created. Boxes come from each item's REAL mesh size.
   function _rebuildFurnColliders() {
+    if (!_collReady) return;
     for (let i = colliders.length - 1; i >= 0; i--) if (colliders[i]._furn !== undefined) colliders.splice(i, 1);
-    _placedFurniture.forEach((p, idx) => {
-      const it = getItem(p.id); if (!it || _NON_SOLID.has(p.id)) return;
-      const rot = p.rot || 0, c = Math.abs(Math.cos(rot)), s = Math.abs(Math.sin(rot));
-      // grid cell ≈ 0.8 m (matches makeFurnitureMesh's fallback box size); rotated AABB
-      const hw = (c * (it.w || 1) + s * (it.d || 1)) * 0.4 + 0.08;
-      const hd = (s * (it.w || 1) + c * (it.d || 1)) * 0.4 + 0.08;
-      colliders.push({ minX: (p.x || 0) - hw, maxX: (p.x || 0) + hw, minZ: (p.z || 0) - hd, maxZ: (p.z || 0) + hd, _furn: idx, off: false });
-    });
+    const box = new THREE.Box3();
+    for (const mesh of _furnitureGroup.children) {
+      const idx = mesh.userData.placedIdx, p = _placedFurniture[idx];
+      if (!p || _NON_SOLID.has(p.id)) continue;
+      mesh.updateMatrixWorld(true);
+      box.setFromObject(mesh);
+      if (!isFinite(box.min.x) || box.max.y - box.min.y < 0.15) continue;              // flat things (rugs, mats) stay walkable
+      colliders.push({ minX: box.min.x - 0.05, maxX: box.max.x + 0.05, minZ: box.min.z - 0.05, maxZ: box.max.z + 0.05, _furn: idx, off: false });
+    }
   }
   function _setFurnColliderOff(idx) {
     for (const c of colliders) if (c._furn !== undefined) c.off = idx >= 0 && c._furn === idx;
@@ -259,6 +265,8 @@ export async function build(scene, ctx) {
     { minX:  doorSide + doorWidth/2, maxX: HW, minZ: HD - 0.2, maxZ: HD + 0.2 },  // front-right
     ...layout.colliders,
   ];
+
+  _collReady = true; _rebuildFurnColliders();   // furniture is already loaded: make it solid now
 
   scene.add(group);
 

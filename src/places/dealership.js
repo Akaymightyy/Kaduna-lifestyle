@@ -250,11 +250,11 @@ export async function build(scene, ctx) {
     if (_promptEl) return;
     _promptEl = document.createElement("div");
     _promptEl.style.cssText =
-      "position:fixed;left:50%;bottom:calc(40% + env(safe-area-inset-bottom));" +
-      "transform:translateX(-50%);background:rgba(15,77,58,.92);color:#fff;" +
-      "padding:10px 18px;border-radius:14px;font:600 13px Poppins,sans-serif;" +
+      "position:fixed;left:50%;bottom:calc(238px + env(safe-area-inset-bottom));" +
+      "transform:translateX(-50%);background:rgba(15,77,58,.9);color:#fff;" +
+      "padding:7px 13px;border-radius:12px;font:600 12px Poppins,sans-serif;" +
       "box-shadow:0 4px 14px rgba(0,0,0,.3);display:none;z-index:30;" +
-      "border:1px solid #f2b134;text-align:center;max-width:90vw;cursor:pointer;";
+      "border:1px solid #f2b134;text-align:center;max-width:64vw;cursor:pointer;";
     document.body.appendChild(_promptEl);
   }
   function _showPrompt(text, onClick) {
