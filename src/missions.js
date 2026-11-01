@@ -105,6 +105,12 @@ export function initMissions(uid, onUpdate) {
   onValue(ref(db, "players/" + uid + "/missions"), (snap) => {
     _missions = snap.val() || {};
     _onUpdate?.(getActiveMission());
+  }, (err) => {
+    // BUGFIX (Nov 1): without an error callback, a denied/failed missions read
+    // was swallowed SILENTLY and the quest card stayed on its static
+    // placeholder forever. Log it (and keep the card hidden — main.js only
+    // shows the card once a real snapshot arrives).
+    console.warn("[missions] missions read failed:", err && (err.code || err.message));
   });
 }
 

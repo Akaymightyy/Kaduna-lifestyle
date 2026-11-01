@@ -223,7 +223,6 @@ export function setMyPosition(x, z) { _myX = x; _myZ = z; }
 function updateAvatars() {
   if(!_scene) return;
   const seen=new Set();
-  const _dt = 0.016; // approx
   const FAR = 500 * 500; // hide + skip animation beyond 500m (Oct 21: was 200m — players in outer districts couldn't see each other. Map is 580m wide so 500m covers most of it.)
   for(const [uid,d] of Object.entries(_players)) {
     seen.add(uid);
@@ -258,8 +257,19 @@ function updateAvatars() {
       continue;
     }
     m.group.visible = true;
-    m.group.position.set(px, 0, pz);
-    m.group.rotation.y = d.heading||0;
+    // SMOOTH MOVEMENT (Nov 1): Firebase delivers positions in ~5Hz steps, so
+    // snapping straight to them made remote players GLITCH-TELEPORT (the
+    // choppy movement in the user's video). Now this function only stores the
+    // latest position as a TARGET; tickRemotePlayers(dt) glides the mesh
+    // toward it every frame. First snapshot still snaps (so a newly built
+    // avatar doesn't fly in from 0,0).
+    m.tgtX = px; m.tgtZ = pz; m.tgtH = d.heading || 0;
+    if (!m._placed) {
+      m.group.position.set(px, 0, pz);
+      m.group.rotation.y = d.heading || 0;
+      m.lastX = px; m.lastZ = pz;
+      m._placed = true;
+    }
     // EMOTE BROADCAST (Oct 21): if this remote player has an active emote,
     // show the emoji sprite above their name tag. Clears when expired.
     _updateEmoteSprite(m, d);
@@ -276,17 +286,32 @@ function updateAvatars() {
       m.riding = d.riding || null;
       _swapRidingMesh(m, oldRiding);
     }
-    // Determine if moving (compare to last pos)
-    const dx = px - m.lastX, dz = pz - m.lastZ;
-    const dist = Math.sqrt(dx*dx + dz*dz);
-    const moving = dist > 0.05;
-    const speed = Math.min(3, dist / _dt);
-    m.lastX = px; m.lastZ = pz;
-    if (m.walker && moving) m.walker.animate(_dt, speed, true);
-    else if (m.walker) m.walker.animate(_dt, 0, false);
   }
   for(const [uid,m] of Object.entries(_meshes)) {
     if(!seen.has(uid)) _disposeMesh(uid);
+  }
+}
+
+// SMOOTH MOVEMENT (Nov 1): called from main.js EVERY FRAME with the real dt.
+// Glides every visible remote avatar toward its latest Firebase position and
+// runs the walk animation from the ACTUAL per-frame motion (so legs move at
+// the speed the player really travels, not at snapshot rate).
+export function tickRemotePlayers(dt) {
+  if(!_scene) return;
+  const k = 1 - Math.exp(-dt * 12);   // smoothing: fast enough to track, slow enough to hide the 5Hz steps
+  for(const m of Object.values(_meshes)) {
+    if(!m || !m.group || !m.group.visible || !m._placed) continue;
+    if(m.tgtX === undefined) continue;
+    const px = m.group.position.x, pz = m.group.position.z;
+    const nx = px + (m.tgtX - px) * k, nz = pz + (m.tgtZ - pz) * k;
+    let dh = (m.tgtH || 0) - m.group.rotation.y;
+    dh = Math.atan2(Math.sin(dh), Math.cos(dh));      // shortest way round
+    m.group.rotation.y += dh * k;
+    const moved = Math.hypot(nx - px, nz - pz);
+    const speed = moved / Math.max(dt, 1e-4);
+    m.group.position.x = nx; m.group.position.z = nz;
+    m.lastX = nx; m.lastZ = nz;
+    if (m.walker) m.walker.animate(dt, Math.min(3, speed), moved > 0.0025);
   }
 }
 

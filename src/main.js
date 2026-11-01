@@ -12,7 +12,7 @@ import { auth, db } from "./firebase.js";
 import { initAuth, showAuthModal, wireAuthUI, logout, isAuthed } from "./auth.js";
 import { driveStep, ksrDriveStep } from "./drive.js";
 import { vehInput, ensureVehicleControls, setVehicleControlsVisible, resetVehInput } from "./vehicle_controls.js";
-import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition, getRemotePlayers, setMyPlace, setMyLook, setBlockedUids, setMyRiding, setMyPassengerOf, getPassengerUids, getRemotePlayerData, getMyPlace, getPlayersInRoom } from "./multiplayer.js";
+import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition, getRemotePlayers, setMyPlace, setMyLook, setBlockedUids, setMyRiding, setMyPassengerOf, getPassengerUids, getRemotePlayerData, getMyPlace, getPlayersInRoom, tickRemotePlayers } from "./multiplayer.js";
 import { startRide, travelToZone, travelToPlace, getDestinations } from "./travel.js";
 import { subscribeRichList } from "./economy.js";
 import { createNPCs } from "./npcs.js";
@@ -3281,6 +3281,12 @@ window._claimDaily=(id)=>claimDailyReward(id);
 window._claimWeekly=(id)=>claimWeeklyReward(id);
 function _updateMissionTracker(){
   const el=$("qc-main");if(!el)return;
+  // BUGFIX (Nov 1): the card used to show the STATIC "Getting Started — Visit
+  // the market" HTML for the whole session because Firebase delivers the
+  // missions snapshot a few seconds after login (and on slow networks much
+  // later). The card is now hidden until REAL mission data arrives, so
+  // players never see the fake placeholder quest again.
+  el.style.display = "flex";
   if(!_activeMission){el.querySelector(".qc-title").textContent="All Chapters Complete!";el.querySelector(".qc-desc").textContent="You're a City Legend! 🏆";return;}
   if(_activeMission.isComplete){el.querySelector(".qc-title").textContent="🎉 "+_activeMission.chapter.title+" Complete!";el.querySelector(".qc-desc").textContent="Reward: ₦"+_activeMission.chapter.reward.toLocaleString();return;}
   const ch=_activeMission.chapter;const step=_activeMission.step;const pct=Math.round((_activeMission.stepIdx/ch.steps.length)*100);
@@ -4571,6 +4577,7 @@ function _frame() {
   setMyPlace(active ? (active.id === "home" ? "home:" + (placeCtx.visitingHouse?.ownerUid || getMyUid() || "me") : active.id) : "");
   sendPosition(player.pos.x, player.pos.z, player.heading);
   setMyPosition(player.pos.x, player.pos.z);
+  tickRemotePlayers(dt);   // SMOOTH MOVEMENT (Nov 1): glide remote avatars toward their latest Firebase positions every frame
   tickRoute(player.pos, dt, toast);
   mmT += dt; if (mmT > 0.1) { mmT = 0; mmDraw(player.pos.x, player.pos.z, ctl.yaw, player.heading, traffic.positions); }
   // FIX (Oct 24 — TODO #4): the ?perf=1 overlay only ever ticked on the
