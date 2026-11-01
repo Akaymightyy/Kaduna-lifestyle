@@ -199,6 +199,12 @@
         ".write": "auth.uid === $uid"
       }
     },
+    "presence": {
+      ".read": "auth != null",
+      "$uid": {
+        ".write": "auth.uid === $uid"
+      }
+    },
     "weather": {
       ".read": "auth != null",
       "$worldId": {
