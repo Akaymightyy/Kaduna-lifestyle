@@ -228,6 +228,11 @@ export async function build(scene, ctx) {
     { minX: -20, maxX: 20, minZ: -15, maxZ: -14.7 },    // north wall
     // South wall has a gap for the entrance (no collider)
   ];
+  // SOLID WORLD (Nov 1): the 4 showroom pedestal cars are solid too (the 6 m
+  // "view car" prompt still triggers — you stop ~2.75 m from the pedestal).
+  for (const pp of pedestalPositions) {
+    colliders.push({ minX: pp.x - 2.3, maxX: pp.x + 2.3, minZ: pp.z - 2.3, maxZ: pp.z + 2.3 });
+  }
 
   scene.add(group);
 

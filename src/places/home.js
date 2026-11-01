@@ -219,6 +219,28 @@ export async function build(scene, ctx) {
       }
       _furnitureGroup.add(mesh);
     }
+    _rebuildFurnColliders();
+  }
+
+  // ---- SOLID FURNITURE (Nov 1): every placed item gets a collider so you can't
+  // walk through sofas, beds, tables or the chairs (the "entering through chairs"
+  // bug). Rugs/mats and wall decor stay walkable. The item you are SITTING on
+  // disables its own collider (c.off) so the sit teleport isn't undone, and it
+  // re-enables the moment you stand up (see _proximityTick).
+  const _NON_SOLID = new Set(["rug_large", "prayer_mat", "painting", "photo_frame"]);
+  function _rebuildFurnColliders() {
+    for (let i = colliders.length - 1; i >= 0; i--) if (colliders[i]._furn !== undefined) colliders.splice(i, 1);
+    _placedFurniture.forEach((p, idx) => {
+      const it = getItem(p.id); if (!it || _NON_SOLID.has(p.id)) return;
+      const rot = p.rot || 0, c = Math.abs(Math.cos(rot)), s = Math.abs(Math.sin(rot));
+      // grid cell ≈ 0.8 m (matches makeFurnitureMesh's fallback box size); rotated AABB
+      const hw = (c * (it.w || 1) + s * (it.d || 1)) * 0.4 + 0.08;
+      const hd = (s * (it.w || 1) + c * (it.d || 1)) * 0.4 + 0.08;
+      colliders.push({ minX: (p.x || 0) - hw, maxX: (p.x || 0) + hw, minZ: (p.z || 0) - hd, maxZ: (p.z || 0) + hd, _furn: idx, off: false });
+    });
+  }
+  function _setFurnColliderOff(idx) {
+    for (const c of colliders) if (c._furn !== undefined) c.off = idx >= 0 && c._furn === idx;
   }
 
   // ---- Decorate mode: place / move furniture ----
@@ -314,6 +336,7 @@ export async function build(scene, ctx) {
     pl.pos.set((item.x || 0) + Math.sin(item.rot || 0) * 0.05, 0, (item.z || 0) + Math.cos(item.rot || 0) * 0.05);
     pl.heading = item.rot || 0;
     _sittingIdx = idx;
+    _setFurnColliderOff(idx);   // sitting ON the item: its collider must not push you out
     // HOUSE PARTY (Oct 25): sitting on the right furniture restores needs —
     // Dining Table → +Hunger +Energy, Sofa → +Social +Fun, Bed → +Energy.
     let comfort = "";
@@ -357,7 +380,7 @@ export async function build(scene, ctx) {
   // walk up to a piece -> its menu appears by itself; walk away -> gone
   function _proximityTick() {
     const pl = _P(); if (!pl || _decorateMode) return;
-    if (_sittingIdx >= 0) { if (pl.speed > 0.25) _sittingIdx = -1; else return; }
+    if (_sittingIdx >= 0) { if (pl.speed > 0.25) { _sittingIdx = -1; _setFurnColliderOff(-1); } else return; }
     let best = -1, bd = 1e9;
     for (let i = 0; i < _placedFurniture.length; i++) {
       const f = _placedFurniture[i], it = getItem(f.id); if (!it) continue;
