@@ -399,6 +399,9 @@ export function buildWorld(scene) {
   // Lamps at every crossing
   for (const cx of CROSSINGS) for (const side of [1, -1]) lampPos.push([cx, side * (ROAD_HALF + 0.7), side]);
 
+  // SOLID LAMP POSTS (Nov 1): the pavement lamps had no collider, so people walked straight through them.
+  // (Lamps in the middle of side streets, side === 0, stay non-solid so cars and the lane clearing are not affected.)
+  for (const [lx, lz, ls] of lampPos) if (ls !== 0) colliders.push({ minX: lx - 0.2, maxX: lx + 0.2, minZ: lz - 0.2, maxZ: lz + 0.2, _lamp: true });
   const poles = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.07, 0.1, 6.2, 6).translate(0, 3.1, 0), OL({ color: 0x4a4f55 }), lampPos.length);
   // Lamp head — emissive warm yellow so it glows at night even without the point light
   const headMat = new THREE.MeshStandardMaterial({ color: 0xfff0b0, emissive: 0xffd070, emissiveIntensity: 0.6 });

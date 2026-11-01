@@ -249,6 +249,9 @@ function updateAvatars() {
     // SYNC (Oct 19): if this player is a passenger on MY ride, hide their
     // avatar — they're sitting on my bike, not walking around.
     if (d.passengerOf && d.passengerOf === _uid) { m.group.visible = false; continue; }
+    // PASSENGER (Nov 1): someone riding in another player's CLOSED car (no seat) is hidden inside it for everybody,
+    // instead of standing on the roof. On open rides (okada, keke, bicycle) they stay visible on the back seat.
+    if (d.passengerOf) { const dr = _players[d.passengerOf]; if (!(dr && dr.riding && getSeat(dr.riding))) { m.group.visible = false; continue; } }
     // Distance from local player
     const ddx = px - _myX, ddz = pz - _myZ;
     const distSq = ddx * ddx + ddz * ddz;

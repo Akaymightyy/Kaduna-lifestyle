@@ -2888,7 +2888,7 @@ function _checkFunPlaceProximity() {
   if (!_funActivityPromptEl) {
     _funActivityPromptEl = document.createElement("div");
     _funActivityPromptEl.id = "fun-activity-prompt";
-    _funActivityPromptEl.style.cssText = "position:fixed;left:50%;bottom:calc(45% + env(safe-area-inset-bottom));transform:translateX(-50%);background:rgba(15,77,58,.92);color:#fff;padding:10px 18px;border-radius:14px;font:600 13px Poppins,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.3);display:none;z-index:30;border:1px solid rgba(255,255,255,.2);text-align:center;max-width:90vw;cursor:pointer;";
+    _funActivityPromptEl.style.cssText = "position:fixed;left:50%;bottom:calc(238px + env(safe-area-inset-bottom));transform:translateX(-50%);background:rgba(15,77,58,.9);color:#fff;padding:7px 13px;border-radius:12px;max-width:64vw;font:600 12px Poppins,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.3);display:none;z-index:30;border:1px solid rgba(255,255,255,.2);text-align:center;max-width:90vw;cursor:pointer;";
     document.body.appendChild(_funActivityPromptEl);
     _funActivityPromptEl.addEventListener("click", _onFunActivityTap);
   }
@@ -3924,11 +3924,11 @@ function _onPlotPromptUpdate(info) {
     _plotPromptEl = document.createElement("div");
     _plotPromptEl.id = "plot-knock-prompt";
     _plotPromptEl.style.cssText =
-      "position:fixed;left:50%;bottom:calc(38% + env(safe-area-inset-bottom));" +
-      "transform:translateX(-50%);background:rgba(15,77,58,.92);color:#fff;" +
-      "padding:10px 18px;border-radius:14px;font:600 13px Poppins,sans-serif;" +
+      "position:fixed;left:50%;bottom:calc(238px + env(safe-area-inset-bottom));" +
+      "transform:translateX(-50%);background:rgba(15,77,58,.9);color:#fff;" +
+      "padding:7px 13px;border-radius:12px;font:600 12px Poppins,sans-serif;" +
       "box-shadow:0 4px 14px rgba(0,0,0,.3);display:none;z-index:30;" +
-      "border:1px solid rgba(255,255,255,.2);text-align:center;max-width:90vw;cursor:pointer;";
+      "border:1px solid rgba(255,255,255,.2);text-align:center;max-width:64vw;cursor:pointer;";
     document.body.appendChild(_plotPromptEl);
     _plotPromptEl.addEventListener("click", () => _onPlotPromptTap());
   }
@@ -4459,6 +4459,13 @@ function _frame() {
     // player's feet + legs clip through the vehicle body.
     const _seat = isRiding() ? (window.__dbgSeat || getSeat(getRideId())) : null;
     rig.group.visible = !isRiding() || !!_seat;       // open vehicles (keke, okada, bicycle): the driver sits inside and is seen
+    // PASSENGER (Nov 1): on a closed car (no seat) the passenger used to stand on the roof. Now they are hidden inside it;
+    // on an open ride (okada, keke, bicycle) they sit on the pillion seat.
+    if (_myPassengerUid && !active) {
+      const _drv = getRemotePlayerData(_myPassengerUid), _ds = _drv && _drv.riding ? getSeat(_drv.riding) : null;
+      rig.group.visible = !!_ds;
+      if (_ds) { rig.group.position.y = _ds.y - 0.55; if (!rig.animate.isEmoting || !rig.animate.isEmoting()) rig.animate.emote("sit", 30); }
+    }
     if (_seat && !active) {
       const sh = Math.sin(player.heading), ch = Math.cos(player.heading);
       rig.group.position.x = player.pos.x + sh * _seat.f + ch * _seat.s;
