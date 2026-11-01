@@ -7,6 +7,7 @@ import * as THREE from "three";
 import { createCharacter } from "./characters.js";
 import { ROAD_HALF, WORLD_HALF_X, CROSSINGS, rng } from "./config.js";
 import { collide } from "./player.js";
+import { setDyn } from "./collision.js";
 
 const NPC_COUNT = 3;            // reduced for perf (240 meshes per character)
 const ANIM_DISTANCE = 30;       // metres — skip animation beyond this
@@ -67,7 +68,8 @@ export function createNPCs(scene, colliders = []) {
     // Spawn one NPC per frame until all are loaded
     spawnTick();
 
-    for (const n of npcs) {
+    for (let ni = 0; ni < npcs.length; ni++) {
+      const n = npcs[ni];
       // Walk along X
       n.x += n.dir * n.speed * dt;
       n.walkPhase += dt * (4 + n.speed * 2);
@@ -112,6 +114,9 @@ export function createNPCs(scene, colliders = []) {
       n.group.visible = true;
       n.group.position.set(n.x, 0, n.z);
       n.group.rotation.y = n.heading;
+      // SOLID WORLD (Nov 1): NPCs are solid for the local player + vehicles.
+      // (Far/hidden NPCs skip this line and their entry expires automatically.)
+      setDyn("npc:" + ni, n.x, n.z, 0.4);
 
       // Only animate if close enough to be seen
       if (distSq < ANIM_DISTANCE * ANIM_DISTANCE) {

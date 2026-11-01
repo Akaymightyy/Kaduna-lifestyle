@@ -13,6 +13,7 @@ import { getCarShape } from "./car_shapes.js";
 import { carShape, busShape, personParts, hash2, paint, flatten, B, done } from "./town.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { createCharacter, loadCharacterBase } from "./characters.js";
+import { setDyn } from "./collision.js";
 
 // ---- real 3D vehicles (same models as the main street) swapped in for the box cars ----
 let carG = [], busG = null, glbReady = false;
@@ -397,6 +398,8 @@ export function tickLife(px, pz, show = true) {
     r.ch.group.visible = show; if (!show) continue;
     r.ch.group.position.set(w.x, 0, w.z);
     r.ch.group.rotation.y = w.yaw;
+    // SOLID WORLD (Nov 1): visible pedestrians are solid for the local player.
+    setDyn("life:" + r.who, w.x, w.z, 0.45);
     r.ch.animate(dt, moving ? p.sp * 1.6 : 0);
   }
   const hasRig = new Set(RIGS.filter((r) => r.who >= 0).map((r) => r.who));
@@ -408,6 +411,9 @@ export function tickLife(px, pz, show = true) {
     const dx = x - px, dz = z - pz;
     const si = cars.length + buses.length + i;
     if (hasRig.has(i) || dx * dx + dz * dz > CROWD_R * CROWD_R) { SH.hide(si); return; }
+    // SOLID WORLD (Nov 1): crowd members close to the player are solid too
+    // (checked ~12 m; farther ones expire so the dynamics list stays tiny).
+    if (dx * dx + dz * dz < 144) setDyn("lifep:" + i, x, z, 0.4 * p.sc);
     const j = nj++;
     if (slotOwner[j] !== i) { slotOwner[j] = i; for (const h of PEOPLE_COLS) h.m.setColorAt(j, _col.set(h.c(p))); for (const k in pm) if (pm[k].instanceColor) pm[k].instanceColor.needsUpdate = true; }
     SH.set(si, x, z, 0.9 * p.sc, 0.9 * p.sc);

@@ -5,6 +5,7 @@ import { ref, onValue, set, update, onDisconnect, push, serverTimestamp } from "
 import { onAuthStateChanged } from "firebase/auth";
 import { buildRemoteVehicleMesh, getSeat } from "./vehicles.js";
 import { createCharacter } from "./characters.js";
+import { setDyn, vehBoxOf } from "./collision.js";
 
 
 let _uid=null, _name="Guest", _players={}, _meshes={}, _scene=null, _sendT=null, _onCount=null, _onChat=null;
@@ -299,7 +300,7 @@ function updateAvatars() {
 export function tickRemotePlayers(dt) {
   if(!_scene) return;
   const k = 1 - Math.exp(-dt * 12);   // smoothing: fast enough to track, slow enough to hide the 5Hz steps
-  for(const m of Object.values(_meshes)) {
+  for(const [uid, m] of Object.entries(_meshes)) {
     if(!m || !m.group || !m.group.visible || !m._placed) continue;
     if(m.tgtX === undefined) continue;
     const px = m.group.position.x, pz = m.group.position.z;
@@ -311,6 +312,18 @@ export function tickRemotePlayers(dt) {
     const speed = moved / Math.max(dt, 1e-4);
     m.group.position.x = nx; m.group.position.z = nz;
     m.lastX = nx; m.lastZ = nz;
+    // SOLID WORLD (Nov 1): other players are solid. Their body (or their whole
+    // vehicle, two circles nose+tail) registers as a dynamic collider so the
+    // local player can't walk/drive straight through them. Entries expire in
+    // ~1.2s if the avatar despawns, so no invisible walls are left behind.
+    if (m.riding) {
+      const bx = vehBoxOf(m.riding), fx = Math.sin(m.group.rotation.y), fz = Math.cos(m.group.rotation.y);
+      const off = Math.max(0, bx.hl - bx.hw);
+      setDyn("mp:" + uid, nx + fx * off, nz + fz * off, bx.hw);
+      setDyn("mp:" + uid + "t", nx - fx * off, nz - fz * off, bx.hw);
+    } else {
+      setDyn("mp:" + uid, nx, nz, 0.45);
+    }
     if (m.walker) m.walker.animate(dt, Math.min(3, speed), moved > 0.0025);
   }
 }

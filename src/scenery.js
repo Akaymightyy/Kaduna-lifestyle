@@ -53,6 +53,10 @@ export function addScenery(scene, world) {
       const cone = new THREE.ConeGeometry(1.6, 3.2, 6); cone.translate(tx, 3.1, tz); rb.push(paint(nonIdx(cone), k % 2 ? 0x2f7d3e : 0x3c9449));
     }
     box(rb, ax, 1.1, cz, 2.2, 2.2, 2.2, 0xe8e2d0); box(rb, ax, 3.2, cz, 1.2, 2.2, 1.2, 0x0f7a4a);
+    // SOLID WORLD (Nov 1): the grass island + monument are solid (the ring road
+    // stays clear — the box is inscribed in the 10 m island so corners don't
+    // block it, and traffic.js clearStretches now keeps cars OFF the island too)
+    col.push({ minX: ax - 7, maxX: ax + 7, minZ: cz - 7, maxZ: cz + 7 });
   }
   if (rb.length) mesh(scene, rb, vc());
 

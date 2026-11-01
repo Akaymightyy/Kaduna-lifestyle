@@ -449,6 +449,9 @@ export function buildWorld(scene) {
     const bench = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.15, 0.6), OL({ color: 0x8a6a45 })); bench.position.set(bx, 0.55, z + side * 0.5);
     const sg = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.6), new THREE.MeshBasicMaterial({ map: busStopTex })); sg.position.set(bx, 3.0, z - side * 1.12); sg.rotation.y = side > 0 ? Math.PI : 0;
     world.add(roof, back, bench, sg);
+    // SOLID WORLD (Nov 1): the shelter's glass back wall + bench are solid
+    colliders.push({ minX: bx - 2.5, maxX: bx + 2.5, minZ: z + side * 1 - 0.15, maxZ: z + side * 1 + 0.15 });
+    colliders.push({ minX: bx - 1.7, maxX: bx + 1.7, minZ: z + side * 0.5 - 0.3, maxZ: z + side * 0.5 + 0.3 });
   }
   const boards = [["WELCOME TO KADUNA", "#0f4d3a", -60, 1], ["CENTRE OF LEARNING", "#1d5fa8", 100, -1], ["KADUNA LIFESTYLE", "#c0392b", -150, 1], ["EAT WELL LIVE WELL", "#7a3b8f", 10, -1]];
   for (const [txt, bg, bx, side] of boards) {

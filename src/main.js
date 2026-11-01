@@ -2,6 +2,9 @@ import * as THREE from "three";
 import { buildWorld } from "./world.js";
 import { createTraffic } from "./traffic.js";
 import { loadPlayer, collide } from "./player.js";
+// SOLID WORLD (Nov 1): everything collides — buildings, poles, fences, trees,
+// vehicles, furniture and characters — for walking AND driving.
+import { initCollision, resolvePlayerMove, resolveVehicleMove, resolveBoxed, resolveDyn, collisionStats, vehBoxOf, probeBlocked, firstHit } from "./collision.js";
 import { createControls, updateCamera } from "./controls.js";
 import { createMinimap } from "./minimap.js";
 import { addCity } from "./city.js";
@@ -532,6 +535,7 @@ function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.asp
 addEventListener("resize", resize); resize();
 
 const world = buildWorld(scene);
+initCollision(world.colliders);   // SOLID WORLD: windowed hot-list over the live collider array
 world.world.add(buildStreetDetail(scene, world.colliders));
 const _pShadow = makeBlobShadows(scene, 1);
 addScenery(scene, world);
@@ -4353,19 +4357,22 @@ function _frame() {
   const active = getActivePlace();
   // SAFETY: auto-dismount vehicle when entering a place (can't ride inside a shop)
   if (active && isRiding()) { despawnRideVehicle(); resetVehInput(); toast("🚶 Dismounted (entered building)"); }
-  if (!active && !isBusy()) collide(player.pos, world.colliders);
+  // ---- SOLID WORLD (Nov 1): everything collides now ----
+  // Walking: the body circle vs every static collider (windowed hot list) plus
+  // every character (remote players, NPCs, pedestrians).
+  // Riding: the VEHICLE BODY itself (3-circle chain along the heading) is what
+  // collides — the car can no longer clip through houses/poles/parked cars.
+  // It slides along walls and loses speed on impact instead of ghosting through.
+  // Passengers skip this: their position is owned by the driver every frame.
+  if (!active && !isBusy() && !_myPassengerUid) {
+    if (_riding) resolveVehicleMove(player, getRideId(), dt);
+    else resolvePlayerMove(player.pos, 0.55);
+  }
   // If we're inside a place, also collide with the place's local colliders
-  if (active?.handle?.colliders && !isBusy()) {
-    for (const c of active.handle.colliders) {
-      const cx = Math.max(c.minX, Math.min(player.pos.x, c.maxX));
-      const cz = Math.max(c.minZ, Math.min(player.pos.z, c.maxZ));
-      const dx = player.pos.x - cx, dz = player.pos.z - cz, d2 = dx * dx + dz * dz;
-      const r = 0.45;
-      if (d2 < r * r) {
-        if (d2 > 1e-6) { const d = Math.sqrt(d2), f = (r - d) / d; player.pos.x += dx * f; player.pos.z += dz * f; }
-        else player.pos.x = c.minX - r;
-      }
-    }
+  // (walls + solid furniture) and with other characters in the room.
+  if (active?.handle?.colliders && !isBusy() && !_myPassengerUid) {
+    resolveBoxed(player.pos, 0.45, active.handle.colliders);
+    resolveDyn(player.pos, 0.45);
   }
   // Update active place (NPC animations, smoke, etc.)
   updateActive(dt, now);
@@ -4658,6 +4665,6 @@ Promise.all([loadPlayer(manager, scene, game.state.look), addCity(scene, world, 
   
   frame();
   $("loading").classList.add("done");
-  window.__dbg = { ride: (id) => { initVehicles(scene, null, () => {}); return spawnRideVehicle(id, player.pos, player.heading, toast); }, player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig, cullStats, trafficCars: () => traffic.positions.length, trafficPos: () => traffic.positions.slice(0, 8), lampDebug: () => ({ hasPos: Array.isArray(world.lampPositions), n: world.lampPositions ? world.lampPositions.length : -1, lights: world.lampLights.map((l) => [Math.round(l.position.x), Math.round(l.position.z)]) }) };
+  window.__dbg = { ride: (id) => { initVehicles(scene, null, () => {}); return spawnRideVehicle(id, player.pos, player.heading, toast); }, player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig, cullStats, trafficCars: () => traffic.positions.length, trafficPos: () => traffic.positions.slice(0, 8), col: () => collisionStats(), probe: (x, z, r) => probeBlocked(x, z, r), probeBox: (x, z, r) => firstHit(x, z, r), vehBox: (id) => vehBoxOf(id), lampDebug: () => ({ hasPos: Array.isArray(world.lampPositions), n: world.lampPositions ? world.lampPositions.length : -1, lights: world.lampLights.map((l) => [Math.round(l.position.x), Math.round(l.position.z)]) }) };
   window.__ready = true;
 }).catch((e) => showError("Could not load the game: " + e.message));

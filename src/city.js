@@ -160,7 +160,13 @@ export async function addCity(scene, world, manager) {
         world.mapShapes.buildings.push({ x: cx, z: cz, w, d });
         // low fence along the front, and a tree in the garden
         place("fence-low", cx, side * 16.4, 0, HOUSE_SCALE * 0.9);
-        if (R() < 0.7) place(R() < 0.5 ? "tree-large" : "tree-small", cx + (R() - 0.5) * w * 0.7, side * (18 + R() * 2), R() * 6, HOUSE_SCALE * (0.9 + R() * 0.4));
+        // SOLID WORLD (Nov 1): the front fence + garden tree trunks are solid
+        world.colliders.push({ minX: cx - 2.4, maxX: cx + 2.4, minZ: side * 16.4 - 0.3, maxZ: side * 16.4 + 0.3 });
+        if (R() < 0.7) {
+          const tx = cx + (R() - 0.5) * w * 0.7, tz = side * (18 + R() * 2);
+          place(R() < 0.5 ? "tree-large" : "tree-small", tx, tz, R() * 6, HOUSE_SCALE * (0.9 + R() * 0.4));
+          world.colliders.push({ minX: tx - 0.55, maxX: tx + 0.55, minZ: tz - 0.55, maxZ: tz + 0.55 });
+        }
       }
       x += w + 3 + R() * 4;
     }
