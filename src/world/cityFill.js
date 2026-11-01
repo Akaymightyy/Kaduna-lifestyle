@@ -371,6 +371,8 @@ function buildCityFill(world) {
     const cm = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), OL({ color: 0xffffff }), treePts.length);
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion();
     treePts.forEach(([x, , z], i) => {
+      // SOLID WORLD (Nov 1): tree trunks are solid (walk into a tree, you stop)
+      world.colliders.push({ minX: x - 0.45, maxX: x + 0.45, minZ: z - 0.45, maxZ: z + 0.45 });
       m4.compose(new THREE.Vector3(x, 0, z), q, new THREE.Vector3(0.24, 2.6, 0.24)); tm.setMatrixAt(i, m4);
       const s = 2.2 + R() * 0.6;
       m4.compose(new THREE.Vector3(x, 3.4, z), q, new THREE.Vector3(s, s * 0.8, s)); cm.setMatrixAt(i, m4);
