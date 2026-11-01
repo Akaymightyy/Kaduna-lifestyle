@@ -717,11 +717,9 @@ function applyTime() {
 }
 
 const player = { pos: new THREE.Vector3(-9,0,11), heading: Math.PI, speed: 0 };
-// Remember where the player was, so a refresh does not send them back to the start.
-try {
-  const sp = JSON.parse(localStorage.getItem("kaduna-pos"));
-  if (sp && Number.isFinite(sp.x) && Number.isFinite(sp.z)) { player.pos.set(sp.x, 0, sp.z); if (Number.isFinite(sp.h)) player.heading = sp.h; }
-} catch (e) {}
+// START-POSITION FIX (Nov 1): the game used to restore the last saved spot, which could be a club doorway or a
+// wall, so the first thing you saw was a black half-screen from inside a building. Now every visit starts at the
+// normal safe spawn. (The position is still saved below in case we want a safe "continue" later.)
 let _posSaveT = 0;
 function savePos(dt) {
   _posSaveT += dt; if (_posSaveT < 2) return; _posSaveT = 0;

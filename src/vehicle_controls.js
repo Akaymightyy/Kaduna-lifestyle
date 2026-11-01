@@ -30,7 +30,7 @@ function recompute(action) {
 function makeBtn(label, sub, action, css) {
   const b = document.createElement("button");
   b.innerHTML =
-    '<div style="line-height:1;font-size:' + (sub ? "28" : "24") + 'px;">' + label + "</div>" +
+    '<div style="line-height:1;font-size:' + (sub ? "28" : label.length > 2 ? "11" : "24") + 'px;font-weight:800;letter-spacing:.3px;">' + label + "</div>" +
     (sub ? '<div style="font:800 8px Poppins,sans-serif;margin-top:2px">' + sub + "</div>" : "");
   b.style.cssText = css +
     "display:flex;flex-direction:column;align-items:center;justify-content:center;" +
