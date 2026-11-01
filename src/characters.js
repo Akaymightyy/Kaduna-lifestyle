@@ -220,16 +220,34 @@ function applyAccessories(model, look) {
   // Kaftan/Agbada/Babanriga → add a WIDE flowing robe mesh over the torso (like a real kaftan)
   const ts = look.topStyle;
   if (ts === "kaftan") {
-    // Wide robe: a cone/lathe shape from shoulders to mid-thigh, wider than the body
-    const robePts = [
-      [0.13, 0.55], [0.16, 0.40], [0.20, 0.25], [0.24, 0.10], [0.26, -0.05],
-      [0.27, -0.18], [0.25, -0.32], [0.20, -0.42], [0.12, -0.48],
-    ].map(([x, y]) => new THREE.Vector2(x, y));
+    // NATIVE (Nov 1): a knee-length tunic with long sleeves (each sleeve follows its arm bones) and a darker hem trim.
+    // Slimmer than before so it reads as a kaftan / babariga, not an egg, and the trousers (same cloth) show below.
+    const robePts = [[0.085, 0.57], [0.17, 0.52], [0.19, 0.38], [0.185, 0.15], [0.2, -0.08], [0.215, -0.34], [0.225, -0.46]].map(([x, y]) => new THREE.Vector2(x, y));
     const robeMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(look.top), roughness: 0.88, side: THREE.DoubleSide });
-    attach("Spine", new THREE.Mesh(new THREE.LatheGeometry(robePts, 20), robeMat), 0.0, 0);
-    // Also add a subtle "collar" — a small ring at the neck
-    const collarGeo = new THREE.TorusGeometry(0.07, 0.015, 8, 16);
-    attach("Head", new THREE.Mesh(collarGeo, robeMat), -0.05, 0);
+    const trimMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(look.top).multiplyScalar(0.62), roughness: 0.85 });
+    const robe = new THREE.Mesh(new THREE.LatheGeometry(robePts, 22), robeMat);
+    attach("Spine", robe, 0.0, 0); robe.scale.z *= 0.74;
+    const hem = new THREE.Mesh(new THREE.TorusGeometry(0.221, 0.011, 6, 22).rotateX(Math.PI / 2), trimMat);
+    attach("Spine", hem, -0.455, 0); hem.scale.z *= 0.74;
+    attach("Head", new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.016, 8, 16), trimMat), -0.05, 0);
+    // sleeves: a loose tube from each joint to the next (shoulder→elbow→wrist), flaring a little at the cuff
+    const _Y = new THREE.Vector3(0, 1, 0), _v = new THREE.Vector3();
+    const kidBone = (bone, key) => { let f = null; bone.traverse((o) => { if (!f && o !== bone && o.isBone && base(o.name) === key) f = o; }); return f; };
+    const sleeve = (from, to, r0, r1) => {
+      const bone = _outerBone(model, from); if (!bone) return;
+      const kid = kidBone(bone, to); if (!kid) return;
+      const sc = bone.getWorldScale(new THREE.Vector3()).x || 1;
+      _v.copy(kid.position); const len = _v.length() * sc; if (len < 0.02) return;
+      const g = new THREE.CylinderGeometry(r1, r0, len, 10, 1, true);   // top = far end (wrist side)
+      const m = new THREE.Mesh(g, robeMat); m.userData.acc = true; m.castShadow = false;
+      m.scale.setScalar(1 / sc); m.position.copy(_v).multiplyScalar(0.5);
+      m.quaternion.setFromUnitVectors(_Y, _v.clone().normalize());
+      bone.add(m);
+    };
+    for (const side of ["Left", "Right"]) {
+      sleeve(side + "Arm", side + "ForeArm", 0.062, 0.068);
+      sleeve(side + "ForeArm", side + "Hand", 0.068, 0.085);
+    }
   }
   // Gown → already has a long skirt; make it WIDER so it's clearly a gown, not a thin tube
   if (bs === "gown") {
@@ -264,7 +282,7 @@ function applyAccessories(model, look) {
     attach("Head", new THREE.Mesh(cg, hm), 0, 0);
     attach("Head", new THREE.Mesh(bg, hm), 0, 0);
   }
-  if (w.head === "kufi") {
+  if (w.head === "kufi" || (ts === "kaftan" && look.gender !== "female" && !w.head)) {   // men in native wear get a cap
     const g = new THREE.CylinderGeometry(0.088, 0.1, 0.085, 20);
     attach("Head", new THREE.Mesh(g, ACC_MAT.kufi), 0.215, 0);
   }
@@ -321,7 +339,8 @@ function makeRig(group, model, baseY, pose = "stand") {
   const arms = (a, aR, f, fR, inward = 0.08) => { aim("LeftArm", 0.16, -Math.cos(a), Math.sin(a)); aim("RightArm", 0.16, -Math.cos(aR), Math.sin(aR)); aim("LeftForeArm", inward, -Math.cos(f), Math.sin(f)); aim("RightForeArm", inward, -Math.cos(fR), Math.sin(fR)); };
   let phase = Math.random() * 6.28;
   function animate(dt, speed = 0) {
-    phase += dt * (6 + speed * 1.6);
+    // stride rate follows real speed (walk ~0.9 cycles/s, jog ~1.3, sprint ~1.8) so feet no longer "march" on the spot
+    phase += dt * (speed > 0.15 ? 6.2832 * (0.55 + 0.16 * Math.min(speed, 9)) : 6);
     const sw = Math.sin(phase), amp = Math.min(1, speed / 3.2);
     // FEATURE: emote override — if an emote is active, play it instead of normal anim
     const now = performance.now() / 1000;
@@ -454,10 +473,19 @@ function makeRig(group, model, baseY, pose = "stand") {
     }
     if (model.rotation.x !== 0) model.rotation.x = 0;   // lying / swimming poses tilt the model
     if (speed > 0.15) {
-      model.position.y = baseY + Math.abs(sw) * 0.04 * amp;
-      turn("LeftUpLeg", sw * 0.6 * amp); turn("RightUpLeg", -sw * 0.6 * amp);
-      turn("LeftLeg", Math.max(0, -sw) * 0.8 * amp); turn("RightLeg", Math.max(0, sw) * 0.8 * amp);
-      arms(-sw * 0.55 * amp, sw * 0.55 * amp, 0.3 + Math.max(0, -sw) * 0.5 * amp, 0.3 + Math.max(0, sw) * 0.5 * amp);
+      // REAL GAIT (Nov 1): walk -> jog -> run blend. Hips swing, knees bend on the forward swing (heel kick when running),
+      // arms bend at the elbow and pump against the legs, the body bobs twice per stride and leans into a run.
+      const run = Math.max(0, Math.min(1, (speed - 2.6) / 3.4));
+      const gait = Math.min(1, Math.max(0.35, speed / 1.8));
+      const A = (0.40 + 0.46 * run) * gait, hipB = 0.12 * run;
+      const kBase = 0.07 + 0.13 * run, kMax = (0.75 + 0.95 * run) * gait;
+      const kn = (ph) => -(kBase + kMax * Math.pow(Math.max(0, Math.cos(ph - 0.6)), 1.25));
+      model.position.y = baseY + (0.02 + 0.05 * run) * gait * 0.5 * (1 + Math.cos(2 * phase) * (1 - 2 * run));
+      model.rotation.x = 0.16 * run;
+      turn("LeftUpLeg", A * sw + hipB); turn("RightUpLeg", -A * sw + hipB);
+      turn("LeftLeg", kn(phase)); turn("RightLeg", kn(phase + Math.PI));
+      const sA = (0.38 + 0.55 * run) * gait, elb = 0.22 + 1.2 * run;
+      arms(-sA * sw, sA * sw, elb + 0.3 * run * (1 + sw) * 0.5, elb + 0.3 * run * (1 - sw) * 0.5, 0.08);
     } else if (pose === "pray") {
       model.position.y = baseY;
       turn("LeftUpLeg", 0); turn("RightUpLeg", 0); turn("LeftLeg", 0); turn("RightLeg", 0);

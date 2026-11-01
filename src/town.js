@@ -139,8 +139,9 @@ export function kioskShape() {
 const ball = (r, x, y, z, v, sy = 1, ws = 12, hs = 9) => { const g = new THREE.SphereGeometry(r, ws, hs); g.scale(1, sy, 1); g.translate(x, y, z); return paint(flatten(g), v); };
 export function personParts() {
   const torso = []; B(torso, 0.44, 0.62, 0.25, 0, 1.2, 0, 1); B(torso, 0.4, 0.1, 0.23, 0, 0.93, 0, 0.18); B(torso, 0.1, 0.1, 0.1, 0, 1.54, 0, 0.9);
-  const kaftan = []; B(kaftan, 0.46, 0.7, 0.27, 0, 1.18, 0, 1); B(kaftan, 0.5, 0.98, 0.31, 0, 0.62, 0, 0.92); B(kaftan, 0.54, 0.14, 0.34, 0, 0.22, 0, 0.8);
-  B(kaftan, 0.06, 0.5, 0.02, 0, 1.2, 0.14, 0.65); B(kaftan, 0.15, 0.08, 0.26, -0.1, 0.05, 0.05, 0.1); B(kaftan, 0.15, 0.08, 0.26, 0.1, 0.05, 0.05, 0.1);
+  // KAFTAN (Nov 1): a knee-length tunic with a slim hem, embroidered placket and trim. The legs (matching trousers) show below it.
+  const kaftan = []; B(kaftan, 0.46, 0.7, 0.27, 0, 1.18, 0, 1); B(kaftan, 0.5, 0.6, 0.3, 0, 0.9, 0, 0.94); B(kaftan, 0.52, 0.05, 0.32, 0, 0.6, 0, 0.78);
+  B(kaftan, 0.07, 0.62, 0.02, 0, 1.0, 0.155, 0.62); B(kaftan, 0.16, 0.03, 0.02, 0, 1.52, 0.14, 0.62);
   const gown = []; B(gown, 0.42, 0.66, 0.25, 0, 1.2, 0, 1); gown.push(paint(flatten((() => { const g = new THREE.CylinderGeometry(0.2, 0.36, 0.95, 10); g.translate(0, 0.52, 0); return g; })()), 0.95));
   gown.push(ball(0.215, 0, 1.73, -0.02, 0.9, 1.05)); gown.push(ball(0.2, 0, 1.62, 0.0, 0.8, 0.9));              // hijab: head cover + shoulder drape
   B(gown, 0.15, 0.08, 0.26, -0.1, 0.05, 0.05, 0.1); B(gown, 0.15, 0.08, 0.26, 0.1, 0.05, 0.05, 0.1);

@@ -233,6 +233,7 @@ export function initLife(scene, colliders = []) {
       }
     }
   }
+  for (const p of people) if (p.type === 1) p.bot = p.top;   // kaftan = matching trousers, shown under the tunic
   const mk = (geo) => { const m = new THREE.InstancedMesh(geo, mat, people.length); m.frustumCulled = false; m.count = 0; scene.add(m); return m; };
   pm = { torso: mk(PP.torso), kaftan: mk(PP.kaftan), gown: mk(PP.gown), legL: mk(PP.leg), legR: mk(PP.leg), armL: mk(PP.arm), armR: mk(PP.arm), hair: mk(PP.headHair), cap: mk(PP.headCap), bare: mk(PP.headBare) };
   PEOPLE_COLS = [[pm.torso, (p) => p.top], [pm.kaftan, (p) => p.top], [pm.gown, (p) => p.top], [pm.legL, (p) => p.bot], [pm.legR, (p) => p.bot], [pm.armL, (p) => p.top], [pm.armR, (p) => p.top], [pm.hair, (p) => p.skin], [pm.cap, (p) => p.skin], [pm.bare, (p) => p.skin]].map(([m, c]) => ({ m, c }));
@@ -416,7 +417,7 @@ export function tickLife(px, pz, show = true) {
     const part = (mesh, px_, py_, ang) => { _m2.makeTranslation(px_, py_, 0); if (ang) _m2.multiply(_m3.makeRotationX(ang)); mesh.setMatrixAt(j, _m.multiplyMatrices(_mb, _m2)); };
     pm.torso.setMatrixAt(j, p.type === 0 ? _mb : _Z); pm.kaftan.setMatrixAt(j, p.type === 1 ? _mb : _Z); pm.gown.setMatrixAt(j, p.type === 2 ? _mb : _Z);
     pm.hair.setMatrixAt(j, p.type === 0 ? _mb : _Z); pm.cap.setMatrixAt(j, p.type === 1 ? _mb : _Z); pm.bare.setMatrixAt(j, p.type === 2 ? _mb : _Z);
-    if (p.type === 0) { part(pm.legL, -0.11, 0.9, sw); part(pm.legR, 0.11, 0.9, -sw); } else { pm.legL.setMatrixAt(j, _Z); pm.legR.setMatrixAt(j, _Z); }
+    if (p.type <= 1) { part(pm.legL, -0.11, 0.9, sw); part(pm.legR, 0.11, 0.9, -sw); } else { pm.legL.setMatrixAt(j, _Z); pm.legR.setMatrixAt(j, _Z); }
     part(pm.armL, -0.28, 1.5, moving ? -sw * 0.8 : -0.5 + g); part(pm.armR, 0.28, 1.5, moving ? sw * 0.8 : -0.9 - g);
   });
   for (const k in pm) pm[k].count = nj;

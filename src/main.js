@@ -3198,7 +3198,8 @@ window.claimQuest = async function(questId) {
 $("zin").onclick=()=>ctl.zoom(-1.8); $("zout").onclick=()=>ctl.zoom(1.8);
 $("fit").onclick=()=>{ctl.yaw=player.heading+Math.PI;ctl.pitch=0.38;ctl.dist=6.5;};
 $("eye-solo").onclick=()=>$("ui").classList.remove("hidden");
-$("jog").onclick=()=>{ctl.jog=!ctl.jog;$("jog").classList.toggle("on",ctl.jog);$("jog-t").textContent=ctl.jog?"Jog":"Walk";};
+// Walk -> Jog -> Run (Nov 1): tap the button to go up a gear, and back to Walk after Run.
+$("jog").onclick=()=>{ctl.gait=((ctl.gait||0)+1)%3;ctl.jog=ctl.gait>0;$("jog").classList.toggle("on",ctl.jog);$("jog-t").textContent=["Walk","Jog","Run"][ctl.gait];};
 $("phone-close").onclick=closePhone;
 // Top pill buttons
 $("tp-plus")?.addEventListener("click",()=>{openPhone();setTimeout(()=>showPhoneApp("daily"),50);});
@@ -4332,7 +4333,7 @@ function _frame() {
     if (!_actOn) {
     // ODOGWU FREEZE (Oct 25): a ₦5m spray pauses the whole party for a second
     const _frozen = Date.now() < (window._kadunaPartyFreezeUntil || 0);
-    const maxSpd = _frozen ? 0 : (ctl.jog ? 4.8 : 2.1) * (game.state.needs?.energy < 20 ? 0.5 : 1.0);
+    const maxSpd = _frozen ? 0 : ([2.1, 4.8, 7.6][ctl.gait || (ctl.jog ? 1 : 0)]) * (game.state.needs?.energy < 20 ? 0.5 : 1.0);
     const target = it.mag * maxSpd;
     player.speed += (target - player.speed) * (1 - Math.exp(-dt * 9));
     if (it.mag > 0 && !_frozen) {
