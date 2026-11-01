@@ -66,22 +66,22 @@ export function ksrDriveStep(player, input, dt, st) {
     k.x += fx * a * dt; k.z += fz * a * dt;
   }
   const drifting = !!input.drift && fwd > st.top * KS * 0.3;
-  if (thr < 0) {   // BRAKE: stops the car (never reverses), hard
-    const b = Math.min(Math.max(0, fwd), 70 * KS * dt * 1.6);
-    k.x -= fx * b; k.z -= fz * b;
+  if (thr < 0) {   // BRAKE: stops the car hard, and if you keep holding it the car REVERSES (like KSR)
+    if (fwd > 0.3) { const b = Math.min(fwd, 70 * KS * dt * 1.6); k.x -= fx * b; k.z -= fz * b; }
+    else if (fwd > -20 * KS) { k.x -= fx * 22 * KS * dt; k.z -= fz * 22 * KS * dt; }
   }
   fwd = k.x * fx + k.z * fz;
   const grip = Math.max(0, Math.min(1, Math.abs(fwd) / (16 * KS)));
   player.steerSm = (player.steerSm || 0) + (steer - (player.steerSm || 0)) * (1 - Math.exp(-dt * 10));
-  player.heading -= player.steerSm * st.steer * grip / (1 + Math.abs(fwd) / (85 * KS)) * dt * (drifting ? 1.5 : 1);
+  player.heading -= player.steerSm * st.steer * grip / (1 + Math.abs(fwd) / (85 * KS)) * dt * (drifting ? 1.5 : 1) * (fwd < 0 ? -1 : 1);
   // NO gas = the car slows down properly (no free-rolling). Gas = only light drag.
-  const dr = Math.exp(-(thr > 0 ? 0.14 : thr < 0 ? 1.0 : 1.2) * dt * (drifting ? 0.4 : 1));
+  const dr = Math.exp(-(thr > 0 ? 0.14 : thr < 0 ? (fwd < 0.3 ? 0.1 : 1.0) : 1.2) * dt * (drifting ? 0.4 : 1));
   k.x *= dr; k.z *= dr;
   const nfx = Math.sin(player.heading), nfz = Math.cos(player.heading);
   const sp = Math.hypot(k.x, k.z), g = 1 - Math.exp(-(drifting ? st.drift : 7.5) * dt);
   const dir = (k.x * nfx + k.z * nfz) >= 0 ? 1 : -1;
   k.x += (nfx * sp * dir - k.x) * g; k.z += (nfz * sp * dir - k.z) * g;
-  if (thr <= 0 && Math.hypot(k.x, k.z) < 0.6) { k.x = 0; k.z = 0; }   // creeping speeds snap to a full stop
+  if (thr === 0 && Math.hypot(k.x, k.z) < 0.6) { k.x = 0; k.z = 0; }   // creeping speeds snap to a full stop
   player.pos.x += k.x * dt; player.pos.z += k.z * dt;
   player.speed = Math.max(0, k.x * nfx + k.z * nfz);
 }
