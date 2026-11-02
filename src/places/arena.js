@@ -19,6 +19,7 @@ import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { rng } from "../config.js";
 import { spawnPeople } from "./people.js";
+import { openArenaGame } from "../arena_games.js";
 
 let _built = false, _cache = null;
 
@@ -30,7 +31,7 @@ export async function build(scene, ctx) {
   group.visible = false;
 
   // ---- Floor: polished concrete with lane markers ----
-  group.add(floor(50, 40, 0x2a2a2a, 9));
+  group.add(floor(50, 40, 0x9aa0ad, 9));
   // Bowling lane wood flooring (2 strips)
   for (let li = 0; li < 2; li++) {
     const laneX = -15 + li * 30;
@@ -45,12 +46,12 @@ export async function build(scene, ctx) {
 
   // ---- Walls: opaque on all 4 sides ----
   group.add(mergedMesh([
-    box(50, 5, 0.3, 0, 2.5, -20, 0x1a3b4a),
-    box(0.3, 5, 40, -25, 2.5, 0, 0x1a3b4a),
-    box(0.3, 5, 40, 25, 2.5, 0, 0x1a3b4a),
+    box(50, 5, 0.3, 0, 2.5, -20, 0x5f9bb8),
+    box(0.3, 5, 40, -25, 2.5, 0, 0x5f9bb8),
+    box(0.3, 5, 40, 25, 2.5, 0, 0x5f9bb8),
     // South wall split for entrance
-    box(22, 5, 0.3, -14, 2.5, 20, 0x1a3b4a),
-    box(22, 5, 0.3, 14, 2.5, 20, 0x1a3b4a),
+    box(22, 5, 0.3, -14, 2.5, 20, 0x5f9bb8),
+    box(22, 5, 0.3, 14, 2.5, 20, 0x5f9bb8),
   ]));
   // Gold door frame
   group.add(mergedMesh([
@@ -61,7 +62,7 @@ export async function build(scene, ctx) {
   // Roof
   const roof = new THREE.Mesh(
     new THREE.BoxGeometry(50, 0.2, 40),
-    new THREE.MeshLambertMaterial({ color: 0x1a1a2a })
+    new THREE.MeshLambertMaterial({ color: 0xc9ccd8 })
   );
   roof.position.set(0, 5.1, 0);
   group.add(roof);
@@ -87,7 +88,9 @@ export async function build(scene, ctx) {
   group.add(subSign);
 
   // ---- Lighting: bright + warm ----
-  group.add(interiorLights({ ambient: 0.9 }));
+  group.add(interiorLights({ ambient: 1.3 }));
+  group.add(new THREE.AmbientLight(0xffffff, 0.9));
+  group.add(new THREE.HemisphereLight(0xffffff, 0x8890a0, 0.8));
   // Neon strip lights (coloured — arcade vibe)
   const stripColors = [0xff2a6d, 0x05d9e8, 0xd1f7ff, 0xf2b134];
   for (let i = 0; i < 4; i++) {
@@ -190,7 +193,7 @@ export async function build(scene, ctx) {
     // Cabinet body
     const cab = new THREE.Mesh(
       new THREE.BoxGeometry(1.2, 2.5, 1.0),
-      new THREE.MeshLambertMaterial({ color: 0x1a1a2a })
+      new THREE.MeshLambertMaterial({ color: 0xc9ccd8 })
     );
     cab.position.set(mx, 1.25, mz);
     group.add(cab);
@@ -243,7 +246,7 @@ export async function build(scene, ctx) {
   // Okada cabinet body
   const okadaCab = new THREE.Mesh(
     new THREE.BoxGeometry(0.8, 2.5, 3.5),
-    new THREE.MeshLambertMaterial({ color: 0x1a1a2a })
+    new THREE.MeshLambertMaterial({ color: 0xc9ccd8 })
   );
   okadaCab.position.set(-24.5, 1.25, 0);
   group.add(okadaCab);
@@ -308,11 +311,8 @@ export async function build(scene, ctx) {
     dispose() { if (_people) _people.dispose(); scene.remove(group); disposeGroup(group); _built = false; _cache = null; },
     colliders,
     onUIEvent(eid) {
-      if (eid === "bowling") ctx.toast("🎳 Bowling — coming soon! Play setup in progress.");
-      else if (eid === "pool") ctx.toast("🎱 Pool — coming soon! Rack 'em up.");
-      else if (eid === "arcade") ctx.toast("🕹️ Arcade — coming soon! Insert coin.");
-      else if (eid === "okada_dash") ctx.toast("🏍️ Okada Dash — coming soon! Endless runner.");
-      else if (eid === "browse") ctx.toast("👀 Look around. Games coming soon!");
+      if (eid === "bowling" || eid === "pool" || eid === "arcade" || eid === "okada_dash") openArenaGame(eid);
+      else if (eid === "browse") ctx.toast("👀 Games: Bowling lanes, Pool table, Arcade machines, Okada Dash screen — walk to one and tap it.");
     },
   };
 
