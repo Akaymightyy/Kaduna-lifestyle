@@ -97,6 +97,36 @@ export async function buyVehicle(vehicleId, gameState, toast) {
   }
 }
 
+// ---- Sell an owned vehicle: you get SELL_RATE of the catalog price back (money + garage change together) ----
+export const SELL_RATE = 0.6;
+export function sellPriceOf(vehicleId) { const v = getVehicle(vehicleId); return v ? Math.floor((v.price || 0) * SELL_RATE) : 0; }
+export async function sellVehicle(vehicleId, gameState, toast) {
+  if (!_uid) { toast?.("Sign in first"); return false; }
+  const v = getVehicle(vehicleId);
+  if (!v) { toast?.("Unknown vehicle"); return false; }
+  if (!ownsVehicle(vehicleId)) { toast?.("You don't own " + v.name); return false; }
+  if (_riding && _riding.vehicleId === vehicleId) { toast?.("Dismount first, then sell"); return false; }
+  const price = sellPriceOf(vehicleId);
+  if (price <= 0) { toast?.(v.name + " is a free starter — can't be sold"); return false; }
+  const before = gameState.money || 0;
+  try {
+    const newBal = Math.floor(before + price);
+    await update(ref(db, "/"), {
+      ["economy/" + _uid + "/balance"]: newBal,
+      ["players/" + _uid + "/vehicles/" + vehicleId]: null,
+    });
+    gameState.money = newBal;
+    delete _owned[vehicleId];
+    toast?.("💰 Sold " + v.name + " for ₦" + price.toLocaleString());
+    return true;
+  } catch (e) {
+    gameState.money = before;
+    console.warn("[vehicles] sell failed:", e && e.message);
+    toast?.("Sell failed: " + String((e && (e.code || e.message)) || "unknown").slice(0, 80));
+    return false;
+  }
+}
+
 // ---- Build a single vehicle mesh (reuses traffic.js geometry builders) ----
 // We import the TYPES from traffic.js lazily to avoid circular deps.
 let _trafficTypes = null;

@@ -80,7 +80,7 @@ import { initOsmCity } from "./world/osmCity.js";
 // Oct 25: our OWN procedural city filler (Kaduna-style buildings, no real
 // map data) — see src/world/cityFill.js.
 import { initCityFill } from "./world/cityFill.js";
-import { getSeat, VEHICLE_CATALOG, getVehicle, initVehicles, buyVehicle, getOwned, ownsVehicle, isRiding, getRideSpeed, getRideId, spawnRideVehicle, despawnRideVehicle, tickRideVehicle } from "./vehicles.js";
+import { getSeat, VEHICLE_CATALOG, getVehicle, initVehicles, buyVehicle, getOwned, ownsVehicle, isRiding, getRideSpeed, getRideId, spawnRideVehicle, despawnRideVehicle, tickRideVehicle, sellVehicle, sellPriceOf } from "./vehicles.js";
 import { hitRide, tickRideDamage, rideHp, rideDead, crashCooldown } from "./damage.js";
 import { extendCatalog } from "./dealership_catalog.js";
 import { buildStreetDetail, makeBlobShadows } from "./street.js";
@@ -1056,6 +1056,7 @@ function _showPhoneApp(appId) {
           h += '<span style="font-size:10px;color:#4ade80;">Riding</span>';
         } else {
           h += '<button onclick="window._rideVehicle(\'' + id + '\')" style="background:#4ade80;color:#000;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font:600 11px Poppins,sans-serif;"> Ride</button>';
+          if (sellPriceOf(id) > 0) h += '<button onclick="window._sellVehicle(\'' + id + '\')" style="background:#e11d48;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer;font:600 11px Poppins,sans-serif;margin-left:4px;">Sell ₦' + sellPriceOf(id).toLocaleString() + '</button>';
         }
         h += '</div>';
       }
@@ -2802,6 +2803,14 @@ window._buyVehicle = async (vehicleId) => {
   const ok = await buyVehicle(vehicleId, game.state, toast);
   if (ok) { updateHUD(); showPhoneApp("cars"); }
 };
+// FEATURE: Sell an owned vehicle (60% of its price back)
+window._sellVehicle = async (vehicleId) => {
+  const v = getVehicle(vehicleId);
+  if (!v) return;
+  if (!confirm("Sell " + v.name + " for ₦" + sellPriceOf(vehicleId).toLocaleString() + "? E no go fit come back free.")) return;
+  const ok = await sellVehicle(vehicleId, game.state, toast);
+  if (ok) { updateHUD(); showPhoneApp("cars"); }
+};
 // FEATURE: Ride a vehicle (spawn mesh + boost speed)
 window._rideVehicle = async (vehicleId) => {
   if (isRiding()) { toast("Already riding — dismount first"); return; }
@@ -4529,10 +4538,13 @@ function _frame() {
     rig.group.visible = !isRiding() || !!_seat;       // open vehicles (keke, okada, bicycle): the driver sits inside and is seen
     // PASSENGER (Nov 1): on a closed car (no seat) the passenger used to stand on the roof. Now they are hidden inside it;
     // on an open ride (okada, keke, bicycle) they sit on the pillion seat.
+    const _wasSeated = rig._seated;
+    rig._seated = false;
     if (_myPassengerUid && !active) {
       const _drv = getRemotePlayerData(_myPassengerUid), _ds = _drv && _drv.riding ? getSeat(_drv.riding) : null;
       rig.group.visible = !!_ds;
-      if (_ds) { rig.group.position.y = _ds.y - 0.55; if (!rig.animate.isEmoting || !rig.animate.isEmoting()) rig.animate.emote("sit", 30); }
+      if (_ds) { rig.group.position.y = _ds.y - 0.55; if (!rig.animate.isEmoting || !rig.animate.isEmoting()) rig.animate.emote("sit", 30); rig._seated = true; }
+      if (_ds) rig._seated = true;
     }
     if (_seat && !active) {
       const sh = Math.sin(player.heading), ch = Math.cos(player.heading);
@@ -4540,7 +4552,10 @@ function _frame() {
       rig.group.position.z = player.pos.z + ch * _seat.f - sh * _seat.s;
       rig.group.position.y = _seat.y - 0.55;
       if (!rig.animate.isEmoting || !rig.animate.isEmoting()) rig.animate.emote("sit", 30);
+      rig._seated = true;
     }
+    // just got off a vehicle (dismount, kicked, entered a building): stand up instead of staying in the sitting pose
+    if (_wasSeated && !rig._seated && rig.animate.stopEmote) rig.animate.stopEmote();
     // ---- Footstep dust + sound (Oct 19) ----
     if (player.speed > 0.05 && !isRiding() && !active) {
       _stepT = (_stepT || 0) - dt;
