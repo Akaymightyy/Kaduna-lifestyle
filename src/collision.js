@@ -82,11 +82,13 @@ export function initCollision(colliders) { _cols = colliders; }
 // Call EVERY FRAME (or at least every ~0.5 s) while the character is active;
 // entries that stop being refreshed expire automatically after 1.2 s, so a
 // despawned/hidden avatar never leaves an invisible wall behind.
-export function setDyn(id, x, z, r) {
+// ped = a person on foot: blocks other walkers, but a VEHICLE is never pushed by (or damaged by) pedestrians —
+// pedestrians wait for cars instead (life.js / npcs.js freeze walkers near the player's vehicle).
+export function setDyn(id, x, z, r, ped = false) {
   const t = performance.now() / 1000;
   const d = _dyn.get(id);
-  if (d) { d.x = x; d.z = z; d.r = r; d.t = t; }
-  else _dyn.set(id, { x, z, r, t });
+  if (d) { d.x = x; d.z = z; d.r = r; d.t = t; d.ped = ped; }
+  else _dyn.set(id, { x, z, r, t, ped });
 }
 export function clearDyn(id) { _dyn.delete(id); }
 
@@ -227,6 +229,7 @@ export function resolveVehicleMove(player, rideId, dt) {
         }
       }
       for (const d of _dyn.values()) {
+        if (d.ped) continue;                       // pedestrians can't shove a vehicle
         const dx = cx - d.x, dz = cz - d.z, rr = box.hw + d.r, d2 = dx * dx + dz * dz;
         if (d2 < rr * rr && d2 > 1e-6) {
           const dd = Math.sqrt(d2), f = (rr - dd) / dd;

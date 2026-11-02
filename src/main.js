@@ -4438,10 +4438,10 @@ function _frame() {
     // Scraping a wall / tapping a pole = nothing. A real crash = dents, smoke, and if it is hard enough the car is wrecked.
     if (_riding) {
       const imp = lastImpact(), closing = imp.speed;
-      const thr = imp.soft ? 9 : 5.5;                          // m/s of closing speed before ANYTHING breaks (poles/trees are softer)
+      const thr = imp.soft ? 13 : 9;                          // m/s of closing speed before ANYTHING breaks (poles/trees are softer)
       if (closing > thr && !rideDead() && !crashCooldown()) {
         const _heavyV = getRideId() === "bus" || getRideId() === "jeep" || getRideId() === "suv";
-        const _dmg = Math.min(60, (closing - thr + 2) * 1.7) * (imp.soft ? 0.5 : 1) * (_heavyV ? 0.75 : 1);
+        const _dmg = Math.min(45, (closing - thr + 2) * 1.0) * (imp.soft ? 0.5 : 1) * (_heavyV ? 0.75 : 1);
         const _before = rideHp();
         hitRide(_dmg, player.pos.x - imp.nx * 1.8, player.pos.z - imp.nz * 1.8);
         sfx.crash(Math.min(1, closing / 20));
@@ -4503,6 +4503,7 @@ function _frame() {
   if (traffic.setPedestrianPos) { const _riding = isRiding(); traffic.setPedestrianPos(_riding ? 1e9 : player.pos.x, _riding ? 1e9 : player.pos.z); }
   setLifePlayerVehicle(player.pos.x, player.pos.z, isRiding());
   if (!active) traffic.update(now);
+  if (npcs.setPlayerVehicle) npcs.setPlayerVehicle(player.pos.x, player.pos.z, isRiding());
   if (!active) npcs.update(dt, now, player.pos.x, player.pos.z);
   hitCool -= dt;
   if (!active) {

@@ -64,6 +64,8 @@ export function createNPCs(scene, colliders = []) {
   const _tmpVec = new THREE.Vector3();
   const _npcPos = new THREE.Vector3();
 
+  const _pvh = { x: 0, z: 0, on: false };
+  function setPlayerVehicle(x, z, on) { _pvh.x = x; _pvh.z = z; _pvh.on = !!on; }
   function update(dt, now, playerX, playerZ) {
     // Spawn one NPC per frame until all are loaded
     spawnTick();
@@ -71,8 +73,9 @@ export function createNPCs(scene, colliders = []) {
     for (let ni = 0; ni < npcs.length; ni++) {
       const n = npcs[ni];
       // Walk along X
-      n.x += n.dir * n.speed * dt;
-      n.walkPhase += dt * (4 + n.speed * 2);
+      // pedestrians wait for the player's vehicle (within ~7 m) instead of getting pushed
+      const held = _pvh.on && (n.x - _pvh.x) * (n.x - _pvh.x) + (n.z - _pvh.z) * (n.z - _pvh.z) < 49;
+      if (!held) { n.x += n.dir * n.speed * dt; n.walkPhase += dt * (4 + n.speed * 2); }
 
       // Wrap around world
       if (n.x > WORLD_HALF_X) n.x = -WORLD_HALF_X;
@@ -116,14 +119,14 @@ export function createNPCs(scene, colliders = []) {
       n.group.rotation.y = n.heading;
       // SOLID WORLD (Nov 1): NPCs are solid for the local player + vehicles.
       // (Far/hidden NPCs skip this line and their entry expires automatically.)
-      setDyn("npc:" + ni, n.x, n.z, 0.4);
+      setDyn("npc:" + ni, n.x, n.z, 0.4, true);
 
       // Only animate if close enough to be seen
       if (distSq < ANIM_DISTANCE * ANIM_DISTANCE) {
-        n.walker.animate(dt, n.speed);
+        n.walker.animate(dt, held ? 0 : n.speed);
       }
     }
   }
 
-  return { update, npcs };
+  return { update, npcs, setPlayerVehicle };
 }

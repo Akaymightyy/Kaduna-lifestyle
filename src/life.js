@@ -148,8 +148,8 @@ const _snapAll = [];                                   // per-vehicle { ln, x, z
 const _wp = { x: 0, z: 0, yaw: 0, moving: true };
 function walkXZ(p, t) {
   if (p.chat) { _wp.x = p.cx; _wp.z = p.az; _wp.yaw = p.face; _wp.moving = false; return _wp; }
-  const ph = (t * p.sp + p.ph) / p.span, f = ph % 2, u = f < 1 ? f : 2 - f, a = -p.span + u * p.span * 2;
-  _wp.moving = true;
+  const ph = ((t - (p.hold || 0)) * p.sp + p.ph) / p.span, f = ph % 2, u = f < 1 ? f : 2 - f, a = -p.span + u * p.span * 2;
+  _wp.moving = !p._held;
   if (p.axis === "z") { _wp.x = p.ax; _wp.z = p.az + a; _wp.yaw = f < 1 ? 0 : Math.PI; } else { _wp.x = p.ax + a; _wp.z = p.az; _wp.yaw = f < 1 ? Math.PI / 2 : -Math.PI / 2; }
   return _wp;
 }
@@ -297,6 +297,14 @@ export function tickLife(px, pz, show = true) {
   if (SH) SH.mesh.visible = show;
   if (BEAM) { BEAM.visible = show && NIGHT_GLOW.value > 0.05; BEAM.material.opacity = NIGHT_GLOW.value * 0.5; }
   if (!show) return;
+  // PEDESTRIANS WAIT FOR CARS: anyone within ~7 m of the player's vehicle stops and lets it pass (their walk clock pauses)
+  for (const p of people) {
+    if (_pv.on) {
+      const w = walkXZ(p, _t), dx = w.x - _pv.x, dz = w.z - _pv.z;
+      if (dx * dx + dz * dz < 49) { p._held = true; p.hold = (p.hold || 0) + dt; continue; }
+    }
+    p._held = false;
+  }
 
   // FIX (Oct 23): runtime guard — every 0.5s, rebuild nearby colliders list
   // (includes lazily-built area colliders from areas_world.js). Per-frame,
@@ -426,7 +434,7 @@ export function tickLife(px, pz, show = true) {
     r.ch.group.position.set(w.x, 0, w.z);
     r.ch.group.rotation.y = w.yaw;
     // SOLID WORLD (Nov 1): visible pedestrians are solid for the local player.
-    setDyn("life:" + r.who, w.x, w.z, 0.45);
+    setDyn("life:" + r.who, w.x, w.z, 0.45, true);
     r.ch.animate(dt, moving ? p.sp * 1.6 : 0);
   }
   const hasRig = new Set(RIGS.filter((r) => r.who >= 0).map((r) => r.who));
@@ -440,7 +448,7 @@ export function tickLife(px, pz, show = true) {
     if (hasRig.has(i) || dx * dx + dz * dz > CROWD_R * CROWD_R) { SH.hide(si); return; }
     // SOLID WORLD (Nov 1): crowd members close to the player are solid too
     // (checked ~12 m; farther ones expire so the dynamics list stays tiny).
-    if (dx * dx + dz * dz < 144) setDyn("lifep:" + i, x, z, 0.4 * p.sc);
+    if (dx * dx + dz * dz < 144) setDyn("lifep:" + i, x, z, 0.4 * p.sc, true);
     const j = nj++;
     if (slotOwner[j] !== i) { slotOwner[j] = i; for (const h of PEOPLE_COLS) h.m.setColorAt(j, _col.set(h.c(p))); for (const k in pm) if (pm[k].instanceColor) pm[k].instanceColor.needsUpdate = true; }
     SH.set(si, x, z, 0.9 * p.sc, 0.9 * p.sc);

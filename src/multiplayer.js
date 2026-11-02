@@ -325,7 +325,7 @@ export function tickRemotePlayers(dt) {
       setDyn("mp:" + uid, nx + fx * off, nz + fz * off, bx.hw);
       setDyn("mp:" + uid + "t", nx - fx * off, nz - fz * off, bx.hw);
     } else {
-      setDyn("mp:" + uid, nx, nz, 0.45);
+      setDyn("mp:" + uid, nx, nz, 0.45, true);
     }
     if (m.walker) m.walker.animate(dt, Math.min(3, speed), moved > 0.0025);
   }
