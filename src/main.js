@@ -4,7 +4,7 @@ import { createTraffic } from "./traffic.js";
 import { loadPlayer, collide } from "./player.js";
 // SOLID WORLD (Nov 1): everything collides — buildings, poles, fences, trees,
 // vehicles, furniture and characters — for walking AND driving.
-import { initCollision, resolvePlayerMove, resolveVehicleMove, resolveBoxed, resolveDyn, collisionStats, vehBoxOf, probeBlocked, firstHit, setVehicleProvider, vehHits } from "./collision.js";
+import { initCollision, resolvePlayerMove, resolveVehicleMove, resolveBoxed, resolveDyn, collisionStats, vehBoxOf, probeBlocked, firstHit, setVehicleProvider, addVehicleProvider, vehHits, lastImpact } from "./collision.js";
 import { createControls, updateCamera } from "./controls.js";
 import { createMinimap } from "./minimap.js";
 import { addCity } from "./city.js";
@@ -53,7 +53,7 @@ import { initSfx, sfx, setMuted as setSfxMuted, isMuted as isSfxMuted } from "./
 import { initParticles, emitConfetti, emitDust, emitSmoke, emitFire, tickParticles } from "./particles.js";
 import { initRoadEvents, tickRoadEvents, getCurrentWeather as getRoadWeather, resetRoadEvents, trafficSpeedMultiplierAt } from "./road_events.js";
 import { addScenery, SCENERY_LABELS } from "./scenery.js";
-import { initLife, tickLife , setLifePlayerVehicle, lifeTrafficPositions, setLifeCrossTrafficProvider } from "./life.js";
+import { initLife, tickLife , setLifePlayerVehicle, lifeTrafficPositions, setLifeCrossTrafficProvider, damageLifeCar } from "./life.js";
 import { initLiveMap, openLiveMap, closeLiveMap, isLiveMapOn, liveMapFrame } from "./livemap.js";
 import { perfFrameStart, perfBeforeRender, perfAfterRender } from "./perf.js";
 import { initGraphics, updateSky, nightAmount, tickGraphics, tickShadows, applyQuality, autoDetectQuality, getQuality, QUALITY_PRESETS } from "./graphics.js";
@@ -81,7 +81,7 @@ import { initOsmCity } from "./world/osmCity.js";
 // map data) — see src/world/cityFill.js.
 import { initCityFill } from "./world/cityFill.js";
 import { getSeat, VEHICLE_CATALOG, getVehicle, initVehicles, buyVehicle, getOwned, ownsVehicle, isRiding, getRideSpeed, getRideId, spawnRideVehicle, despawnRideVehicle, tickRideVehicle } from "./vehicles.js";
-import { hitRide, tickRideDamage, rideHp, rideDead } from "./damage.js";
+import { hitRide, tickRideDamage, rideHp, rideDead, crashCooldown } from "./damage.js";
 import { extendCatalog } from "./dealership_catalog.js";
 import { buildStreetDetail, makeBlobShadows } from "./street.js";
 import { initActivity, startActivity, tickActivity, isBusy, cancelActivity, eatSpec, toiletSpec, sitSpec, funSpec, placeSpec } from "./activity.js";
@@ -547,6 +547,7 @@ const traffic = createTraffic(scene, world.colliders);  // Oct 23: pass collider
 // VEHICLE DAMAGE (Nov 2): traffic cars are SOLID obstacles now (walking + driving)
 // and they take damage when you ram them.
 setVehicleProvider(() => traffic.positions);
+addVehicleProvider(() => lifeTrafficPositions());   // avenue + cross-street cars and danfo buses are solid too
 // TODO #5 (Oct 24): junction give-way — main-street traffic and the avenue
 // cars (life.js) stop for each other where the avenues cross the main street.
 traffic.setCrossTrafficProvider(() => lifeTrafficPositions());
@@ -4424,23 +4425,27 @@ function _frame() {
     const _preSpd = _riding ? (Math.hypot(player.kvel ? player.kvel.x : 0, player.kvel ? player.kvel.z : 0) || Math.abs(player.speed || 0)) : 0;
     if (_riding) resolveVehicleMove(player, getRideId(), dt);
     else resolvePlayerMove(player.pos, 0.55);
-    // VEHICLE DAMAGE (Nov 2): a crash that kills real speed hurts the car — and the traffic car it hit.
+    // VEHICLE DAMAGE (Nov 2, v2): damage comes from the CLOSING SPEED into what you hit (not from speed lost per frame).
+    // Scraping a wall / tapping a pole = nothing. A real crash = dents, smoke, and if it is hard enough the car is wrecked.
     if (_riding) {
-      const _postSpd = Math.hypot(player.kvel ? player.kvel.x : 0, player.kvel ? player.kvel.z : 0) || Math.abs(player.speed || 0);
-      const _impact = _preSpd - _postSpd;
-      if (_impact > 2.0 && !rideDead()) {
+      const imp = lastImpact(), closing = imp.speed;
+      const thr = imp.soft ? 9 : 5.5;                          // m/s of closing speed before ANYTHING breaks (poles/trees are softer)
+      if (closing > thr && !rideDead() && !crashCooldown()) {
         const _heavyV = getRideId() === "bus" || getRideId() === "jeep" || getRideId() === "suv";
-        // per-hit cap 55: one honest mistake hurts badly but never totals you; a second one can.
-        const _dmg = Math.min(55, (_impact - 1.4) * 4.8) * (_heavyV ? 0.7 : 1);   // big cars shrug scrapes off
+        const _dmg = Math.min(60, (closing - thr + 2) * 1.7) * (imp.soft ? 0.5 : 1) * (_heavyV ? 0.75 : 1);
         const _before = rideHp();
-        hitRide(_dmg);
-        sfx.crash(Math.min(1, _impact / 13));
-        try { emitDust(new THREE.Vector3(player.pos.x + Math.sin(player.heading) * 2, 0.5, player.pos.z + Math.cos(player.heading) * 2), 6); } catch (e) {}
+        hitRide(_dmg, player.pos.x - imp.nx * 1.8, player.pos.z - imp.nz * 1.8);
+        sfx.crash(Math.min(1, closing / 20));
+        try { emitDust(new THREE.Vector3(player.pos.x - imp.nx * 1.8, 0.5, player.pos.z - imp.nz * 1.8), Math.min(14, 4 + closing)); } catch (e) {}
         const _after = rideHp();
         if (_after <= 0 && _before > 0) toast("💥 Vehicle wrecked! Engine don knock — dismount to leave am.");
-        else console.info("[kaduna] crash — hp " + Math.round(_after) + "/100 (impact " + _impact.toFixed(1) + " m/s)");
+        else if (_dmg >= 8) toast("💥 Crash! Car condition " + Math.round(_after) + "%");
         for (const h of vehHits()) {
-          if (h.car && traffic.damageCar && traffic.damageCar(h.car, _dmg * 1.25) && h.car.wrecked) toast("💥 You wreck that car — e no go move again!");
+          if (!h.car) continue;
+          const dmgOther = _dmg * 1.25;
+          const was = h.car.wrecked;
+          const ok = h.car.lane ? (traffic.damageCar && traffic.damageCar(h.car, dmgOther)) : damageLifeCar(h.car, dmgOther);
+          if (ok && h.car.wrecked && !was) toast("💥 You wreck that car — e no go move again!");
         }
       }
     }
@@ -4558,6 +4563,11 @@ function _frame() {
   if (_wreckSmokeT <= 0) {
     _wreckSmokeT = 0.4;
     for (const c of traffic.positions) {
+      if (c.wrecked && Math.abs(c.x - player.pos.x) < 70 && Math.abs(c.z - player.pos.z) < 70) {
+        try { emitSmoke(new THREE.Vector3(c.x, 1.0, c.z), 0.9); emitFire(new THREE.Vector3(c.x, 0.9, c.z)); } catch (e) {}
+      }
+    }
+    for (const c of lifeTrafficPositions()) {
       if (c.wrecked && Math.abs(c.x - player.pos.x) < 70 && Math.abs(c.z - player.pos.z) < 70) {
         try { emitSmoke(new THREE.Vector3(c.x, 1.0, c.z), 0.9); emitFire(new THREE.Vector3(c.x, 0.9, c.z)); } catch (e) {}
       }
@@ -4770,6 +4780,6 @@ Promise.all([loadPlayer(manager, scene, game.state.look), addCity(scene, world, 
   const _hideLoading = () => $("loading").classList.add("done");
   if (window.__authReady || window.__bypassAuth) _hideLoading();
   else { window.addEventListener("kaduna-auth-ready", _hideLoading, { once: true }); setTimeout(_hideLoading, 20000); }
-  window.__dbg = { ride: (id) => { initVehicles(scene, null, () => {}); return spawnRideVehicle(id, player.pos, player.heading, toast); }, player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig, cullStats, trafficCars: () => traffic.positions.length, trafficPos: () => traffic.positions.slice(0, 8), col: () => collisionStats(), probe: (x, z, r) => probeBlocked(x, z, r), probeBox: (x, z, r) => firstHit(x, z, r), vehBox: (id) => vehBoxOf(id), rideHp: () => rideHp(), rideDead: () => rideDead(), hitRide: (n) => hitRide(n), crashHits: () => vehHits().map((h) => ({ depth: +h.depth.toFixed(2), wrecked: !!(h.car && h.car.wrecked), hp: h.car ? Math.round(h.car.hp) : null })), trafficHp: () => traffic.cars.map((c) => Math.round(c.hp || 0)), posDbg: () => ({ key: _posKey(), uid: getGameUid(), restored: _posRestored, saved: (() => { try { return JSON.parse(localStorage.getItem(_posKey()) || "null"); } catch (e) { return "parse-error"; } })(), at: { x: +player.pos.x.toFixed(1), z: +player.pos.z.toFixed(1), h: +player.heading.toFixed(2) }, doors: listPlaces().filter((p) => Number.isFinite(p.entranceX)).map((p) => [p.id, +p.entranceX.toFixed(1), +p.entranceZ.toFixed(1)]) }), lampDebug: () => ({ hasPos: Array.isArray(world.lampPositions), n: world.lampPositions ? world.lampPositions.length : -1, lights: world.lampLights.map((l) => [Math.round(l.position.x), Math.round(l.position.z)]) }) };
+  window.__dbg = { cols: world.colliders, lifePos: () => lifeTrafficPositions(), rideHp: () => rideHp(), lastImpact, traffic, ride: (id) => { initVehicles(scene, null, () => {}); return spawnRideVehicle(id, player.pos, player.heading, toast); }, player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig, cullStats, trafficCars: () => traffic.positions.length, trafficPos: () => traffic.positions.slice(0, 8), col: () => collisionStats(), probe: (x, z, r) => probeBlocked(x, z, r), probeBox: (x, z, r) => firstHit(x, z, r), vehBox: (id) => vehBoxOf(id), rideHp: () => rideHp(), rideDead: () => rideDead(), hitRide: (n) => hitRide(n), crashHits: () => vehHits().map((h) => ({ depth: +h.depth.toFixed(2), wrecked: !!(h.car && h.car.wrecked), hp: h.car ? Math.round(h.car.hp) : null })), trafficHp: () => traffic.cars.map((c) => Math.round(c.hp || 0)), posDbg: () => ({ key: _posKey(), uid: getGameUid(), restored: _posRestored, saved: (() => { try { return JSON.parse(localStorage.getItem(_posKey()) || "null"); } catch (e) { return "parse-error"; } })(), at: { x: +player.pos.x.toFixed(1), z: +player.pos.z.toFixed(1), h: +player.heading.toFixed(2) }, doors: listPlaces().filter((p) => Number.isFinite(p.entranceX)).map((p) => [p.id, +p.entranceX.toFixed(1), +p.entranceZ.toFixed(1)]) }), lampDebug: () => ({ hasPos: Array.isArray(world.lampPositions), n: world.lampPositions ? world.lampPositions.length : -1, lights: world.lampLights.map((l) => [Math.round(l.position.x), Math.round(l.position.z)]) }) };
   window.__ready = true;
 }).catch((e) => showError("Could not load the game: " + e.message));

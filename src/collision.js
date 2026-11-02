@@ -51,24 +51,30 @@ const _dyn = new Map();      // id -> { x, z, r, t }  (characters; expires if no
 // player AND the driven vehicle resolve against them, so nobody drives or walks
 // through a moving car any more — and the driven car learns WHICH car it hit
 // (vehHits below) so impacts can deal damage.
-let _vehProv = null;
+const _vehProvs = [];
 const _vehNear = [];
-export function setVehicleProvider(fn) { _vehProv = fn; }
+export function setVehicleProvider(fn) { _vehProvs.length = 0; _vehProvs.push(fn); }
+export function addVehicleProvider(fn) { _vehProvs.push(fn); }
 function _refreshVehNear(x, z) {
   _vehNear.length = 0;
-  if (!_vehProv) return;
-  const list = _vehProv();
-  if (!list) return;
-  for (const c of list) {
-    if (!c || !isFinite(c.minX) || c.minX > c.maxX || c.minZ > c.maxZ) continue;
-    if (c.maxX < x - WIN || c.minX > x + WIN || c.maxZ < z - WIN || c.minZ > z + WIN) continue;
-    _vehNear.push(c);
+  for (const prov of _vehProvs) {
+    const list = prov();
+    if (!list) continue;
+    for (const c of list) {
+      if (!c || !isFinite(c.minX) || c.minX > c.maxX || c.minZ > c.maxZ) continue;
+      if (c.maxX < x - WIN || c.minX > x + WIN || c.maxZ < z - WIN || c.minZ > z + WIN) continue;
+      _vehNear.push(c);
+    }
   }
 }
 // What did the driven vehicle hit LAST resolveVehicleMove? [{ car, depth }] —
 // reset at the start of every resolve, filled by vehicle-box pushes only.
 export const _vehHits = [];
 export function vehHits() { return _vehHits; }
+// How hard was the LAST vehicle resolve? speed = closing speed INTO the obstacle (m/s, relative to a moving car),
+// soft = only poles/trees were touched, car = hit a vehicle. Grinding along a wall = ~0; a real crash = large.
+const _imp = { speed: 0, soft: false, car: false, nx: 0, nz: 0 };
+export function lastImpact() { return _imp; }
 
 export function initCollision(colliders) { _cols = colliders; }
 
@@ -193,7 +199,9 @@ export function resolveVehicleMove(player, rideId, dt) {
   const off = Math.max(0, box.hl - box.hw);
   const offs = off > 0.01 ? [off, -off, 0] : [0];
   _vehHits.length = 0;
-  let hits = 0, nX = 0, nZ = 0;
+  let hits = 0, nX = 0, nZ = 0, hard = 0, soft = 0, carHit = 0, ovX = 0, ovZ = 0, ovN = 0;
+  // velocity BEFORE the push-out (what actually slams into the obstacle)
+  const v0x = player.kvel ? player.kvel.x : fx * (player.speed || 0), v0z = player.kvel ? player.kvel.z : fz * (player.speed || 0);
   for (let iter = 0; iter < 3; iter++) {
     let any = false;
     for (const s of offs) {
@@ -202,13 +210,16 @@ export function resolveVehicleMove(player, rideId, dt) {
         if (_pushBox(cx, cz, box.hw, b, _out)) {
           pos.x += _out.x; pos.z += _out.z; hits++; any = true;
           nX += _out.x; nZ += _out.z;
+          if (b._lamp || b._tree) soft++; else hard++;
         }
       }
       // traffic cars: same AABB push, but remember WHICH car + how deep (for damage)
       for (const b of _vehNear) {
         if (_pushBox(cx, cz, box.hw, b, _out)) {
           pos.x += _out.x; pos.z += _out.z; hits++; any = true;
-          nX += _out.x; nZ += _out.z;
+          nX += _out.x; nZ += _out.z; carHit++;
+          if (b.vx != null) { ovX += b.vx; ovZ += b.vz; } else { ovX += (b.dir || 0) * (b.speed || 0); }
+          ovN++;
           const depth = Math.hypot(_out.x, _out.z);
           const prev = _vehHits.find((h) => h.car === b.car);
           if (prev) prev.depth = Math.max(prev.depth, depth);
@@ -226,15 +237,23 @@ export function resolveVehicleMove(player, rideId, dt) {
     }
     if (!any) break;
   }
+  _imp.speed = 0; _imp.soft = false; _imp.car = false;
   if (hits) {
     const l = Math.hypot(nX, nZ) || 1;
     const nx = nX / l, nz = nZ / l;                       // average push direction (away from the obstacle)
-    if (player.kvel) {                                     // KSR cars: slide along the wall, keep some speed
-      const d = player.kvel.x * nx + player.kvel.z * nz;
-      if (d < 0) { player.kvel.x -= nx * d; player.kvel.z -= nz * d; }
-      player.kvel.x *= 0.55; player.kvel.z *= 0.55;
+    const ox = ovN ? ovX / ovN : 0, oz = ovN ? ovZ / ovN : 0;     // velocity of the car we hit (0 for walls/poles)
+    // closing speed along the contact normal, relative to what we hit
+    const closing = Math.max(0, -((v0x - ox) * nx + (v0z - oz) * nz));
+    _imp.speed = closing; _imp.soft = hard === 0 && carHit === 0 && soft > 0; _imp.car = carHit > 0; _imp.nx = nx; _imp.nz = nz;
+    // collision response: lose the normal part (small bounce on a hard hit), keep the slide (a scrape no longer kills your speed)
+    const e = closing > 8 ? 0.22 : 0;
+    const keep = 1 - Math.min(0.5, 0.004 + closing * 0.02);
+    if (player.kvel) {
+      const d = (player.kvel.x - ox) * nx + (player.kvel.z - oz) * nz;
+      if (d < 0) { player.kvel.x -= (1 + e) * d * nx; player.kvel.z -= (1 + e) * d * nz; }
+      player.kvel.x *= keep; player.kvel.z *= keep;
     }
-    if (player.speed) player.speed *= 0.5;                 // classic driveStep + HUD feel
+    if (player.speed) player.speed *= keep;
   }
   return hits;
 }

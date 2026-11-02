@@ -60,6 +60,7 @@ const cars = [], buses = [], people = [];
 const _pv = { x: 0, z: 0, on: false };             // the player's own vehicle: cars wait for it
 export function setLifePlayerVehicle(x, z, on) { _pv.x = x; _pv.z = z; _pv.on = !!on; }
 const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(1, 1, 1);
+const _wEul = new THREE.Euler();
 const _up = new THREE.Vector3(0, 1, 0), _col = new THREE.Color(), _mb = new THREE.Matrix4(), _m2 = new THREE.Matrix4(), _m3 = new THREE.Matrix4(), _Z = new THREE.Matrix4().makeScale(0, 0, 0), _s2 = new THREE.Vector3();
 const RB = [];                                       // roundabout centres
 for (const ax of WIDE_AVENUES_X) for (const cz of [-195, 195]) RB.push([ax, cz]);
@@ -125,6 +126,20 @@ const sFromAlong = (ln, along) => (((ln.dir > 0 ? along + ln.len / 2 : ln.len / 
 // so OUR cars stop before crossing the main street.
 const _lifePos = [];
 export function lifeTrafficPositions() { return _lifePos; }
+// CRASHES (Nov 2): avenue / cross-street cars are solid + can be wrecked, same as the main-street traffic.
+export function damageLifeCar(c, dmg) {
+  if (!c || c.wrecked) return false;
+  c.hp = Math.max(0, (c.hp == null ? 100 : c.hp) - dmg);
+  if (c.hp > 0) return false;
+  c.wrecked = true; c._wt = 0; _paintLife(c, true);
+  return true;
+}
+function _paintLife(c, burnt) {
+  const i = cars.indexOf(c); if (i < 0) return;
+  _col.setHSL(c.hue, burnt ? 0.15 : 0.6, burnt ? 0.1 : 0.5);
+  const list = [carMesh, ...carX]; for (const m of list) if (m && m.instanceColor) { m.setColorAt(i, _col); m.instanceColor.needsUpdate = true; }
+  if (carG.length) { _col.setHSL(c.hue, burnt ? 0.15 : 0.55, burnt ? 0.1 : 0.62); for (const m of carG) if (m.instanceColor) { m.setColorAt(i, _col); m.instanceColor.needsUpdate = true; } }
+}
 let _crossProv = null;
 export function setLifeCrossTrafficProvider(fn) { _crossProv = fn; }
 const _snapAll = [];                                   // per-vehicle { ln, x, z } snapshot from before this frame's advance
@@ -347,6 +362,8 @@ export function tickLife(px, pz, show = true) {
         if (go === 0) break;
       }
     }
+    if (c.wrecked) { go = 0; c._wt = (c._wt || 0) + dt; if (c._wt > 18) { c.wrecked = false; c.hp = 100; c._wt = 0; _paintLife(c, false); } }   // a wreck goes nowhere, then gets towed
+    c._go = go;
     c.s += c.v * dt * go; lanePos(c.ln, c.s, _p); lanePos(c.ln, c.s + 1.5, nx);
     // FIX (Oct 23): runtime guard — if car position overlaps a nearby collider
     // (house/building/lamp/kiosk), hide it (scale to 0) so it doesn't show
@@ -373,11 +390,21 @@ export function tickLife(px, pz, show = true) {
     _p.y = -2.7 * c._sk;
     _s2.setScalar(1);
     const yaw = Math.atan2(-(nx.z - _p.z), nx.x - _p.x);
-    _q.setFromAxisAngle(_up, yaw); _m.compose(_p, _q, _s2); if (mesh === carMesh && c.t > 0) { carMesh.setMatrixAt(i, _Z); for (let k = 0; k < 3; k++) carX[k].setMatrixAt(i, k === c.t - 1 ? _m : _Z); } else mesh.setMatrixAt(i, _m); if (glbReady) { if (mesh === carMesh) { if (carG.length) carG[0].setMatrixAt(i, _m); } else if (busG) busG.setMatrixAt(i, _m); } BEAM.setMatrixAt(mesh === carMesh ? i : cars.length + i, _m);
+    if (c.wrecked) _q.setFromEuler(_wEul.set(0.05, yaw, 0.045)); else _q.setFromAxisAngle(_up, yaw); _m.compose(_p, _q, _s2); if (mesh === carMesh && c.t > 0) { carMesh.setMatrixAt(i, _Z); for (let k = 0; k < 3; k++) carX[k].setMatrixAt(i, k === c.t - 1 ? _m : _Z); } else mesh.setMatrixAt(i, _m); if (glbReady) { if (mesh === carMesh) { if (carG.length) carG[0].setMatrixAt(i, _m); } else if (busG) busG.setMatrixAt(i, _m); } BEAM.setMatrixAt(mesh === carMesh ? i : cars.length + i, _m);
     SH.set(mesh === carMesh ? i : cars.length + i, _p.x, _p.z, (mesh === carMesh ? 2.6 : 3.4) * ek, (mesh === carMesh ? 5.4 : 12) * ek, yaw + Math.PI / 2);
     // publish position for traffic.js's junction give-way (main street side)
     // + player push-out sizes in main.js (Oct 25: cars were "untouchable")
-    if (gi < _lifePos.length) { _lifePos[gi].x = _p.x; _lifePos[gi].z = _p.z; _lifePos[gi].hl = mesh === carMesh ? 2.6 : 4.6; _lifePos[gi].hw = mesh === carMesh ? 1.3 : 1.5; }
+    if (gi < _lifePos.length) {
+      const e = _lifePos[gi], hl = mesh === carMesh ? 2.6 : 4.6, hw = mesh === carMesh ? 1.3 : 1.5, ax = c.ln.axis === "x";
+      e.x = _p.x; e.z = _p.z; e.hl = hl; e.hw = hw;
+      const hid = (c._sk || 0) > 0.5;   // diving under the map (blocked stretch) = not solid
+      // true oriented footprint (avenue cars drive along Z, so their long side is Z)
+      const hx = ax ? hl : hw, hz = ax ? hw : hl;
+      if (hid) { e.minX = Infinity; e.maxX = -Infinity; e.minZ = Infinity; e.maxZ = -Infinity; } else { e.minX = _p.x - hx; e.maxX = _p.x + hx; e.minZ = _p.z - hz; e.maxZ = _p.z + hz; }
+      const sp = c.v * (c._go == null ? 1 : c._go) * c.ln.dir;
+      e.vx = ax ? sp : 0; e.vz = ax ? 0 : sp;
+      e.car = c; e.wrecked = !!c.wrecked; e.life = true;
+    }
   };
   cars.forEach((c, i) => place(carMesh, i, c, i)); buses.forEach((c, i) => place(busMesh, i, c, cars.length + i));
   carMesh.instanceMatrix.needsUpdate = true; carX.forEach((m) => { m.instanceMatrix.needsUpdate = true; }); busMesh.instanceMatrix.needsUpdate = true; carG.forEach((m) => { m.instanceMatrix.needsUpdate = true; }); if (busG) busG.instanceMatrix.needsUpdate = true;

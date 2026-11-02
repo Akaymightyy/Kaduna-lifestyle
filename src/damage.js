@@ -14,7 +14,7 @@
 // freed in clearRideDamage() when the ride despawns.
 
 let _hp = 100, _dead = false, _mesh = null, _cloned = [];
-let _smokeT = 0, _lastHitAt = 0, _crashCool = 0;
+let _smokeT = 0, _lastHitAt = 0, _crashCool = 0, _ownGeo = [];
 
 export function resetRideDamage(mesh) {
   _hp = 100; _dead = false; _smokeT = 0; _crashCool = 0;
@@ -27,6 +27,8 @@ export function resetRideDamage(mesh) {
 export function clearRideDamage() {
   for (const m of _cloned) { try { m.dispose(); } catch (e) {} }
   _cloned = []; _mesh = null; _hp = 100; _dead = false;
+  for (const g of _ownGeo) { try { g.dispose(); } catch (e) {} }
+  _ownGeo = [];
 }
 
 export function rideHp() { return _hp; }
@@ -36,12 +38,13 @@ export function crashCooldown() { return _crashCool > 0; }
 
 // dmg = impact energy from main.js (based on the speed the crash killed).
 // Returns the hp AFTER the hit.
-export function hitRide(dmg) {
+export function hitRide(dmg, wx, wz) {
   if (_dead) return 0;
   if (!(dmg > 0)) return _hp;
+  if (wx != null && wz != null) { try { _dent(dmg, wx, wz); } catch (e) { console.warn("[damage] dent failed", e); } }
   _hp = Math.max(0, _hp - dmg);
   _lastHitAt = performance.now();
-  _crashCool = 0.25;
+  _crashCool = 0.6;
   if (_hp <= 0) _dead = true;
   _applyVisuals();
   return _hp;
@@ -98,4 +101,40 @@ function _applyVisuals() {
     if (m.userData._baseR == null) m.userData._baseR = m.color.r, m.userData._baseG = m.color.g, m.userData._baseB = m.color.b;
     m.color.setRGB(m.userData._baseR * shade, m.userData._baseG * shade, m.userData._baseB * shade);
   }
+}
+
+// ---- real dents: vertices near the impact point are pushed INTO the car, with a little crumple noise ----
+// Geometry is cloned once per ride (GLB / KSR geometries are shared with the cache) and freed on despawn.
+let _tmpV = null;
+function _dent(dmg, wx, wz) {
+  if (!_mesh) return;
+  if (!_tmpV) _tmpV = { v: null };
+  const THREE_V = _mesh.position.constructor;           // THREE.Vector3 without importing three here
+  _mesh.updateMatrixWorld(true);
+  const hit = _mesh.worldToLocal(new THREE_V(wx, 0.6, wz));
+  const R = 0.9 + dmg * 0.045, depth = Math.min(0.75, 0.05 + dmg * 0.014);
+  const centre = new THREE_V(0, 0.6, 0), dir = centre.clone().sub(hit); dir.y = 0; if (dir.lengthSq() < 1e-6) dir.set(-1, 0, 0); dir.normalize();
+  const w = new THREE_V(), l = new THREE_V();
+  _mesh.traverse((o) => {
+    if (!o.isMesh || !o.geometry || !o.geometry.attributes.position) return;
+    const pos0 = o.geometry.attributes.position;
+    if (pos0.count > 80000) return;                      // huge scanned models: skip (too slow on a phone)
+    if (!o.userData._dentGeo) { o.geometry = o.geometry.clone(); _ownGeo.push(o.geometry); o.userData._dentGeo = true; }
+    const pos = o.geometry.attributes.position;
+    o.updateMatrixWorld(true);
+    let changed = false;
+    for (let i = 0; i < pos.count; i++) {
+      w.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld);
+      l.copy(w); _mesh.worldToLocal(l);
+      const d = l.distanceTo(hit);
+      if (d > R) continue;
+      const f = Math.pow(1 - d / R, 1.4);
+      const n = (Math.sin(i * 12.9898 + dmg) * 43758.5453) % 1;      // stable pseudo-random crumple
+      const push = depth * f * (0.75 + 0.5 * Math.abs(n));
+      l.addScaledVector(dir, push); l.y -= push * 0.15 * Math.abs(n);
+      w.copy(l); _mesh.localToWorld(w); o.worldToLocal(w);
+      pos.setXYZ(i, w.x, w.y, w.z); changed = true;
+    }
+    if (changed) { pos.needsUpdate = true; o.geometry.computeVertexNormals(); o.geometry.computeBoundingSphere(); }
+  });
 }
