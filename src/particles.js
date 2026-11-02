@@ -14,12 +14,16 @@ import * as THREE from "three";
 let _scene = null;
 let _confettiPool = [];
 let _dustPool = [];
+let _smokePool = [];   // VEHICLE DAMAGE (Nov 2): crash smoke + fire
+let _firePool = [];
 let _rainGroup = null;
 let _rainActive = false;
 
 // ---- textures (procedural, no asset files) ----
 let _confettiTex = null;
 let _dustTex = null;
+let _smokeTex = null;
+let _fireTex = null;
 let _rainTex = null;
 
 function _makeConfettiTex() {
@@ -45,6 +49,37 @@ function _makeDustTex() {
   ctx.fillRect(0, 0, 64, 64);
   _dustTex = new THREE.CanvasTexture(c);
   return _dustTex;
+}
+// VEHICLE DAMAGE (Nov 2): dark engine smoke — damaged cars breathe this from the hood
+function _makeSmokeTex() {
+  if (_smokeTex) return _smokeTex;
+  const c = document.createElement("canvas");
+  c.width = c.height = 64;
+  const ctx = c.getContext("2d");
+  const g = ctx.createRadialGradient(32, 32, 2, 32, 32, 32);
+  g.addColorStop(0, "rgba(40,40,44,0.85)");
+  g.addColorStop(0.55, "rgba(58,58,64,0.4)");
+  g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  _smokeTex = new THREE.CanvasTexture(c);
+  return _smokeTex;
+}
+// fire ball — additive orange/red for wrecked engines
+function _makeFireTex() {
+  if (_fireTex) return _fireTex;
+  const c = document.createElement("canvas");
+  c.width = c.height = 64;
+  const ctx = c.getContext("2d");
+  const g = ctx.createRadialGradient(32, 34, 2, 32, 32, 32);
+  g.addColorStop(0, "rgba(255,240,180,0.95)");
+  g.addColorStop(0.35, "rgba(255,140,40,0.8)");
+  g.addColorStop(0.7, "rgba(220,50,10,0.35)");
+  g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  _fireTex = new THREE.CanvasTexture(c);
+  return _fireTex;
 }
 function _makeRainTex() {
   if (_rainTex) return _rainTex;
@@ -134,6 +169,61 @@ export function emitDust(pos, count = 5) {
   }
 }
 
+// ---- VEHICLE DAMAGE (Nov 2): engine smoke + fire ----
+// emitSmoke: dark puffs that RISE and grow (broken engine / wrecked car).
+// strength 0..1 scales size + count (use higher when close to death).
+export function emitSmoke(pos, strength = 0.5) {
+  if (!_scene) return;
+  const tex = _makeSmokeTex();
+  const n = 1 + Math.round(strength * 2);
+  for (let i = 0; i < n; i++) {
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.55 + strength * 0.25, fog: false, depthWrite: false });
+    const s = new THREE.Sprite(mat);
+    s.position.copy(pos);
+    s.position.x += (Math.random() - 0.5) * 0.3;
+    s.position.z += (Math.random() - 0.5) * 0.3;
+    const sc = (0.35 + Math.random() * 0.3) * (0.7 + strength * 0.8);
+    s.scale.set(sc, sc, 1);
+    s.userData = {
+      vx: (Math.random() - 0.5) * 0.5,
+      vy: 1.1 + Math.random() * 1.2 + strength,      // smoke goes UP
+      vz: (Math.random() - 0.5) * 0.5,
+      life: 1.1 + Math.random() * 0.9,
+      maxLife: 2,
+      rot: (Math.random() - 0.5) * 1.5,
+    };
+    s.userData.maxLife = s.userData.life;
+    _scene.add(s);
+    _smokePool.push(s);
+  }
+}
+
+// emitFire: bright additive flames (wrecked vehicle). Short, violent, rises.
+export function emitFire(pos) {
+  if (!_scene) return;
+  const tex = _makeFireTex();
+  for (let i = 0; i < 2; i++) {
+    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity: 0.95, fog: false, depthWrite: false, blending: THREE.AdditiveBlending });
+    const s = new THREE.Sprite(mat);
+    s.position.copy(pos);
+    s.position.x += (Math.random() - 0.5) * 0.5;
+    s.position.z += (Math.random() - 0.5) * 0.5;
+    const sc = 0.45 + Math.random() * 0.45;
+    s.scale.set(sc, sc * 1.25, 1);
+    s.userData = {
+      vx: (Math.random() - 0.5) * 0.7,
+      vy: 1.6 + Math.random() * 1.6,
+      vz: (Math.random() - 0.5) * 0.7,
+      life: 0.35 + Math.random() * 0.35,
+      maxLife: 0.7,
+      rot: (Math.random() - 0.5) * 2,
+    };
+    s.userData.maxLife = s.userData.life;
+    _scene.add(s);
+    _firePool.push(s);
+  }
+}
+
 // ---- rain weather ----
 const RAIN_COUNT = 800;
 export function startRain() {
@@ -216,6 +306,44 @@ export function tickParticles(dt, camera) {
     const grow = 1 + dt * 0.6;
     s.scale.multiplyScalar(grow);
     s.material.opacity = (u.life / u.maxLife) * 0.6;
+  }
+  // smoke (vehicle damage): rises, drifts, grows, fades
+  for (let i = _smokePool.length - 1; i >= 0; i--) {
+    const s = _smokePool[i];
+    const u = s.userData;
+    u.life -= dt;
+    if (u.life <= 0) {
+      _scene.remove(s);
+      if (s.material) s.material.dispose();
+      _smokePool.splice(i, 1);
+      continue;
+    }
+    u.vx *= 0.98; u.vz *= 0.98;
+    s.position.x += u.vx * dt;
+    s.position.y += u.vy * dt;
+    s.position.z += u.vz * dt;
+    s.scale.multiplyScalar(1 + dt * 0.9);
+    s.material.rotation += u.rot * dt;
+    s.material.opacity = Math.min(0.8, (u.life / u.maxLife) * 0.8);
+  }
+  // fire (wrecked vehicle): fast rise, shrink then vanish
+  for (let i = _firePool.length - 1; i >= 0; i--) {
+    const s = _firePool[i];
+    const u = s.userData;
+    u.life -= dt;
+    if (u.life <= 0) {
+      _scene.remove(s);
+      if (s.material) s.material.dispose();
+      _firePool.splice(i, 1);
+      continue;
+    }
+    s.position.x += u.vx * dt;
+    s.position.y += u.vy * dt;
+    s.position.z += u.vz * dt;
+    s.material.rotation += u.rot * dt;
+    const f = u.life / u.maxLife;
+    s.material.opacity = Math.min(1, f * 1.4);
+    s.scale.multiplyScalar(1 - dt * 0.5);
   }
   // rain
   if (_rainGroup && _rainActive) {

@@ -12,6 +12,7 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { db } from "./firebase.js";
 import { ref, get, set, update, onValue } from "firebase/database";
+import { resetRideDamage, clearRideDamage } from "./damage.js";
 
 // ---- Catalog ----
 // glbPath = path to a real 3D model (loaded lazily via GLTFLoader on first ride)
@@ -342,6 +343,7 @@ export async function spawnRideVehicle(vehicleId, playerPos, playerHeading, toas
   mesh.rotation.y = pivotRotY(playerHeading);
   _scene.add(mesh);
   _riding = { vehicleId, speed: v.speed, mesh, own };
+  resetRideDamage(mesh);            // VEHICLE DAMAGE: every ride starts fresh (hp 100)
   console.log("[vehicles] Riding " + v.name + " (speed boost +" + v.speed + ")");
   return true;
 }
@@ -352,6 +354,7 @@ export function despawnRideVehicle() {
   _scene.remove(_riding.mesh);
   // only free what we built ourselves: GLB geometry is shared with the cache and the next ride
   if (_riding.own) _riding.own.forEach((o) => o.dispose());
+  clearRideDamage();                // VEHICLE DAMAGE: free the cloned damage materials
   _riding = null;
 }
 

@@ -44,6 +44,32 @@ const REBUILD = 0.5;         // seconds between near-list rebuilds
 const _out = { x: 0, z: 0 }; // reusable push-out vector (no per-frame allocation)
 const _dyn = new Map();      // id -> { x, z, r, t }  (characters; expires if not refreshed)
 
+// ---- VEHICLE OBSTACLES (Nov 2): traffic cars are solid now ----
+// A provider (wired in main.js) returns the live list of traffic cars; every
+// entry is an axis-aligned box { minX, maxX, minZ, maxZ, hl, hw, car } (traffic
+// cars only ever face 0 or PI, so an AABB is their EXACT body). The walking
+// player AND the driven vehicle resolve against them, so nobody drives or walks
+// through a moving car any more — and the driven car learns WHICH car it hit
+// (vehHits below) so impacts can deal damage.
+let _vehProv = null;
+const _vehNear = [];
+export function setVehicleProvider(fn) { _vehProv = fn; }
+function _refreshVehNear(x, z) {
+  _vehNear.length = 0;
+  if (!_vehProv) return;
+  const list = _vehProv();
+  if (!list) return;
+  for (const c of list) {
+    if (!c || !isFinite(c.minX) || c.minX > c.maxX || c.minZ > c.maxZ) continue;
+    if (c.maxX < x - WIN || c.minX > x + WIN || c.maxZ < z - WIN || c.minZ > z + WIN) continue;
+    _vehNear.push(c);
+  }
+}
+// What did the driven vehicle hit LAST resolveVehicleMove? [{ car, depth }] —
+// reset at the start of every resolve, filled by vehicle-box pushes only.
+export const _vehHits = [];
+export function vehHits() { return _vehHits; }
+
 export function initCollision(colliders) { _cols = colliders; }
 
 // ---- Dynamic circles (characters) ----
@@ -139,12 +165,14 @@ export function resolveDyn(pos, r) {
   return hits;
 }
 
-// ---- Walking player: world bounds + windowed statics + characters ----
+// ---- Walking player: world bounds + windowed statics + characters + traffic cars ----
 export function resolvePlayerMove(pos, r = 0.55) {
   pos.x = Math.max(-PLAYER_LIMIT_X, Math.min(PLAYER_LIMIT_X, pos.x));
   pos.z = Math.max(-PLAYER_LIMIT_Z, Math.min(PLAYER_LIMIT_Z, pos.z));
   _refreshNear(pos.x, pos.z);
+  _refreshVehNear(pos.x, pos.z);
   let hits = resolveBoxed(pos, r, _near);
+  hits += resolveBoxed(pos, r, _vehNear);          // traffic cars block the walker too
   hits += resolveDyn(pos, r);
   return hits;
 }
@@ -160,9 +188,11 @@ export function resolveVehicleMove(player, rideId, dt) {
   pos.x = Math.max(-PLAYER_LIMIT_X, Math.min(PLAYER_LIMIT_X, pos.x));
   pos.z = Math.max(-PLAYER_LIMIT_Z, Math.min(PLAYER_LIMIT_Z, pos.z));
   _refreshNear(pos.x, pos.z);
+  _refreshVehNear(pos.x, pos.z);
   const fx = Math.sin(player.heading), fz = Math.cos(player.heading);
   const off = Math.max(0, box.hl - box.hw);
   const offs = off > 0.01 ? [off, -off, 0] : [0];
+  _vehHits.length = 0;
   let hits = 0, nX = 0, nZ = 0;
   for (let iter = 0; iter < 3; iter++) {
     let any = false;
@@ -172,6 +202,17 @@ export function resolveVehicleMove(player, rideId, dt) {
         if (_pushBox(cx, cz, box.hw, b, _out)) {
           pos.x += _out.x; pos.z += _out.z; hits++; any = true;
           nX += _out.x; nZ += _out.z;
+        }
+      }
+      // traffic cars: same AABB push, but remember WHICH car + how deep (for damage)
+      for (const b of _vehNear) {
+        if (_pushBox(cx, cz, box.hw, b, _out)) {
+          pos.x += _out.x; pos.z += _out.z; hits++; any = true;
+          nX += _out.x; nZ += _out.z;
+          const depth = Math.hypot(_out.x, _out.z);
+          const prev = _vehHits.find((h) => h.car === b.car);
+          if (prev) prev.depth = Math.max(prev.depth, depth);
+          else _vehHits.push({ car: b.car, depth });
         }
       }
       for (const d of _dyn.values()) {

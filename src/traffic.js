@@ -247,9 +247,11 @@ export function createTraffic(scene, colliders = []) {
       let u = ((i + 0.5) / n + (R() - 0.5) * (0.6 / n)) * tot;
       let s0 = L.spans.clear[0].a0 + (L.spans.clear[0].a1 - L.spans.clear[0].a0) / 2;
       for (const g of L.spans.clear) { const gl = g.a1 - g.a0; if (u < gl) { s0 = g.a0 + u; break; } u -= gl; }
-      cars.push({ lane: L, type, offset: Math.max(8, Math.min(len - 8, s0)), color: new THREE.Color(pool[Math.floor(R() * pool.length)]) });
+      cars.push({ lane: L, type, offset: Math.max(8, Math.min(len - 8, s0)), color: new THREE.Color(pool[Math.floor(R() * pool.length)]), hp: 100, wrecked: false });
     }
   });
+  // stable instance index per car (its order among same-type cars) — used for colour damage feedback
+  { const cnt = {}; for (const c of cars) { cnt[c.type] = (cnt[c.type] || 0); c._inst = cnt[c.type]++; } }
   const glowMat = new THREE.MeshBasicMaterial({ map: makeGlowAtlas(), vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, opacity: 0, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
   let glowOn = false;
   const meshes = {};
@@ -301,6 +303,7 @@ export function createTraffic(scene, colliders = []) {
   };
   swapInGlb("bus", "bus");   // keke GLB is 126k triangles per copy — far too heavy to instance dozens of times (that made the game slow); keke traffic stays light boxes
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), up = new THREE.Vector3(0, 1, 0);
+  const _wreckEul = new THREE.Euler();
   const white = new THREE.Color(1, 1, 1), sc = new THREE.Vector3(1, 1, 1);
   const positions = [];
 
@@ -314,6 +317,29 @@ export function createTraffic(scene, colliders = []) {
   // main.js (life.js keeps its own positions; no circular import).
   let _crossTraffic = null;
   function setCrossTrafficProvider(fn) { _crossTraffic = fn; }
+
+  // ---- VEHICLE DAMAGE (Nov 2): traffic cars take damage and can be wrecked ----
+  // dmg from a ram. hp<=0 → wrecked: the car stops dead (engine gone), looks
+  // burnt (dark colour) and smokes. After ~18s it gets "towed away": it sinks,
+  // teleports far from the player and comes back brand new, so a wreck never
+  // blocks a lane forever.
+  function damageCar(car, dmg) {
+    if (!car || car.wrecked || !(car.hp > 0)) return false;
+    car.hp = Math.max(0, car.hp - dmg);
+    if (car.hp <= 0) {
+      car.wrecked = true; car._wreckT = 0;
+      car.color.multiplyScalar(0.32);                       // burnt look (update() writes instance colours every frame)
+    } else if (car.hp < 55 && !car._dented) {
+      car._dented = true;
+      car.color.multiplyScalar(0.6);                        // dented look
+    }
+    return true;
+  }
+  function _resetCar(c) {
+    c.hp = 100; c.wrecked = false; c._dented = false; c._wreckT = 0;
+    const T = TYPES[c.type];
+    c.color.set((T.fixedColors || BODY_COLORS)[Math.floor(Math.random() * (T.fixedColors || BODY_COLORS).length)]);
+  }
   // TODO #2 (Oct 24): runtime guard — world.colliders GROW lazily as districts
   // stream in, so the init-time stretches can go stale. Every 0.5s rebuild the
   // list of colliders within 80m of the player (cheap: one pass, not per car
@@ -377,11 +403,12 @@ export function createTraffic(scene, colliders = []) {
 
       // ---- advance along the WHOLE lane (wrap only at the road's two ends) ----
       if (c._go == null) c._go = 1;
+      if (c.wrecked) { go = 0; c._wreckT = (c._wreckT || 0) + dt; }   // a wreck is going nowhere
       c._go += (go - c._go) * Math.min(1, dt * 6);          // smooth accel / brake (IDM-lite)
       if (c._go < 0.004) c._go = 0;
       const adv = L.speed * c._go * dt;
       c.s += adv;
-      if (c.s >= L.len) c.s -= L.len;
+      if (c.s >= L.len) { c.s -= L.len; _resetCar(c); }
       const x = L.dir > 0 ? -L.len / 2 + c.s : L.len / 2 - c.s;
 
       // ---- TODO #2 runtime guard: freeze + hide inside a lazily-built collider ----
@@ -397,29 +424,36 @@ export function createTraffic(scene, colliders = []) {
       // which still reads as "shrinking". Now the ONLY dives are: (a) this lane's
       // precomputed blocked spans (a building genuinely on the road — rare,
       // the OSM layer keeps buildings off the lanes), (b) the two road ends
-      // where the asphalt stops, (c) lazily-added colliders (runtime guard).
-      // The dive eases faster (dt*9) so the car is fully under before it
-      // reaches the collider edge, and the margin below (4.5m) covers the
-      // easing distance at top speed.
+      // where the asphalt stops, (c) lazily-added colliders (runtime guard),
+      // (d) a WRECK after ~18s (towed away, then respawns fresh far away).
       const edge = Math.min(c.s, L.len - c.s);              // distance to the road end
       let inBlk = false;
       for (let bi = 0; bi < L.spans.blocked.length; bi++) { const b = L.spans.blocked[bi]; if (c.s > b.a0 && c.s < b.a1) { inBlk = true; break; } }
-      const wantSink = (overlap || inBlk || edge < 2.5) ? 1 : 0;
+      const towed = c.wrecked && c._wreckT > 18;
+      const wantSink = (overlap || inBlk || edge < 2.5 || towed) ? 1 : 0;
       if (c._sk == null) c._sk = wantSink;
       c._sk += (wantSink - c._sk) * Math.min(1, dt * 9);    // ease the dive so nothing snaps
       if (c._sk > 0.995) c._sk = 1; else if (c._sk < 0.005) c._sk = 0;
+      if (towed && c._sk >= 1) {                            // fully under: respawn brand-new far from the player
+        const spans = L.spans.clear;
+        let best = spans[0], bd = -1;
+        for (const g of spans) { const mx = L.dir > 0 ? -L.len / 2 + (g.a0 + g.a1) / 2 : L.len / 2 - (g.a0 + g.a1) / 2; const d = Math.abs(mx - pv.x); if (d > bd) { bd = d; best = g; } }
+        c.s = (best.a0 + best.a1) / 2;
+        _resetCar(c); c._sk = 0;
+      }
 
       p.set(x, 0.02 - 2.7 * c._sk, L.z);
-      q.setFromAxisAngle(up, L.dir > 0 ? 0 : Math.PI);
+      if (c.wrecked && c._sk < 0.5) { q.setFromEuler(_wreckEul.set(0.05, L.dir > 0 ? 0 : Math.PI, 0.045)); }  // wreck sits a little crooked
+      else q.setFromAxisAngle(up, L.dir > 0 ? 0 : Math.PI);
       sc.setScalar(1);
       m.compose(p, q, sc);
       mm.body.setMatrixAt(mm.i, m); mm.body.setColorAt(mm.i, c.color);
       mm.lights.setMatrixAt(mm.i, m); mm.lights.setColorAt(mm.i, white);
       if (mm.glb) mm.glb.setMatrixAt(mm.i, m);
-      if (glowOn) mm.glow.setMatrixAt(mm.i, m);
+      if (glowOn) { if (c.wrecked) { q.setFromAxisAngle(up, L.dir > 0 ? 0 : Math.PI); m.compose(p.set(x, -3, L.z), q, sc); } mm.glow.setMatrixAt(mm.i, m); }
       mm.i++;
       prevNext.push({ x, lane: L, ci, hl: TYPES[c.type].L / 2 });
-      positions.push({ x, z: L.z, hl: TYPES[c.type].L / 2, hw: TYPES[c.type].W / 2, dir: L.dir, speed: L.speed * c._go });
+      positions.push({ x, z: L.z, hl: TYPES[c.type].L / 2, hw: TYPES[c.type].W / 2, dir: L.dir, speed: L.speed * c._go, minX: x - TYPES[c.type].L / 2, maxX: x + TYPES[c.type].L / 2, minZ: L.z - TYPES[c.type].W / 2, maxZ: L.z + TYPES[c.type].W / 2, car: c, wrecked: !!c.wrecked });
     }
     prev = prevNext;
     for (const k in meshes) {
@@ -440,5 +474,5 @@ export function createTraffic(scene, colliders = []) {
     const on = v > 0.02;
     if (on !== glowOn) { glowOn = on; for (const k in meshes) meshes[k].glow.visible = on && meshes[k].body.visible; }
   }
-  return { update, setNight, setGlow, positions, cars, meshes, setCrossTrafficProvider, setPlayerVehicle(x, z, on) { pv.x = x; pv.z = z; pv.on = !!on; }, setVisible(v) { for (const k in meshes) { if (meshes[k].glb) meshes[k].glb.visible = v; meshes[k].body.visible = v && !meshes[k].glb; meshes[k].lights.visible = v && !meshes[k].glb; meshes[k].glow.visible = v && glowOn; } } };
+  return { update, setNight, setGlow, positions, cars, meshes, damageCar, setCrossTrafficProvider, setPlayerVehicle(x, z, on) { pv.x = x; pv.z = z; pv.on = !!on; }, setVisible(v) { for (const k in meshes) { if (meshes[k].glb) meshes[k].glb.visible = v; meshes[k].body.visible = v && !meshes[k].glb; meshes[k].lights.visible = v && !meshes[k].glb; meshes[k].glow.visible = v && glowOn; } } };
 }

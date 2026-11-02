@@ -4,7 +4,7 @@ import { createTraffic } from "./traffic.js";
 import { loadPlayer, collide } from "./player.js";
 // SOLID WORLD (Nov 1): everything collides — buildings, poles, fences, trees,
 // vehicles, furniture and characters — for walking AND driving.
-import { initCollision, resolvePlayerMove, resolveVehicleMove, resolveBoxed, resolveDyn, collisionStats, vehBoxOf, probeBlocked, firstHit } from "./collision.js";
+import { initCollision, resolvePlayerMove, resolveVehicleMove, resolveBoxed, resolveDyn, collisionStats, vehBoxOf, probeBlocked, firstHit, setVehicleProvider, vehHits } from "./collision.js";
 import { createControls, updateCamera } from "./controls.js";
 import { createMinimap } from "./minimap.js";
 import { addCity } from "./city.js";
@@ -50,7 +50,7 @@ import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpots
 import { HUNT_ACHIEVEMENTS, RARITY, SPOTS } from "./moneyspots.js";
 import { celebrate } from "./celebrate.js";
 import { initSfx, sfx, setMuted as setSfxMuted, isMuted as isSfxMuted } from "./sfx.js";
-import { initParticles, emitConfetti, emitDust, tickParticles } from "./particles.js";
+import { initParticles, emitConfetti, emitDust, emitSmoke, emitFire, tickParticles } from "./particles.js";
 import { initRoadEvents, tickRoadEvents, getCurrentWeather as getRoadWeather, resetRoadEvents, trafficSpeedMultiplierAt } from "./road_events.js";
 import { addScenery, SCENERY_LABELS } from "./scenery.js";
 import { initLife, tickLife , setLifePlayerVehicle, lifeTrafficPositions, setLifeCrossTrafficProvider } from "./life.js";
@@ -81,6 +81,7 @@ import { initOsmCity } from "./world/osmCity.js";
 // map data) — see src/world/cityFill.js.
 import { initCityFill } from "./world/cityFill.js";
 import { getSeat, VEHICLE_CATALOG, getVehicle, initVehicles, buyVehicle, getOwned, ownsVehicle, isRiding, getRideSpeed, getRideId, spawnRideVehicle, despawnRideVehicle, tickRideVehicle } from "./vehicles.js";
+import { hitRide, tickRideDamage, rideHp, rideDead } from "./damage.js";
 import { extendCatalog } from "./dealership_catalog.js";
 import { buildStreetDetail, makeBlobShadows } from "./street.js";
 import { initActivity, startActivity, tickActivity, isBusy, cancelActivity, eatSpec, toiletSpec, sitSpec, funSpec, placeSpec } from "./activity.js";
@@ -543,6 +544,9 @@ initLife(scene, world.colliders);
 initRoute(scene);
 initActivity(scene);
 const traffic = createTraffic(scene, world.colliders);  // Oct 23: pass colliders so cars don't drive through houses
+// VEHICLE DAMAGE (Nov 2): traffic cars are SOLID obstacles now (walking + driving)
+// and they take damage when you ram them.
+setVehicleProvider(() => traffic.positions);
 // TODO #5 (Oct 24): junction give-way — main-street traffic and the avenue
 // cars (life.js) stop for each other where the avenues cross the main street.
 traffic.setCrossTrafficProvider(() => lifeTrafficPositions());
@@ -721,26 +725,59 @@ function applyTime() {
 }
 
 const player = { pos: new THREE.Vector3(-9,0,11), heading: Math.PI, speed: 0 };
-// CONTINUE WHERE YOU STOPPED (Nov 1): the last outside position is saved per account and restored when the world is
-// ready - but only if it is a safe spot (inside the map, not inside a building, not at a place door). Anything odd = normal spawn.
-let _posSaveT = 0;
+// CONTINUE WHERE YOU STOPPED (Nov 1, FIXED): the last outside position is saved per account and restored once the
+// world AND the account are both known. Two real bugs it had:
+//  1) It restored the instant the world finished loading — seconds BEFORE the account resolves (Firebase is async),
+//     so it read the shared "kaduna-pos-x" key instead of "kaduna-pos-<uid>" and always fell back to the spawn.
+//  2) The "never on a doorstep" check rejected every spot within 14m of ANY place entrance OR plot centre — that is
+//     ~18% of the city centre, so perfectly good street saves were silently discarded.
+// Now: restore waits for the account (kaduna-auth-ready), the doorstep check is 8m from the entrance only, and a
+// toast confirms the restore so you can see it worked. Unsafe spots (outside the map, on a doorstep, inside a
+// solid) still fall back to the normal spawn.
+let _posSaveT = 0, _posRestored = false;
 const _posKey = () => "kaduna-pos-" + (getGameUid() || "x");
 function savePos(dt) {
   _posSaveT += dt; if (_posSaveT < 2) return; _posSaveT = 0;
+  if (!getGameUid() && !window.__bypassAuth) return;   // real session: never write the shared "x" key
   try { localStorage.setItem(_posKey(), JSON.stringify({ x: +player.pos.x.toFixed(1), z: +player.pos.z.toFixed(1), h: +player.heading.toFixed(2) })); } catch (e) {}
 }
 function restoreSavedPos() {
+  let why = null;
   try {
     const sp = JSON.parse(localStorage.getItem(_posKey()));
-    if (!sp || !Number.isFinite(sp.x) || !Number.isFinite(sp.z)) return;
-    if (Math.abs(sp.x) > MAP_HALF_X - 8 || Math.abs(sp.z) > MAP_HALF_Z - 8) return;
-    for (const pl of listPlaces()) {                                   // never start on a doorstep
-      for (const [ex, ez] of [[pl.entranceX, pl.entranceZ], [pl.worldX, pl.worldZ]]) if (Number.isFinite(ex) && Number.isFinite(ez) && Math.hypot(sp.x - ex, sp.z - ez) < 14) return;
+    if (!sp || !Number.isFinite(sp.x) || !Number.isFinite(sp.z)) return false;
+    if (Math.abs(sp.x) > MAP_HALF_X - 8 || Math.abs(sp.z) > MAP_HALF_Z - 8) why = "outside the map";
+    else {
+      for (const pl of listPlaces()) {                                 // never start ON a doorstep ("Enter" prompt would fire at once)
+        if (Number.isFinite(pl.entranceX) && Number.isFinite(pl.entranceZ) && Math.hypot(sp.x - pl.entranceX, sp.z - pl.entranceZ) < 8) { why = "on a doorstep (" + pl.id + ")"; break; }
+      }
+      if (!why) {
+        const probe = new THREE.Vector3(sp.x, 0, sp.z);
+        collide(probe, world.colliders);
+        if (Math.hypot(probe.x - sp.x, probe.z - sp.z) > 0.3) why = "inside something solid";
+      }
     }
-    const probe = new THREE.Vector3(sp.x, 0, sp.z);
-    collide(probe, world.colliders);
-    if (Math.hypot(probe.x - sp.x, probe.z - sp.z) > 0.3) return;      // it was inside something solid
+    if (why) { try { console.info("[kaduna] saved spot skipped — " + why + " → normal spawn"); } catch (e) {} return false; }
     player.pos.set(sp.x, 0, sp.z); if (Number.isFinite(sp.h)) player.heading = sp.h;
+    try { console.info("[kaduna] welcome back — restored your last spot", sp.x, sp.z); } catch (e) {}
+    return true;
+  } catch (e) { return false; }
+}
+function _tryRestorePos() {
+  if (_posRestored) return;
+  // The save is per-account: wait until we know WHICH account this is. bypassAuth (automated tests) may use the shared key.
+  if (!getGameUid() && !window.__bypassAuth) return;
+  _posRestored = true;
+  if (!restoreSavedPos()) return;
+  toast("Welcome back — continuing from your last spot");
+  // Dedicated banner (road-event toasts would overwrite the toast in seconds): stays 6s so you actually SEE it.
+  try {
+    const b = document.createElement("div");
+    b.id = "welcome-back";
+    b.textContent = "👋 Welcome back — you continue where you stopped";
+    b.style.cssText = "position:fixed;left:50%;bottom:calc(238px + env(safe-area-inset-bottom));transform:translateX(-50%);background:rgba(15,77,58,.92);color:#fff;padding:8px 14px;border-radius:12px;font:600 12px Poppins,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.3);z-index:31;border:1px solid rgba(255,255,255,.2);pointer-events:none;white-space:nowrap;";
+    document.body.appendChild(b);
+    setTimeout(() => b.remove(), 8000);
   } catch (e) {}
 }
 let rig; let toastT=0;
@@ -4223,7 +4260,7 @@ onValue(ref(db, "events"), (snap) => {
 
 // ---- Main loop ----
 const clock = new THREE.Clock();
-let mmT=0, hitCool=0, hudT=0, _missionCheckT=0, _stepT=0;
+let mmT=0, hitCool=0, hudT=0, _missionCheckT=0, _stepT=0, _wreckSmokeT=0;
 // ---- Automatic speed governor: if the phone is REALLY slow, lower quality step by step ----
 // FIX (Oct 21): the old governor triggered at FPS < 42, which is too
 // aggressive — most phones briefly dip below 42 while warming up, and the
@@ -4331,7 +4368,12 @@ function _frame() {
     const _gas = vehInput.gas || k["w"] || k["arrowup"], _brk = vehInput.brake || k["s"] || k["arrowdown"];
     let throttle = _brk ? -1 : (_gas ? 1 : 0);   // BRAKE always wins over gas
     const _drift = !!(vehInput.drift || k[" "]), _boost = !!(vehInput.boost || k["shift"]);
-    if (!player._wasRiding) { player.kvel = null; player.speed = 0; }   // fresh ride: never inherit an old velocity (this was the "drives by itself" bug)
+    if (!player._wasRiding) { player.kvel = null; player.speed = 0; player._wreckTold = false; }   // fresh ride: never inherit an old velocity (this was the "drives by itself" bug)
+    // VEHICLE DAMAGE (Nov 2): a wrecked ride is going nowhere — the engine is dead.
+    if (rideDead()) {
+      throttle = 0;
+      if (!player._wreckTold) { player._wreckTold = true; toast("💥 Engine don knock — this vehicle don finish! Dismount to leave am."); }
+    }
     player._wasRiding = true;
     if (k["a"] || k["arrowleft"]) steer -= 1;
     if (k["d"] || k["arrowright"]) steer += 1;
@@ -4379,8 +4421,29 @@ function _frame() {
   // It slides along walls and loses speed on impact instead of ghosting through.
   // Passengers skip this: their position is owned by the driver every frame.
   if (!active && !isBusy() && !_myPassengerUid) {
+    const _preSpd = _riding ? (Math.hypot(player.kvel ? player.kvel.x : 0, player.kvel ? player.kvel.z : 0) || Math.abs(player.speed || 0)) : 0;
     if (_riding) resolveVehicleMove(player, getRideId(), dt);
     else resolvePlayerMove(player.pos, 0.55);
+    // VEHICLE DAMAGE (Nov 2): a crash that kills real speed hurts the car — and the traffic car it hit.
+    if (_riding) {
+      const _postSpd = Math.hypot(player.kvel ? player.kvel.x : 0, player.kvel ? player.kvel.z : 0) || Math.abs(player.speed || 0);
+      const _impact = _preSpd - _postSpd;
+      if (_impact > 2.0 && !rideDead()) {
+        const _heavyV = getRideId() === "bus" || getRideId() === "jeep" || getRideId() === "suv";
+        // per-hit cap 55: one honest mistake hurts badly but never totals you; a second one can.
+        const _dmg = Math.min(55, (_impact - 1.4) * 4.8) * (_heavyV ? 0.7 : 1);   // big cars shrug scrapes off
+        const _before = rideHp();
+        hitRide(_dmg);
+        sfx.crash(Math.min(1, _impact / 13));
+        try { emitDust(new THREE.Vector3(player.pos.x + Math.sin(player.heading) * 2, 0.5, player.pos.z + Math.cos(player.heading) * 2), 6); } catch (e) {}
+        const _after = rideHp();
+        if (_after <= 0 && _before > 0) toast("💥 Vehicle wrecked! Engine don knock — dismount to leave am.");
+        else console.info("[kaduna] crash — hp " + Math.round(_after) + "/100 (impact " + _impact.toFixed(1) + " m/s)");
+        for (const h of vehHits()) {
+          if (h.car && traffic.damageCar && traffic.damageCar(h.car, _dmg * 1.25) && h.car.wrecked) toast("💥 You wreck that car — e no go move again!");
+        }
+      }
+    }
   }
   // If we're inside a place, also collide with the place's local colliders
   // (walls + solid furniture) and with other characters in the room.
@@ -4485,6 +4548,21 @@ function _frame() {
   }
   // FEATURE: update the ride vehicle mesh to follow the player
   tickRideVehicle(player.pos, player.heading);
+  // VEHICLE DAMAGE (Nov 2): your ride smokes when hurt, burns when wrecked — and so do the traffic wrecks around you.
+  if (isRiding()) {
+    const _ds = tickRideDamage(dt, player.pos, player.heading);
+    if (_ds.smoke) { try { emitSmoke(new THREE.Vector3(_ds.smoke.x, _ds.smoke.y, _ds.smoke.z), _ds.state === "wreck" ? 1 : _ds.state === "smoking" ? 0.7 : 0.35); } catch (e) {} }
+    if (_ds.fire) { try { emitFire(new THREE.Vector3(_ds.smoke.x, _ds.smoke.y + 0.2, _ds.smoke.z)); } catch (e) {} }
+  }
+  _wreckSmokeT -= dt;
+  if (_wreckSmokeT <= 0) {
+    _wreckSmokeT = 0.4;
+    for (const c of traffic.positions) {
+      if (c.wrecked && Math.abs(c.x - player.pos.x) < 70 && Math.abs(c.z - player.pos.z) < 70) {
+        try { emitSmoke(new THREE.Vector3(c.x, 1.0, c.z), 0.9); emitFire(new THREE.Vector3(c.x, 0.9, c.z)); } catch (e) {}
+      }
+    }
+  }
   updateCamera(camera, ctl, player.pos, active ? (active.handle.colliders || []) : world.colliders, dt);
   applyTime();
   // Inside a place: hide EVERYTHING outdoors (scene-root districts, traffic, sky, people...) so no silhouettes show.
@@ -4681,7 +4759,9 @@ Promise.all([loadPlayer(manager, scene, game.state.look), addCity(scene, world, 
   rig = r; rig.group.castShadow = true;
   if (rig.recolor) rig.recolor(game.state.look); // in case the account outfit arrived while loading
   setProgress(1);
-  restoreSavedPos();
+  _tryRestorePos();   // account already known (returning visit): restore right now
+  // Account not known yet (first frames after a fresh login): restore as soon as auth resolves.
+  if (!window.__authReady) window.addEventListener("kaduna-auth-ready", () => { _tryRestorePos(); ctl.yaw = player.heading + Math.PI; }, { once: true });
   ctl.yaw = player.heading + Math.PI;
   updateHUD();
   
@@ -4690,6 +4770,6 @@ Promise.all([loadPlayer(manager, scene, game.state.look), addCity(scene, world, 
   const _hideLoading = () => $("loading").classList.add("done");
   if (window.__authReady || window.__bypassAuth) _hideLoading();
   else { window.addEventListener("kaduna-auth-ready", _hideLoading, { once: true }); setTimeout(_hideLoading, 20000); }
-  window.__dbg = { ride: (id) => { initVehicles(scene, null, () => {}); return spawnRideVehicle(id, player.pos, player.heading, toast); }, player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig, cullStats, trafficCars: () => traffic.positions.length, trafficPos: () => traffic.positions.slice(0, 8), col: () => collisionStats(), probe: (x, z, r) => probeBlocked(x, z, r), probeBox: (x, z, r) => firstHit(x, z, r), vehBox: (id) => vehBoxOf(id), lampDebug: () => ({ hasPos: Array.isArray(world.lampPositions), n: world.lampPositions ? world.lampPositions.length : -1, lights: world.lampLights.map((l) => [Math.round(l.position.x), Math.round(l.position.z)]) }) };
+  window.__dbg = { ride: (id) => { initVehicles(scene, null, () => {}); return spawnRideVehicle(id, player.pos, player.heading, toast); }, player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig, cullStats, trafficCars: () => traffic.positions.length, trafficPos: () => traffic.positions.slice(0, 8), col: () => collisionStats(), probe: (x, z, r) => probeBlocked(x, z, r), probeBox: (x, z, r) => firstHit(x, z, r), vehBox: (id) => vehBoxOf(id), rideHp: () => rideHp(), rideDead: () => rideDead(), hitRide: (n) => hitRide(n), crashHits: () => vehHits().map((h) => ({ depth: +h.depth.toFixed(2), wrecked: !!(h.car && h.car.wrecked), hp: h.car ? Math.round(h.car.hp) : null })), trafficHp: () => traffic.cars.map((c) => Math.round(c.hp || 0)), posDbg: () => ({ key: _posKey(), uid: getGameUid(), restored: _posRestored, saved: (() => { try { return JSON.parse(localStorage.getItem(_posKey()) || "null"); } catch (e) { return "parse-error"; } })(), at: { x: +player.pos.x.toFixed(1), z: +player.pos.z.toFixed(1), h: +player.heading.toFixed(2) }, doors: listPlaces().filter((p) => Number.isFinite(p.entranceX)).map((p) => [p.id, +p.entranceX.toFixed(1), +p.entranceZ.toFixed(1)]) }), lampDebug: () => ({ hasPos: Array.isArray(world.lampPositions), n: world.lampPositions ? world.lampPositions.length : -1, lights: world.lampLights.map((l) => [Math.round(l.position.x), Math.round(l.position.z)]) }) };
   window.__ready = true;
 }).catch((e) => showError("Could not load the game: " + e.message));

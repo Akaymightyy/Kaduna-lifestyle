@@ -139,6 +139,15 @@ export const sfx = {
     _tone(550, 0.4, "sawtooth", 0.12);
   },
 
+  // VEHICLE DAMAGE (Nov 2): metal crash — low thud + noisy screech, power 0..1 scales violence
+  crash(power = 0.6) {
+    const p = Math.max(0.15, Math.min(1, power));
+    _tone(64 + 50 * p, 0.16 + 0.1 * p, "sine", 0.22 + 0.18 * p, 0.002, 0.04);
+    _noise(0.16 + 0.14 * p, 0.12 + 0.2 * p, 90, 2400);
+    setTimeout(() => _noise(0.09, 0.07 + 0.08 * p, 250, 1600), 55 + Math.random() * 40);
+    setTimeout(() => _tone(52, 0.12, "sine", 0.14 * p, 0.002, 0.05), 90);
+  },
+
   step() {
     _noise(0.05, 0.04, 600, 2000);
   },
