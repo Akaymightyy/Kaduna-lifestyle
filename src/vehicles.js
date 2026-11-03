@@ -67,6 +67,7 @@ export function initVehicles(scene, uid, onUpdate) {
 export function getOwned() { return _owned; }
 export function ownsVehicle(id) { return !!_owned[id]; }
 export function isRiding() { return _riding !== null; }
+export function vehiclesReady() { return _scene != null; }   // scene wired by initVehicles?
 export function getRideSpeed() { return _riding ? _riding.speed : 0; }
 export function getRideId() { return _riding ? _riding.vehicleId : null; }
 

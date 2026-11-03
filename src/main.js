@@ -80,7 +80,10 @@ import { initOsmCity } from "./world/osmCity.js";
 // Oct 25: our OWN procedural city filler (Kaduna-style buildings, no real
 // map data) — see src/world/cityFill.js.
 import { initCityFill } from "./world/cityFill.js";
-import { getSeat, VEHICLE_CATALOG, getVehicle, initVehicles, buyVehicle, getOwned, ownsVehicle, isRiding, getRideSpeed, getRideId, spawnRideVehicle, despawnRideVehicle, tickRideVehicle, sellVehicle, sellPriceOf, vehHealth, repairCost, repairVehicle } from "./vehicles.js";
+import { getSeat, VEHICLE_CATALOG, getVehicle, initVehicles, buyVehicle, getOwned, ownsVehicle, isRiding, getRideSpeed, getRideId, spawnRideVehicle, despawnRideVehicle, tickRideVehicle, sellVehicle, sellPriceOf, vehHealth, repairCost, repairVehicle, vehiclesReady, setVehHp } from "./vehicles.js";
+// GTA-STYLE GARAGE (Nov 2): owned houses tier 5+ get a garage block — roller door
+// opens on approach, owned cars park inside, walk to a car + Enter to bring it out.
+import { initGarage, tickGarage, garageSetUid, garageSyncHomes, garagePark, garageZoneAt, garageContains, garageCount, garageDbg } from "./garage.js";
 import { hitRide, tickRideDamage, rideHp, rideDead, crashCooldown } from "./damage.js";
 import { extendCatalog } from "./dealership_catalog.js";
 import { buildStreetDetail, makeBlobShadows } from "./street.js";
@@ -537,6 +540,15 @@ addEventListener("resize", resize); resize();
 
 const world = buildWorld(scene);
 initCollision(world.colliders);   // SOLID WORLD: windowed hot-list over the live collider array
+// GTA-STYLE GARAGE (Nov 2): probe-build a garage behind every owned tier-5+ house;
+// onTakeOut pulls the car out to the mouth of the garage with the player mounted.
+initGarage({ scene, colliders: world.colliders, getHomes: _garageHomes, onTakeOut: (vid, pos, heading) => {
+  player.pos.x = pos.x; player.pos.z = pos.z; player.heading = heading;
+  if (!vehiclesReady()) initVehicles(scene, getMyUid(), () => {});   // bypass-auth boots skip the auth init
+  spawnRideVehicle(vid, player.pos, player.heading, toast).then((ok) => {
+    if (ok) { toast("🚗 " + (getVehicle(vid)?.name || vid) + " don come out — enjoy!"); try { sfx.engine(true, 0.4); } catch (e) {} setMyRiding(vid); }
+  });
+} });
 world.world.add(buildStreetDetail(scene, world.colliders));
 const _pShadow = makeBlobShadows(scene, 1);
 addScenery(scene, world);
@@ -2824,6 +2836,8 @@ window._sellVehicle = async (vehicleId) => {
 window._rideVehicle = async (vehicleId) => {
   if (isRiding()) { toast("Already riding — dismount first"); return; }
   if (!ownsVehicle(vehicleId)) { toast("You don't own this vehicle"); return; }
+  // GARAGE (Nov 2): a car parked at home must be brought out from the garage itself
+  if (garageContains(vehicleId) && garageCount() > 0) { toast("🏢 That one dey park for your garage — go house bring am out!"); return; }
   const ok = await spawnRideVehicle(vehicleId, player.pos, player.heading, toast);
   if (ok) {
     closePhone();
@@ -2834,7 +2848,16 @@ window._rideVehicle = async (vehicleId) => {
   } else { toast("Could not spawn vehicle — try again"); }
 };
 // FEATURE: Dismount vehicle (despawn mesh + remove speed boost)
+// GARAGE (Nov 2): the ride is parked into a garage slot — into the garage you
+// are standing at, otherwise it drives itself home to your first garage.
+function _parkOrStoreRide() {
+  const vid = getRideId(); if (!vid) return;
+  const zone = garageZoneAt(player.pos.x, player.pos.z);
+  if (zone && garagePark(zone, vid)) { toast("🔩 Parked for garage ✅"); return; }
+  if (garageCount() > 0 && garagePark(null, vid)) toast("🚗 Car don go rest for your garage — go house see am");
+}
 window._dismountVehicle = () => {
+  _parkOrStoreRide();
   const _dId = getRideId(), _dHp = _dId ? vehHealth(_dId).hp : 100;
   despawnRideVehicle();
   resetVehInput();  // KSR: never carry a held pedal into the next ride
@@ -3407,6 +3430,7 @@ initAuth((user) => {
   initSocial(user.uid, () => {});
   // FEATURE: init the vehicles system (subscribes to owned vehicles from Firebase)
   initVehicles(scene, user.uid, () => {});
+  garageSetUid(user.uid);   // GARAGE: subscribe to players/{uid}/garage contents
   // KADUNA MOTORS (Oct 20): extend VEHICLE_CATALOG with dealership-only luxury
   // cars (Lexus RX, Tesla, G-Wagon, Range Rover, etc). This MUST run after
   // initVehicles so the existing catalog is in place. Idempotent (uses a Set
@@ -3920,6 +3944,20 @@ window._buyOutHouse = async (a, p) => {
   celebrate("🔑 " + t.name, "You own it now — no more rent!"); showPhoneApp("realestate");
 };
 function _tierFor(areaId, fallback) { const a = getArea(areaId); return fallback || (a ? (a.tier === "rich" ? 5 : a.tier === "middle" ? 3 : 1) : 1); }
+// GARAGE (Nov 2): the owned houses the garage module should build for (tier >= 5).
+// Tier comes from the myHouses entry, else the home record, else the area class
+// (rich areas get Mansion-grade houses = garage-worthy by default).
+function _garageHomes() {
+  const out = [];
+  for (const h of (game.state.myHouses || [])) {
+    if (!h.own) continue;
+    const area = getArea(h.a); if (!area) continue;
+    const pos = getPlotPosition(area, h.p);
+    const t = h.t || (h.a === game.state.homeArea && h.p === game.state.homePlot ? game.state.homeTier : 0) || _tierFor(h.a, null);
+    out.push({ a: h.a, p: h.p, tier: t, own: true, x: pos.x, z: pos.z });
+  }
+  return out;
+}
 // Every house this player owns (you can own many). Saved per account; first login also scans for old ones.
 function _myHomesList() {
   const out = [], seen = new Set();
@@ -4446,7 +4484,7 @@ function _frame() {
   }
   const active = getActivePlace();
   // SAFETY: auto-dismount vehicle when entering a place (can't ride inside a shop)
-  if (active && isRiding()) { despawnRideVehicle(); resetVehInput(); toast("🚶 Dismounted (entered building)"); }
+  if (active && isRiding()) { _parkOrStoreRide(); despawnRideVehicle(); resetVehInput(); toast("🚶 Dismounted (entered building)"); }
   // ---- SOLID WORLD (Nov 1): everything collides now ----
   // Walking: the body circle vs every static collider (windowed hot list) plus
   // every character (remote players, NPCs, pedestrians).
@@ -4515,6 +4553,8 @@ function _frame() {
   }
   // Show entrance/exit prompt
   tickEntrancePrompt(player.pos.x, player.pos.z, _gameHour());
+  // GARAGE (Nov 2): roller doors, parked-car prompt, homes diff-sync
+  try { tickGarage(player.pos.x, player.pos.z, dt, _riding); } catch (e) {}
 
   // Hide traffic when inside a place (fixes "cars inside buildings" bug)
   traffic.setVisible?.(!active);
@@ -4821,6 +4861,6 @@ Promise.all([loadPlayer(manager, scene, game.state.look), addCity(scene, world, 
   const _hideLoading = () => $("loading").classList.add("done");
   if (window.__authReady || window.__bypassAuth) _hideLoading();
   else { window.addEventListener("kaduna-auth-ready", _hideLoading, { once: true }); setTimeout(_hideLoading, 20000); }
-  window.__dbg = { getOwned, vehHealth, repairCost, cols: world.colliders, lifePos: () => lifeTrafficPositions(), rideHp: () => rideHp(), lastImpact, traffic, ride: (id) => { initVehicles(scene, null, () => {}); return spawnRideVehicle(id, player.pos, player.heading, toast); }, player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig, cullStats, trafficCars: () => traffic.positions.length, trafficPos: () => traffic.positions.slice(0, 8), col: () => collisionStats(), probe: (x, z, r) => probeBlocked(x, z, r), probeBox: (x, z, r) => firstHit(x, z, r), vehBox: (id) => vehBoxOf(id), rideHp: () => rideHp(), rideDead: () => rideDead(), hitRide: (n) => hitRide(n), crashHits: () => vehHits().map((h) => ({ depth: +h.depth.toFixed(2), wrecked: !!(h.car && h.car.wrecked), hp: h.car ? Math.round(h.car.hp) : null })), trafficHp: () => traffic.cars.map((c) => Math.round(c.hp || 0)), posDbg: () => ({ key: _posKey(), uid: getGameUid(), restored: _posRestored, saved: (() => { try { return JSON.parse(localStorage.getItem(_posKey()) || "null"); } catch (e) { return "parse-error"; } })(), at: { x: +player.pos.x.toFixed(1), z: +player.pos.z.toFixed(1), h: +player.heading.toFixed(2) }, doors: listPlaces().filter((p) => Number.isFinite(p.entranceX)).map((p) => [p.id, +p.entranceX.toFixed(1), +p.entranceZ.toFixed(1)]) }), lampDebug: () => ({ hasPos: Array.isArray(world.lampPositions), n: world.lampPositions ? world.lampPositions.length : -1, lights: world.lampLights.map((l) => [Math.round(l.position.x), Math.round(l.position.z)]) }) };
+  window.__dbg = { getOwned, vehHealth, repairCost, cols: world.colliders, lifePos: () => lifeTrafficPositions(), rideHp: () => rideHp(), lastImpact, traffic, ride: (id) => { initVehicles(scene, null, () => {}); return spawnRideVehicle(id, player.pos, player.heading, toast); }, player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig, cullStats, trafficCars: () => traffic.positions.length, trafficPos: () => traffic.positions.slice(0, 8), col: () => collisionStats(), probe: (x, z, r) => probeBlocked(x, z, r), probeBox: (x, z, r) => firstHit(x, z, r), vehBox: (id) => vehBoxOf(id), rideHp: () => rideHp(), rideDead: () => rideDead(), hitRide: (n) => hitRide(n), crashHits: () => vehHits().map((h) => ({ depth: +h.depth.toFixed(2), wrecked: !!(h.car && h.car.wrecked), hp: h.car ? Math.round(h.car.hp) : null })), trafficHp: () => traffic.cars.map((c) => Math.round(c.hp || 0)), garage: () => garageDbg(), fixCar: (id) => setVehHp(id, 100), isRiding: () => isRiding(), garageSync: (homes) => garageSyncHomes(homes), garageParkTest: (vid, key) => garagePark(key || null, vid), garageZone: (x, z) => garageZoneAt(x, z), garageHomes: () => _garageHomes(), posDbg: () => ({ key: _posKey(), uid: getGameUid(), restored: _posRestored, saved: (() => { try { return JSON.parse(localStorage.getItem(_posKey()) || "null"); } catch (e) { return "parse-error"; } })(), at: { x: +player.pos.x.toFixed(1), z: +player.pos.z.toFixed(1), h: +player.heading.toFixed(2) }, doors: listPlaces().filter((p) => Number.isFinite(p.entranceX)).map((p) => [p.id, +p.entranceX.toFixed(1), +p.entranceZ.toFixed(1)]) }), lampDebug: () => ({ hasPos: Array.isArray(world.lampPositions), n: world.lampPositions ? world.lampPositions.length : -1, lights: world.lampLights.map((l) => [Math.round(l.position.x), Math.round(l.position.z)]) }) };
   window.__ready = true;
 }).catch((e) => showError("Could not load the game: " + e.message));
