@@ -80,7 +80,7 @@ import { initOsmCity } from "./world/osmCity.js";
 // Oct 25: our OWN procedural city filler (Kaduna-style buildings, no real
 // map data) — see src/world/cityFill.js.
 import { initCityFill } from "./world/cityFill.js";
-import { getSeat, VEHICLE_CATALOG, getVehicle, initVehicles, buyVehicle, getOwned, ownsVehicle, isRiding, getRideSpeed, getRideId, spawnRideVehicle, despawnRideVehicle, tickRideVehicle, sellVehicle, sellPriceOf } from "./vehicles.js";
+import { getSeat, VEHICLE_CATALOG, getVehicle, initVehicles, buyVehicle, getOwned, ownsVehicle, isRiding, getRideSpeed, getRideId, spawnRideVehicle, despawnRideVehicle, tickRideVehicle, sellVehicle, sellPriceOf, vehHealth, repairCost, repairVehicle } from "./vehicles.js";
 import { hitRide, tickRideDamage, rideHp, rideDead, crashCooldown } from "./damage.js";
 import { extendCatalog } from "./dealership_catalog.js";
 import { buildStreetDetail, makeBlobShadows } from "./street.js";
@@ -1051,7 +1051,10 @@ function _showPhoneApp(appId) {
         h += '<div style="display:flex;align-items:center;gap:8px;padding:8px;background:#17181b;border-radius:8px;margin-bottom:5px;' + (isCurrentRide ? 'border:2px solid #4ade80;' : '') + '">';
         h += '<span style="font-size:24px;">' + v.emoji + '</span>';
         h += '<div style="flex:1;"><div style="font-size:12px;font-weight:600;color:#f2f2f4;">' + v.name + (isCurrentRide ? ' ✅' : '') + '</div>';
-        h += '<div style="font-size:10px;color:#9b9ba4;">Speed +' + v.speed + '</div></div>';
+        const _vh = vehHealth(id), _hc = _vh.hp >= 100 ? '#4ade80' : _vh.hp >= 55 ? '#f2b134' : '#e11d48';
+        h += '<div style="font-size:10px;color:#9b9ba4;">Speed +' + v.speed + ' · <span style="color:' + _hc + ';font-weight:600;">' + _vh.label + (_vh.hp < 100 ? ' ' + _vh.hp + '%' : '') + '</span></div>';
+        h += '<div style="height:4px;background:#2a2b30;border-radius:3px;margin-top:4px;overflow:hidden;"><div style="height:100%;width:' + _vh.hp + '%;background:' + _hc + ';"></div></div></div>';
+        if (_vh.hp < 100 && !isCurrentRide) h += '<button onclick="window._repairVehicle(\'' + id + '\')" style="background:#3b82f6;color:#fff;border:none;border-radius:6px;padding:6px 10px;cursor:pointer;font:600 11px Poppins,sans-serif;margin-right:4px;">🔧 Fix ₦' + repairCost(id).toLocaleString() + '</button>';
         if (isCurrentRide) {
           h += '<span style="font-size:10px;color:#4ade80;">Riding</span>';
         } else {
@@ -2804,6 +2807,11 @@ window._buyVehicle = async (vehicleId) => {
   const ok = await buyVehicle(vehicleId, game.state, toast);
   if (ok) { updateHUD(); showPhoneApp("cars"); }
 };
+// FEATURE: Mechanic — pay to repair a damaged owned vehicle
+window._repairVehicle = async (vehicleId) => {
+  const ok = await repairVehicle(vehicleId, game.state, toast);
+  if (ok) { updateHUD(); showPhoneApp("cars"); }
+};
 // FEATURE: Sell an owned vehicle (60% of its price back)
 window._sellVehicle = async (vehicleId) => {
   const v = getVehicle(vehicleId);
@@ -2827,9 +2835,10 @@ window._rideVehicle = async (vehicleId) => {
 };
 // FEATURE: Dismount vehicle (despawn mesh + remove speed boost)
 window._dismountVehicle = () => {
+  const _dId = getRideId(), _dHp = _dId ? vehHealth(_dId).hp : 100;
   despawnRideVehicle();
   resetVehInput();  // KSR: never carry a held pedal into the next ride
-  toast("🚶 Dismounted. Walking now.");
+  toast(_dHp < 55 ? "🚶 Dismounted. Your car dey bad (" + _dHp + "%) — Phone → Cars → 🔧 Fix am." : "🚶 Dismounted. Walking now.");
   try { sfx.engine(false); } catch (e) {}
   setMyRiding(null);  // SYNC: tell other players I'm on foot again
   // Drop any passengers — they get off when the driver dismounts
@@ -4812,6 +4821,6 @@ Promise.all([loadPlayer(manager, scene, game.state.look), addCity(scene, world, 
   const _hideLoading = () => $("loading").classList.add("done");
   if (window.__authReady || window.__bypassAuth) _hideLoading();
   else { window.addEventListener("kaduna-auth-ready", _hideLoading, { once: true }); setTimeout(_hideLoading, 20000); }
-  window.__dbg = { cols: world.colliders, lifePos: () => lifeTrafficPositions(), rideHp: () => rideHp(), lastImpact, traffic, ride: (id) => { initVehicles(scene, null, () => {}); return spawnRideVehicle(id, player.pos, player.heading, toast); }, player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig, cullStats, trafficCars: () => traffic.positions.length, trafficPos: () => traffic.positions.slice(0, 8), col: () => collisionStats(), probe: (x, z, r) => probeBlocked(x, z, r), probeBox: (x, z, r) => firstHit(x, z, r), vehBox: (id) => vehBoxOf(id), rideHp: () => rideHp(), rideDead: () => rideDead(), hitRide: (n) => hitRide(n), crashHits: () => vehHits().map((h) => ({ depth: +h.depth.toFixed(2), wrecked: !!(h.car && h.car.wrecked), hp: h.car ? Math.round(h.car.hp) : null })), trafficHp: () => traffic.cars.map((c) => Math.round(c.hp || 0)), posDbg: () => ({ key: _posKey(), uid: getGameUid(), restored: _posRestored, saved: (() => { try { return JSON.parse(localStorage.getItem(_posKey()) || "null"); } catch (e) { return "parse-error"; } })(), at: { x: +player.pos.x.toFixed(1), z: +player.pos.z.toFixed(1), h: +player.heading.toFixed(2) }, doors: listPlaces().filter((p) => Number.isFinite(p.entranceX)).map((p) => [p.id, +p.entranceX.toFixed(1), +p.entranceZ.toFixed(1)]) }), lampDebug: () => ({ hasPos: Array.isArray(world.lampPositions), n: world.lampPositions ? world.lampPositions.length : -1, lights: world.lampLights.map((l) => [Math.round(l.position.x), Math.round(l.position.z)]) }) };
+  window.__dbg = { getOwned, vehHealth, repairCost, cols: world.colliders, lifePos: () => lifeTrafficPositions(), rideHp: () => rideHp(), lastImpact, traffic, ride: (id) => { initVehicles(scene, null, () => {}); return spawnRideVehicle(id, player.pos, player.heading, toast); }, player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig, cullStats, trafficCars: () => traffic.positions.length, trafficPos: () => traffic.positions.slice(0, 8), col: () => collisionStats(), probe: (x, z, r) => probeBlocked(x, z, r), probeBox: (x, z, r) => firstHit(x, z, r), vehBox: (id) => vehBoxOf(id), rideHp: () => rideHp(), rideDead: () => rideDead(), hitRide: (n) => hitRide(n), crashHits: () => vehHits().map((h) => ({ depth: +h.depth.toFixed(2), wrecked: !!(h.car && h.car.wrecked), hp: h.car ? Math.round(h.car.hp) : null })), trafficHp: () => traffic.cars.map((c) => Math.round(c.hp || 0)), posDbg: () => ({ key: _posKey(), uid: getGameUid(), restored: _posRestored, saved: (() => { try { return JSON.parse(localStorage.getItem(_posKey()) || "null"); } catch (e) { return "parse-error"; } })(), at: { x: +player.pos.x.toFixed(1), z: +player.pos.z.toFixed(1), h: +player.heading.toFixed(2) }, doors: listPlaces().filter((p) => Number.isFinite(p.entranceX)).map((p) => [p.id, +p.entranceX.toFixed(1), +p.entranceZ.toFixed(1)]) }), lampDebug: () => ({ hasPos: Array.isArray(world.lampPositions), n: world.lampPositions ? world.lampPositions.length : -1, lights: world.lampLights.map((l) => [Math.round(l.position.x), Math.round(l.position.z)]) }) };
   window.__ready = true;
 }).catch((e) => showError("Could not load the game: " + e.message));

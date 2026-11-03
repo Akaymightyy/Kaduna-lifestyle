@@ -127,6 +127,45 @@ export async function sellVehicle(vehicleId, gameState, toast) {
   }
 }
 
+// ---- MECHANIC (Nov 3): damage is remembered per owned vehicle (this device) until repaired ----
+function _hpKey() { return "kl_vehhp_" + (_uid || "guest"); }
+function _hpAll() { try { return JSON.parse(localStorage.getItem(_hpKey()) || "{}") || {}; } catch (e) { return {}; } }
+export function getVehHp(id) { const h = _hpAll()[id]; return typeof h === "number" ? Math.max(0, Math.min(100, h)) : 100; }
+export function setVehHp(id, hp) {
+  try { const a = _hpAll(); if (hp >= 100) delete a[id]; else a[id] = Math.round(hp); localStorage.setItem(_hpKey(), JSON.stringify(a)); } catch (e) {}
+}
+export function vehHealth(id) { const hp = getVehHp(id); return { hp, label: hp <= 0 ? "Wrecked" : hp < 30 ? "Smoking" : hp < 55 ? "Dented" : hp < 100 ? "Scratched" : "Perfect" }; }
+// price grows with damage; wrecks cost extra; free starters still cost a little
+export function repairCost(id) {
+  const v = getVehicle(id); if (!v) return 0;
+  const hp = getVehHp(id); if (hp >= 100) return 0;
+  const base = Math.max(2000, (v.price || 0) * 0.3), hurt = (100 - hp) / 100;
+  return Math.max(200, Math.round(base * hurt * (hp <= 0 ? 1.25 : 1) / 100) * 100);
+}
+export async function repairVehicle(vehicleId, gameState, toast) {
+  const v = getVehicle(vehicleId);
+  if (!v) { toast?.("Unknown vehicle"); return false; }
+  if (!_uid) { toast?.("Sign in first"); return false; }
+  if (!ownsVehicle(vehicleId)) { toast?.("You don't own " + v.name); return false; }
+  if (_riding && _riding.vehicleId === vehicleId) { toast?.("Dismount first, then take am to the mechanic"); return false; }
+  const cost = repairCost(vehicleId);
+  if (cost <= 0) { toast?.(v.name + " dey perfect already 👌"); return false; }
+  const before = gameState.money || 0;
+  if (before < cost) { toast?.("Not enough money — repair na ₦" + cost.toLocaleString()); return false; }
+  try {
+    const newBal = Math.floor(before - cost);
+    await update(ref(db, "/"), { ["economy/" + _uid + "/balance"]: newBal });
+    gameState.money = newBal;
+    setVehHp(vehicleId, 100);
+    toast?.("🔧 " + v.name + " don fresh again! (₦" + cost.toLocaleString() + ")");
+    return true;
+  } catch (e) {
+    gameState.money = before;
+    toast?.("Repair failed: " + String((e && (e.code || e.message)) || "unknown").slice(0, 80));
+    return false;
+  }
+}
+
 // ---- Build a single vehicle mesh (reuses traffic.js geometry builders) ----
 // We import the TYPES from traffic.js lazily to avoid circular deps.
 let _trafficTypes = null;
@@ -373,7 +412,7 @@ export async function spawnRideVehicle(vehicleId, playerPos, playerHeading, toas
   mesh.rotation.y = pivotRotY(playerHeading);
   _scene.add(mesh);
   _riding = { vehicleId, speed: v.speed, mesh, own };
-  resetRideDamage(mesh);            // VEHICLE DAMAGE: every ride starts fresh (hp 100)
+  resetRideDamage(mesh, getVehHp(vehicleId), (hp) => setVehHp(vehicleId, hp));   // damage now STAYS until you pay the mechanic
   console.log("[vehicles] Riding " + v.name + " (speed boost +" + v.speed + ")");
   return true;
 }

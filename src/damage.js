@@ -16,8 +16,10 @@
 let _hp = 100, _dead = false, _mesh = null, _cloned = [];
 let _smokeT = 0, _lastHitAt = 0, _crashCool = 0, _ownGeo = [];
 
-export function resetRideDamage(mesh) {
-  _hp = 100; _dead = false; _smokeT = 0; _crashCool = 0;
+let _onHp = null;
+// startHp < 100 = a ride that was damaged earlier and not repaired yet (see vehicles.js getVehHp / repairVehicle)
+export function resetRideDamage(mesh, startHp = 100, onHp = null) {
+  _hp = Math.max(0, Math.min(100, startHp)); _dead = _hp <= 0; _smokeT = 0; _crashCool = 0; _onHp = onHp;
   _mesh = mesh || null;
   _lastHitAt = 0;
   _cloneMaterials();
@@ -26,7 +28,7 @@ export function resetRideDamage(mesh) {
 
 export function clearRideDamage() {
   for (const m of _cloned) { try { m.dispose(); } catch (e) {} }
-  _cloned = []; _mesh = null; _hp = 100; _dead = false;
+  _cloned = []; _mesh = null; _hp = 100; _dead = false; _onHp = null;
   for (const g of _ownGeo) { try { g.dispose(); } catch (e) {} }
   _ownGeo = [];
 }
@@ -47,6 +49,7 @@ export function hitRide(dmg, wx, wz) {
   _crashCool = 0.6;
   if (_hp <= 0) _dead = true;
   _applyVisuals();
+  if (_onHp) { try { _onHp(_hp); } catch (e) {} }
   return _hp;
 }
 
