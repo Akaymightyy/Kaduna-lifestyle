@@ -24,7 +24,7 @@ import { checkDailyReward, getDailyStatus, claimQuestReward } from "./daily.js";
 import { ref, get, onValue, update, set } from "firebase/database";
 import { openCreator } from "./creator.js";
 import { mountPreview, setPreviewLook } from "./charpreview.js";
-import { outfitsFor, BUILDS, SHOP, SLOT_KEYS } from "./outfits.js";
+import { outfitsFor, BUILDS, SHOP, SLOT_KEYS, applyOutfit } from "./outfits.js";
 import { tickContext, showContext, isContextShown, hideContext } from "./contextmenu.js";
 import { initRoute, tickRoute } from "./route.js";
 import { peekWorld, initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, getActivePlace, enterPlace, enterPlaceAsVisitor, exitPlace, sendUIEvent } from "./places/manager.js";
@@ -2062,7 +2062,7 @@ window._wearItem=(id,fromBuy)=>{
   const it=SHOP.find(x=>x.id===id), L=game.state.look; if(!it||!(L.owned||[]).includes(id)) return;
   L.worn=L.worn||{};
   if(!L.base) L.base={top:L.top,bottom:L.bottom,topStyle:L.topStyle,bottomStyle:L.bottomStyle,shoes:L.shoes}; // what you wore before
-  if(it.patch) Object.assign(L,it.patch);
+  if(it.patch){ if(it.patch.topStyle) for(const k of ["pattern","pattern2","accent","under","tie","hat","hatColor","skirtColor","jewel"]) delete L[k]; Object.assign(L,it.patch); }
   L.worn[it.slot]=id;
   game.save?.(); _pushLook(); if(rig?.recolor) rig.recolor(L);
   if(!fromBuy) toast("Wearing "+it.name);
@@ -2098,18 +2098,19 @@ window._openCreator = () => {
 };
 window._setOutfit = (id) => {
   const o = outfitsFor(game.state.look.gender).find((x) => x.id === id); if (!o) return;
-  Object.assign(game.state.look, o, { outfitId: id });
+  applyOutfit(game.state.look, o); game.state.look.outfitId = id;
   window._setLook("outfitId", id);
 };
 window._setGender = async (g) => {
   const l = game.state.look; if ((l.gender || "male") === g) return;
-  Object.assign(l, outfitsFor(g)[0], { gender: g, outfitId: outfitsFor(g)[0].id });
+  applyOutfit(l, outfitsFor(g)[0]); l.gender = g; l.outfitId = outfitsFor(g)[0].id;
   game.save?.();
   const uid = getMyUid(); try { if (uid) await update(ref(db, "players/" + uid + "/look"), l); } catch (e) {}
   location.reload();
 };
 // ---- Wardrobe: live colour/style change ----
 window._setLook=(key,val)=>{
+  if(key==="topStyle"||key==="bottomStyle"){ for(const k of ["pattern","pattern2","accent","under","tie","hat","hatColor","skirtColor","jewel"]) delete game.state.look[k]; }   // a hand-picked style drops the preset's extras
   game.state.look[key]=val;
   game.save?.();
   // push to the account right away so your other devices follow
@@ -2967,6 +2968,18 @@ function _onFunActivityTap() {
   if (!rig) { finish(true); return; }
   startActivity(funSpec(place, act, player, finish), player, rig);
 }
+// POSES sheet (Nov 3): tap a pose, the character holds it until you walk.
+window._openPoses = () => {
+  let el = document.getElementById("pose-sheet"); if (el) { el.remove(); return; }
+  el = document.createElement("div"); el.id = "pose-sheet";
+  el.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:60;background:#fffaf0;border-radius:18px 18px 0 0;padding:12px 12px calc(16px + env(safe-area-inset-bottom));box-shadow:0 -6px 24px rgba(0,0,0,.25);max-height:48vh;overflow-y:auto;";
+  const list = Object.entries(EMOTES).filter(([, v]) => v.pose);
+  el.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><div style="font:800 15px Poppins,sans-serif;color:#0f4d3a">🧍 Poses</div><button id="pose-x" style="border:0;background:#e11d48;color:#fff;border-radius:10px;padding:6px 12px;font:700 12px Poppins,sans-serif">Close</button></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px">' +
+    list.map(([k, v]) => '<button data-p="' + k + '" style="padding:10px 4px;border-radius:12px;border:2px solid #0f4d3a22;background:#fff;font:700 11px Poppins,sans-serif;color:#0f4d3a"><div style="font-size:22px">' + v.emoji + '</div>' + v.name + '</button>').join("") + '</div>';
+  document.body.appendChild(el);
+  el.querySelector("#pose-x").onclick = () => el.remove();
+  el.querySelectorAll("button[data-p]").forEach((b) => (b.onclick = () => { window._emote(b.dataset.p, 3600); el.remove(); }));
+};
 // FEATURE: Emotes — REAL character animations via bone manipulation
 window._emote = (type, duration = 3) => {
   if (!rig || !rig.animate || !rig.animate.emote) { toast("Character not loaded yet"); return; }
@@ -2974,8 +2987,8 @@ window._emote = (type, duration = 3) => {
   if (type === "sit") { startActivity(sitSpec(player, null, 25), player, rig); toast("🪑 You sat down on a stool (move to stand up)"); return; }
   rig.animate.emote(type, duration);
   const labels = { wave: "waved", dance: "is dancing", sit: "sat down", clap: "is clapping", jump: "jumped", squat: "squatted", point: "is pointing", laugh: "is laughing", pray: "is praying", spray: "is spraying money 💸", talk: "is socialising", together: "started a group dance!", bell: "rang the bell 🔔" };
-  const icons = { wave: "👋", dance: "💃", sit: "🪑", clap: "👏", jump: "🦘", squat: "🏋️", point: "👆", laugh: "😂", pray: "🙏", spray: "🤑", talk: "💬", together: "🕺", bell: "🔔" };
-  toast(icons[type] + " " + (getMyName() || "You") + " " + (labels[type] || type) + "!");
+  const icons = new Proxy({ wave: "👋", dance: "💃", sit: "🪑", clap: "👏", jump: "🦘", squat: "🏋️", point: "👆", laugh: "😂", pray: "🙏", spray: "🤑", talk: "💬", together: "🕺", bell: "🔔" }, { get: (o, k) => o[k] || (EMOTES[k] && EMOTES[k].emoji) || "🧍" });
+  toast(icons[type] + " " + (getMyName() || "You") + " " + (labels[type] || (EMOTES[type] && EMOTES[type].pose ? "is posing — " + EMOTES[type].name : type)) + "!");
   // Send position update so other players see the emote state
   sendPosition(player.pos.x, player.pos.z, player.heading);
 };
@@ -3743,6 +3756,7 @@ initAuth((user) => {
       { svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v8M8 6l4-4 4 4M5 14a7 7 0 0 0 14 0v8"/></svg>', label: "Point", type: "point", dur: 3 },
       { svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg>', label: "Laugh", type: "laugh", dur: 3 },
       { svg: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 9l8 6M16 9l-8 6"/></svg>', label: "Spray Money", spray: true },
+      { svg: '<span style="font-size:19px;line-height:1">🧍</span>', label: "Poses", poses: true },
     ];
     for (const e of emotes) {
       const b = document.createElement("button");
@@ -3751,7 +3765,8 @@ initAuth((user) => {
       b.innerHTML = e.svg;
       b.addEventListener("click", () => {
         // HOUSE PARTY (Oct 25): the Spray button opens the full money-spray UI
-        if (e.spray) { try { openSprayUI(); } catch (err) {} }
+        if (e.poses) { window._openPoses(); }
+        else if (e.spray) { try { openSprayUI(); } catch (err) {} }
         else window._emote(e.type, e.dur);
         panel.style.display = "none";
       });
@@ -4532,6 +4547,7 @@ function _frame() {
     rig.group.position.copy(player.pos); rig.group.position.y += player.yOff || 0;
     rig.group.rotation.y = player.heading;
     rig.animate(dt, player.speed);
+    { const _et = rig.animate.emoteType && rig.animate.emoteType(); if (_et && EMOTES[_et] && EMOTES[_et].pose && (player.speed > 0.6 || isRiding())) { rig.animate.stopEmote(); clearEmote(); } }   // a pose ends when you move
     // FEATURE: hide the player's character model when riding a vehicle.
     // The vehicle mesh IS the visual representation — without this, the
     // player's feet + legs clip through the vehicle body.

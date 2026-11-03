@@ -1,6 +1,6 @@
 // src/creator.js — "Create your character" sheet: boy/girl, build (slim/normal/big), skin, hair, outfit.
 // Shown once after sign-up (look.created missing). Live preview = the real player model behind the sheet.
-import { outfitsFor, SKINS, HAIRS, BUILDS } from "./outfits.js";
+import { outfitsFor, SKINS, HAIRS, BUILDS, applyOutfit } from "./outfits.js";
 
 export function openCreator({ look, onChange, onDone }) {
   let el = document.getElementById("creator-sheet");
@@ -16,7 +16,7 @@ export function openCreator({ look, onChange, onDone }) {
   const handlers = {};
   function render() {
     const outs = outfitsFor(L.gender);
-    handlers.gender = (v) => { if (L.gender !== v) { L.gender = v; const o = outfitsFor(v)[0]; Object.assign(L, o, { gender: v }); change(); } };
+    handlers.gender = (v) => { if (L.gender !== v) { L.gender = v; const o = outfitsFor(v)[0]; applyOutfit(L, o); L.gender = v; change(); } };
     el.innerHTML = `<div style="font-size:17px;font-weight:800;color:#0f4d3a;margin-bottom:8px">🧑🏾 Create your character</div>` +
       sec("I am a", chip("👦 Boy / Man", L.gender !== "female", "gender:male") + chip("👧 Girl / Woman", L.gender === "female", "gender:female")) +
       sec("Body", BUILDS.map((b) => chip(b.label, (L.build || "normal") === b.id, "build:" + b.id)).join("")) +
@@ -27,13 +27,13 @@ export function openCreator({ look, onChange, onDone }) {
     el.querySelectorAll("button[data-f]").forEach((b) => (b.onclick = () => {
       const [k, ...r] = b.dataset.f.split(":"), v = r.join(":");
       if (k === "gender") return handlers.gender(v);
-      if (k === "outfit") { const o = outs.find((x) => x.id === v); Object.assign(L, o, { outfitId: v }); }
+      if (k === "outfit") { const o = outs.find((x) => x.id === v); applyOutfit(L, o); L.outfitId = v; }
       else L[k] = v;
       change();
     }));
     el.querySelector("#cr-done").onclick = () => { L.created = true; el.remove(); onDone(L); };
   }
   function change() { onChange({ ...L }); render(); }
-  if (!L.outfitId) { const o = outfitsFor(L.gender)[0]; Object.assign(L, o, { outfitId: o.id }); }
+  if (!L.outfitId) { const o = outfitsFor(L.gender)[0]; applyOutfit(L, o); L.outfitId = o.id; }
   render();
 }

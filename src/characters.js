@@ -5,6 +5,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { rng } from "./config.js";
+import { buildGarment, isCustomStyle, reachOf } from "./garments.js";
 
 const SHIRTS = ["#1f7a5a", "#c0392b", "#f2f2ee", "#1d5fa8", "#d98e2b", "#6b4a8a", "#2e2e2e", "#e8c547", "#3c8dbc", "#a23b72"];
 const TROUSERS = ["#2b3a55", "#1f2a36", "#6b5a45", "#3b3b3b", "#7a6a52", "#44546a"];
@@ -205,16 +206,39 @@ const ACC_MAT = { kufi: new THREE.MeshStandardMaterial({ color: 0xf6f2e8, roughn
 // wearable extras (cap, watch) attached to bones; sizes are in metres, compensated for the bone's world scale
 function applyAccessories(model, look) {
   const old = []; model.traverse((o) => { if (o.userData.acc) old.push(o); });
-  for (const o of old) { o.parent && o.parent.remove(o); o.geometry?.dispose(); }
+  for (const o of old) { o.parent && o.parent.remove(o); o.traverse((c) => { c.geometry?.dispose(); }); }
   const w = look.worn || {};
   model.updateWorldMatrix(true, true);
+  // every accessory sits in a holder group (scaled 1/boneScale) so its own position / size are in plain METRES
   const attach = (boneName, mesh, offY, rotX) => {
-    const bone = _outerBone(model, boneName); if (!bone) return;
+    const bone = _outerBone(model, boneName); if (!bone) return mesh;
     const sc = bone.getWorldScale(new THREE.Vector3()).x || 1;
-    mesh.userData.acc = true; mesh.castShadow = false;
-    mesh.scale.setScalar(1 / sc); mesh.position.set(0, offY / sc, 0); if (rotX) mesh.rotation.x = rotX;
-    bone.add(mesh);
+    const h = new THREE.Group(); h.userData.acc = true;
+    h.scale.setScalar(1 / sc); h.position.set(0, offY / sc, 0); if (rotX) h.rotation.x = rotX;
+    // The Spine bone sits at chest-low height (world y ≈ 1.08): garments were modelled 0.18 m too tall at the neck (robe covered the
+    // mouth). Squash everything attached to the Spine so the neckline lands at the base of the neck and the hem stays where it was.
+    if (base(boneName) === "Spine") { h.scale.y *= 0.825; h.position.y = (offY * 0.825 - 0.0805) / sc; }
+    mesh.castShadow = false; h.add(mesh); bone.add(h);
+    return mesh;
   };
+  const put = (boneName, mesh, offY, zs = 1, rotX = 0) => { attach(boneName, mesh, offY, rotX); if (zs !== 1) mesh.scale.z *= zs; return mesh; };
+  // a loose tube from joint to joint (shoulder→elbow→wrist), used for sleeves
+  const _Y = new THREE.Vector3(0, 1, 0), _v = new THREE.Vector3();
+  const kidBone = (bone, key) => { let f = null; bone.traverse((o) => { if (!f && o !== bone && o.isBone && base(o.name) === key) f = o; }); return f; };
+  const sleeve = (from, to, r0, r1, mat) => {
+    const bone = _outerBone(model, from); if (!bone) return;
+    const kid = kidBone(bone, to); if (!kid) return;
+    const sc = bone.getWorldScale(new THREE.Vector3()).x || 1;
+    _v.copy(kid.position); const len = _v.length() * sc; if (len < 0.02) return;
+    const g = new THREE.CylinderGeometry(r1, r0, len, 10, 1, true);   // top = far end (wrist side)
+    const m = new THREE.Mesh(g, mat); m.userData.acc = true; m.castShadow = false;
+    m.scale.setScalar(1 / sc); m.position.copy(_v).multiplyScalar(0.5);
+    m.quaternion.setFromUnitVectors(_Y, _v.clone().normalize());
+    bone.add(m);
+  };
+  // NEW OUTFITS (Nov 3): agbada, iro & buba, suits, hoodies... (src/garments.js)
+  if (look.hat === "none") look = { ...look, hat: null };
+  const customDone = buildGarment({ ...look, skin: look.skin }, { attach, attachBone: attach, put, sleeve, female: look.gender === "female" });
   const bs = look.bottomStyle;
   // FEATURE: VISIBLE garment shapes per outfit style — no more "all look like t-shirts"
   // Kaftan/Agbada/Babanriga → add a WIDE flowing robe mesh over the torso (like a real kaftan)
@@ -230,23 +254,9 @@ function applyAccessories(model, look) {
     const hem = new THREE.Mesh(new THREE.TorusGeometry(0.221, 0.011, 6, 22).rotateX(Math.PI / 2), trimMat);
     attach("Spine", hem, -0.455, 0); hem.scale.z *= 0.74;
     attach("Head", new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.016, 8, 16), trimMat), -0.05, 0);
-    // sleeves: a loose tube from each joint to the next (shoulder→elbow→wrist), flaring a little at the cuff
-    const _Y = new THREE.Vector3(0, 1, 0), _v = new THREE.Vector3();
-    const kidBone = (bone, key) => { let f = null; bone.traverse((o) => { if (!f && o !== bone && o.isBone && base(o.name) === key) f = o; }); return f; };
-    const sleeve = (from, to, r0, r1) => {
-      const bone = _outerBone(model, from); if (!bone) return;
-      const kid = kidBone(bone, to); if (!kid) return;
-      const sc = bone.getWorldScale(new THREE.Vector3()).x || 1;
-      _v.copy(kid.position); const len = _v.length() * sc; if (len < 0.02) return;
-      const g = new THREE.CylinderGeometry(r1, r0, len, 10, 1, true);   // top = far end (wrist side)
-      const m = new THREE.Mesh(g, robeMat); m.userData.acc = true; m.castShadow = false;
-      m.scale.setScalar(1 / sc); m.position.copy(_v).multiplyScalar(0.5);
-      m.quaternion.setFromUnitVectors(_Y, _v.clone().normalize());
-      bone.add(m);
-    };
     for (const side of ["Left", "Right"]) {
-      sleeve(side + "Arm", side + "ForeArm", 0.062, 0.068);
-      sleeve(side + "ForeArm", side + "Hand", 0.068, 0.085);
+      sleeve(side + "Arm", side + "ForeArm", 0.062, 0.068, robeMat);
+      sleeve(side + "ForeArm", side + "Hand", 0.068, 0.085, robeMat);
     }
   }
   // Gown → already has a long skirt; make it WIDER so it's clearly a gown, not a thin tube
@@ -275,14 +285,14 @@ function applyAccessories(model, look) {
     const shortsMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(look.bottom), roughness: 0.9, side: THREE.DoubleSide });
     attach("Hips", new THREE.Mesh(new THREE.LatheGeometry(shortsPts, 16), shortsMat), 0.0, 0);
   }
-  if (look.gender === "female" && w.head !== "kufi") {  // long hair
+  if (look.gender === "female" && w.head !== "kufi" && look.topStyle !== "iro" && look.hat !== "beanie") {  // long hair
     const hm = new THREE.MeshStandardMaterial({ color: new THREE.Color(look.hair || "#111111"), roughness: 0.9 });
     const cg = new THREE.SphereGeometry(1, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2); cg.scale(0.116, 0.12, 0.122); cg.translate(0, 0.15, -0.012);
     const bg = new THREE.SphereGeometry(1, 14, 10); bg.scale(0.112, 0.2, 0.05); bg.translate(0, 0.02, -0.092);
     attach("Head", new THREE.Mesh(cg, hm), 0, 0);
     attach("Head", new THREE.Mesh(bg, hm), 0, 0);
   }
-  if (w.head === "kufi" || (ts === "kaftan" && look.gender !== "female" && !w.head)) {   // men in native wear get a cap
+  if (w.head === "kufi" || (ts === "kaftan" && look.gender !== "female" && !w.head && look.hat !== "none")) {   // men in native wear get a cap
     const g = new THREE.CylinderGeometry(0.088, 0.1, 0.085, 20);
     attach("Head", new THREE.Mesh(g, ACC_MAT.kufi), 0.215, 0);
   }
@@ -302,7 +312,30 @@ function applyBuild(model, look) {
 const _q = new THREE.Quaternion(), _ax = new THREE.Vector3(1, 0, 0);
 const base = (n) => n.replace(/^mixamorig[:_]?/i, "").replace(/_\d+$/, "");
 const SIT_HIP = 1.45; // thigh swing for sitting (positive = knees forward)
-const WANT = ["LeftArm", "RightArm", "LeftForeArm", "RightForeArm", "LeftUpLeg", "RightUpLeg", "LeftLeg", "RightLeg"];
+const WANT = ["LeftArm", "RightArm", "LeftForeArm", "RightForeArm", "LeftUpLeg", "RightUpLeg", "LeftLeg", "RightLeg", "Spine", "Head"];
+
+// ---- POSES (Nov 3) ----  a(bone, outward, up, forward): aim a limb in model space (forward = +z). T = turn(bone, angle).
+const POSES = {
+  clasp: ({ aim }) => { for (const s of ["Left", "Right"]) { aim(s + "Arm", 0.12, -0.97, 0.2); aim(s + "ForeArm", -0.7, -0.35, 0.6); } },                       // hands clasped in front (formal group photo)
+  crossed: ({ aim }) => { for (const s of ["Left", "Right"]) { aim(s + "Arm", 0.1, -0.9, 0.35); aim(s + "ForeArm", -1, 0.05, 0.3); } },                        // arms folded
+  hips: ({ aim }) => { for (const s of ["Left", "Right"]) { aim(s + "Arm", 0.75, -0.6, -0.25); aim(s + "ForeArm", -0.7, -0.5, 0.45); } },                    // hands on hips
+  pocket: ({ aim }) => { for (const s of ["Left", "Right"]) { aim(s + "Arm", 0.08, -0.98, -0.05); aim(s + "ForeArm", -0.3, -0.85, 0.25); } },                // hands in pockets
+  model: ({ aim, turn, model }) => { aim("LeftArm", 0.15, -0.99, 0.0); aim("LeftForeArm", -0.05, -0.9, 0.3); aim("RightArm", 0.75, -0.6, -0.25); aim("RightForeArm", -0.7, -0.5, 0.45); turn("LeftUpLeg", 0.12); turn("RightUpLeg", -0.1); turn("RightLeg", -0.1); model.rotation.z = 0.03; },
+  think: ({ aim }) => { aim("RightArm", 0.1, -0.6, 0.6); aim("RightForeArm", -0.25, 0.9, 0.35); aim("LeftArm", 0.1, -0.95, 0.25); aim("LeftForeArm", -0.95, 0.1, 0.4); },
+  salute: ({ aim }) => { aim("RightArm", 0.7, 0.0, 0.1); aim("RightForeArm", -0.5, 0.85, 0.25); aim("LeftArm", 0.12, -0.98, 0.05); aim("LeftForeArm", 0.05, -0.95, 0.2); },
+  bow: ({ turn, aim, now }) => { const k = Math.min(1, now / 0.5); turn("Spine", 0.75 * k); turn("Head", 0.25 * k); for (const s of ["Left", "Right"]) { aim(s + "Arm", 0.1, -0.95, 0.3); aim(s + "ForeArm", -0.2, -0.8, 0.5); } },
+  shrug: ({ aim }) => { for (const s of ["Left", "Right"]) { aim(s + "Arm", 0.7, -0.7, 0.1); aim(s + "ForeArm", 0.4, 0.3, 0.85); } },
+  thumbsup: ({ aim }) => { aim("RightArm", 0.2, -0.5, 0.75); aim("RightForeArm", 0.0, 0.8, 0.6); aim("LeftArm", 0.12, -0.98, 0.05); aim("LeftForeArm", 0.05, -0.95, 0.2); },
+  peace: ({ aim }) => { aim("RightArm", 0.55, 0.05, 0.3); aim("RightForeArm", 0.1, 0.95, 0.25); aim("LeftArm", 0.12, -0.98, 0.05); aim("LeftForeArm", 0.05, -0.95, 0.2); },
+  victory: ({ aim, esw, model, baseY }) => { model.position.y = baseY + Math.abs(esw) * 0.03; for (const s of ["Left", "Right"]) { aim(s + "Arm", 0.45, 0.9, 0.1); aim(s + "ForeArm", 0.3, 0.95, 0.0); } },
+  flex: ({ aim }) => { for (const s of ["Left", "Right"]) { aim(s + "Arm", 1, 0.0, 0.0); aim(s + "ForeArm", 0.15, 1, 0.1); } },
+  shy: ({ aim, turn }) => { for (const s of ["Left", "Right"]) { aim(s + "Arm", 0.1, -0.95, -0.3); aim(s + "ForeArm", -0.55, -0.4, -0.7); } turn("RightLeg", -0.12); turn("RightUpLeg", 0.1); },
+  welcome: ({ aim }) => { for (const s of ["Left", "Right"]) { aim(s + "Arm", 1, 0.35, 0.3); aim(s + "ForeArm", 1, 0.3, 0.45); } },
+  phone: ({ aim }) => { aim("RightArm", 0.4, -0.4, 0.4); aim("RightForeArm", -0.2, 0.9, 0.25); aim("LeftArm", 0.1, -0.95, 0.25); aim("LeftForeArm", -0.9, 0.05, 0.4); },
+  relaxed: ({ aim, turn, model }) => { turn("LeftUpLeg", 0.1); turn("LeftLeg", -0.08); turn("RightUpLeg", -0.05); for (const s of ["Left", "Right"]) { aim(s + "Arm", 0.2, -0.97, 0.05); aim(s + "ForeArm", 0.0, -0.9, 0.3); } model.rotation.z = -0.025; },
+  kneel: ({ aim, turn, model, baseY }) => { model.position.y = baseY - 0.42; turn("LeftUpLeg", 0.15); turn("LeftLeg", -2.5); turn("RightUpLeg", 1.45); turn("RightLeg", -1.5); for (const s of ["Left", "Right"]) { aim(s + "Arm", 0.12, -0.97, 0.2); aim(s + "ForeArm", -0.7, -0.35, 0.6); } },   // greeting an elder
+};
+export const POSE_TYPES = Object.keys(POSES);
 
 function makeRig(group, model, baseY, pose = "stand") {
   const bones = {};
@@ -344,6 +377,7 @@ function makeRig(group, model, baseY, pose = "stand") {
     const sw = Math.sin(phase), amp = Math.min(1, speed / 3.2);
     // FEATURE: emote override — if an emote is active, play it instead of normal anim
     const now = performance.now() / 1000;
+    if (model.rotation.z !== 0) model.rotation.z = 0; turn("Spine", 0); turn("Head", 0);                       // poses (bow, think...) bend these; everything else keeps them straight
     if (_emoteType && now < _emoteEnd) {
       const ephase = phase * 2;
       const esw = Math.sin(ephase);
@@ -351,7 +385,7 @@ function makeRig(group, model, baseY, pose = "stand") {
       if (_emoteType === "wave") {
         // Right arm raised + waving back and forth
         turn("LeftUpLeg", 0); turn("RightUpLeg", 0); turn("LeftLeg", 0); turn("RightLeg", 0);
-        arms(0.05, -1.8 + esw * 0.3, 0.18, 0.18 + esw * 0.3);
+        arms(0.05, 2.6, 0.18, 2.55 + esw * 0.45, 0.1);
       } else if (_emoteType === "dance") {
         // Bouncing + arm swinging + hip sway
         model.position.y = baseY + Math.abs(esw) * 0.12;
@@ -383,7 +417,7 @@ function makeRig(group, model, baseY, pose = "stand") {
       } else if (_emoteType === "point") {
         // Right arm extended forward (pointing)
         turn("LeftUpLeg", 0); turn("RightUpLeg", 0); turn("LeftLeg", 0); turn("RightLeg", 0);
-        arms(0.1, -1.5, 0.18, 0.18);
+        arms(0.1, 1.55, 0.18, 1.5);
       } else if (_emoteType === "laugh") {
         // Bouncing + head back + arms on belly
         model.position.y = baseY + Math.abs(esw) * 0.06;
@@ -457,6 +491,11 @@ function makeRig(group, model, baseY, pose = "stand") {
         turn("LeftUpLeg", esw * 0.35); turn("RightUpLeg", -esw * 0.35);
         turn("LeftLeg", Math.max(0, -esw) * 0.45); turn("RightLeg", Math.max(0, esw) * 0.45);
         arms(-1.5 + esw * 0.6, -1.5 - esw * 0.6, -2.2 + esw * 0.4, -2.2 - esw * 0.4, 0.1);
+      } else if (POSES[_emoteType]) {
+        // NEW POSES (Nov 3): standing / formal / playful. Arms are aimed with aim(bone, outward, up, forward).
+        model.position.y = baseY;
+        turn("LeftUpLeg", 0); turn("RightUpLeg", 0); turn("LeftLeg", 0); turn("RightLeg", 0);
+        POSES[_emoteType]({ aim, turn, model, baseY, esw, ephase, now: now - _emoteStart });
       } else if (_emoteType === "bell") {
         // RING BELL: right arm reaches out and presses twice
         const k = Math.max(0, Math.sin(ephase * 1.4)) * 0.3;
@@ -534,6 +573,7 @@ function makeRig(group, model, baseY, pose = "stand") {
     _emoteEnd = _emoteStart + duration;
     if (changed) _snapPose();                             // blend into the new pose
   };
+  animate.emoteType = () => (_emoteType && performance.now() / 1000 < _emoteEnd ? _emoteType : null);
   animate.stopEmote = () => { if (_emoteType) { _emoteType = null; _emoteEnd = 0; _snapPose(); } };
   animate.isEmoting = () => _emoteType !== null && performance.now() / 1000 < _emoteEnd;
   animate(0, 0);
@@ -556,6 +596,7 @@ export async function createCharacter(opts = {}) {
   const hair = lk.hair || opts.hair || pick(HAIRS);
   const shoes = lk.shoes || opts.shoes || (R() < 0.5 ? "#f2f2ee" : "#222222");
   const fullLook = { top, bottom, skin, hair, shoes, topStyle: lk.topStyle || outfit, bottomStyle: lk.bottomStyle || "trousers", gender: lk0, build: lk.build || "normal", created: !!lk.created, owned: lk.owned || [], worn: lk.worn || {}, base: lk.base || null };
+  for (const k of ["pattern", "pattern2", "accent", "under", "tie", "hat", "hatColor", "skirtColor", "jewel"]) if (lk[k] != null) fullLook[k] = lk[k];   // outfit design extras (src/outfits.js)
 
   const model = cloneSkinned(src);
   const height = opts.height || 1.75;
@@ -588,14 +629,15 @@ function _applyLook(model, look) {
   const top = new THREE.Color(look.top || "#1f7a5a"), bottom = new THREE.Color(look.bottom || "#2b3a55");
   const skin = new THREE.Color(look.skin || "#8a5a3c"), hair = new THREE.Color(look.hair || "#111111");
   const shoes = new THREE.Color(look.shoes || "#222222");
-  const kaftan = look.topStyle === "kaftan";
+  const reach = reachOf(look.topStyle);
+  const kaftan = look.topStyle === "kaftan" || reach === -1;
   if (look.bottomStyle === "skirt") bottom.copy(skin);      // bare legs under a skirt
   if (look.bottomStyle === "gown") bottom.copy(top);        // long gown covers the legs
   // FEATURE: kaftan cutoff MUCH lower (0.15 vs 0.32) so the top color covers from
   // shoulders to mid-shin — now you can SEE the difference between kaftan and casual.
   // Casual stays at 0.5 (waist) — t-shirt length.
   // Shorts get an even higher cutoff (0.25) so more leg shows.
-  const hipFrac = kaftan ? 0.15 : look.bottomStyle === "shorts" ? 0.25 : 0.5;
+  const hipFrac = kaftan ? 0.15 : (reach != null && reach >= 0) ? reach : look.bottomStyle === "shorts" ? 0.25 : 0.5;
   const cols = [top, bottom, null, hair, shoes];
   model.traverse((o) => {
     if (!o.isMesh || o.name !== "__paint") return;
