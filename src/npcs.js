@@ -8,6 +8,9 @@ import { createCharacter } from "./characters.js";
 import { ROAD_HALF, WORLD_HALF_X, CROSSINGS, rng } from "./config.js";
 import { collide } from "./player.js";
 import { setDyn } from "./collision.js";
+import { npcLook } from "./outfits.js";
+import { makeNameTag, tagScale } from "./nametag.js";
+const NPC_NAMES = ["Musa", "Amina", "Chidi", "Hauwa", "Tunde", "Zainab", "Emeka", "Bala"];
 
 const NPC_COUNT = 3;            // reduced for perf (240 meshes per character)
 const ANIM_DISTANCE = 30;       // metres — skip animation beyond this
@@ -44,12 +47,13 @@ export function createNPCs(scene, colliders = []) {
     if (npc.loading || npc.ready) return spawnIdx < npcs.length;
     npc.loading = true;
     // Defer the actual createCharacter to next microtask so this frame stays cheap
-    createCharacter({ seed: 500 + spawnIdx * 37, height: 1.7 + R() * 0.15 })
+    createCharacter({ seed: 500 + spawnIdx * 37, height: 1.7 + R() * 0.15, look: npcLook(500 + spawnIdx * 37) })
       .then((ch) => {
         // Re-enable frustum culling so off-screen NPCs don't draw
         ch.group.traverse((o) => {
           if (o.isMesh) { o.frustumCulled = true; o.castShadow = true; }
         });
+        { const tex = makeNameTag(NPC_NAMES[spawnIdx % NPC_NAMES.length], "Resident"), sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true })); sp.position.y = 2.05; tagScale(sp, tex); sp.renderOrder = 10; ch.group.add(sp); }
         scene.add(ch.group);
         npc.group = ch.group;
         npc.walker = ch;

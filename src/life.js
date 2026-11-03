@@ -14,6 +14,7 @@ import { carShape, busShape, personParts, hash2, paint, flatten, B, done } from 
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { createCharacter, loadCharacterBase } from "./characters.js";
 import { setDyn } from "./collision.js";
+import { npcLook } from "./outfits.js";
 
 // ---- real 3D vehicles (same models as the main street) swapped in for the box cars ----
 let carG = [], busG = null, glbReady = false;
@@ -197,7 +198,7 @@ export function initLife(scene, colliders = []) {
     try { await loadCharacterBase(THREE.DefaultLoadingManager, "male"); } catch (e) { console.warn("[life] base load failed", e); return; }
     for (let i = 0; i < POOL; i++) {
       try {
-        const ch = await createCharacter({ seed: 900 + i * 31, height: 1.62 + hash2("ph", i) * 0.22, outfit: i % 3 === 0 ? "kaftan" : "casual" });
+        const ch = await createCharacter({ seed: 900 + i * 31, height: 1.62 + hash2("ph", i) * 0.22, look: npcLook(900 + i * 31) });
         ch.group.visible = false; ch.group.traverse((o) => { if (o.isMesh) { o.frustumCulled = true; o.castShadow = false; } });
         scene.add(ch.group); RIGS.push({ ch, who: -1 });
       } catch (e) { console.warn("[life] rig failed", e); break; }

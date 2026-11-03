@@ -83,3 +83,16 @@ export const SHOP = [
   { id: "watch", name: "Gold Watch", emoji: "⌚", price: 12000, slot: "wrist", for: "any", desc: "Status symbol", acc: "watch" },
 ];
 export const SLOT_KEYS = { outfit: ["top", "bottom", "topStyle", "bottomStyle"], shoes: ["shoes"], head: [], wrist: [] };
+
+// NPC variety (Nov 3): deterministic random outfit + skin/hair for any non-player character, from the same library players wear.
+const _NPC_SKINS = ["#c28a5c", "#a5714a", "#8a5a3c", "#7a4b2e", "#6b4429", "#5a3825", "#3d2517"];
+export function npcLook(seed) {
+  let s = (Math.floor(seed) * 2654435761) >>> 0;
+  const r = () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; };
+  const female = r() < 0.45, list = female ? WOMEN_OUTFITS : MEN_OUTFITS;
+  const look = applyOutfit({}, list[Math.floor(r() * list.length)]);
+  look.gender = female ? "female" : "male";
+  look.skin = _NPC_SKINS[Math.floor(r() * _NPC_SKINS.length)];
+  look.hair = HAIRS[Math.floor(r() * 4)];
+  return look;
+}
