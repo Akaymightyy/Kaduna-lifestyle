@@ -84,12 +84,15 @@ export async function buyVehicle(vehicleId, gameState, toast) {
     // SERVER copy — the money leaves only if the REAL balance can pay. Before, the
     // new balance was computed from the device copy and written back wholesale, so a
     // player who edited localStorage could mint money by buying anything.
+    let paid = false;                                  // true only when the LAST run really took the money (a null "guess" run must never count)
     const txn = await runTransaction(ref(db, "economy/" + _uid + "/balance"), (cur) => {
-      const bal = cur || 0;
-      if (bal < v.price) return;                       // cannot afford — abort (transaction retries with undefined)
-      return bal - v.price;
+      paid = false;
+      if (cur === null) return 0;                      // first run before the server value arrives: make a guess, Firebase re-runs us with the REAL balance
+      if (cur < v.price) return;                       // really cannot afford — abort
+      paid = true;
+      return cur - v.price;
     });
-    if (!txn.committed) { toast?.("Not enough money — need ₦" + v.price.toLocaleString()); return false; }
+    if (!txn.committed || !paid) { toast?.("Not enough money — need ₦" + v.price.toLocaleString()); return false; }
     const newBal = txn.snapshot.val() || 0;
     await update(ref(db, "players/" + _uid + "/vehicles/" + vehicleId), true);
     gameState.money = newBal;
@@ -161,12 +164,15 @@ export async function repairVehicle(vehicleId, gameState, toast) {
   if (before < cost) { toast?.("Not enough money — repair na ₦" + cost.toLocaleString()); return false; }
   try {
     // 🛡 ANTI-CHEAT (Nov 4): pay the mechanic through a server transaction too
+    let paid = false;
     const txn = await runTransaction(ref(db, "economy/" + _uid + "/balance"), (cur) => {
-      const bal = cur || 0;
-      if (bal < cost) return;
-      return bal - cost;
+      paid = false;
+      if (cur === null) return 0;                      // guess first, Firebase re-runs with the real balance
+      if (cur < cost) return;
+      paid = true;
+      return cur - cost;
     });
-    if (!txn.committed) { toast?.("Not enough money — repair na ₦" + cost.toLocaleString()); return false; }
+    if (!txn.committed || !paid) { toast?.("Not enough money — repair na ₦" + cost.toLocaleString()); return false; }
     gameState.money = txn.snapshot.val() || 0;
     setVehHp(vehicleId, 100);
     toast?.("🔧 " + v.name + " don fresh again! (₦" + cost.toLocaleString() + ")");
