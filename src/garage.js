@@ -24,7 +24,7 @@ import * as THREE from "three";
 import { db } from "./firebase.js";
 import { ref, set, onValue } from "firebase/database";
 import { getCarShape } from "./car_shapes.js";
-import { getVehicle } from "./vehicles.js";
+import { getVehicle, ownsVehicle, getOwned, buildRemoteVehicleMesh, getVehHp } from "./vehicles.js";
 import { buildKsrMesh } from "./ksr_cars.js";
 
 const TIER_MIN = 5;                 // first tier that comes with a garage
@@ -197,14 +197,35 @@ function _renderCars(g) {
     if (vid && cur && cur.vid === vid) continue;
     if (cur) { g.grp.remove(cur.mesh); g.cars.delete(k); }
     if (!vid) continue;
-    const mesh = _displayMesh(vid);
-    if (!mesh) continue;
-    const lx = g.slotPos[i], lz = -g.D / 2 + 2.35;         // nose towards the mouth
-    mesh.position.set(lx, 0.05, lz);
-    mesh.rotation.y = -Math.PI / 2;                         // car front (+X) faces local +z (the mouth)
-    g.grp.add(mesh);
-    g.cars.set(k, { vid, mesh });
+    // REAL model + colour of the car you own (async: GLB cars load on demand). A token guards against the slot changing mid-load.
+    const holder = new THREE.Group();
+    holder.position.set(g.slotPos[i], 0.05, -g.D / 2 + 2.35);   // nose towards the mouth
+    holder.rotation.y = -Math.PI / 2;                            // car front (+X) faces local +z (the mouth)
+    g.grp.add(holder);
+    const rec = { vid, mesh: holder };
+    g.cars.set(k, rec);
+    _fillDisplay(g, k, rec);
   }
+}
+
+async function _fillDisplay(g, k, rec) {
+  let m = null;
+  try { m = await buildRemoteVehicleMesh(rec.vid); } catch (e) {}
+  if (!m) m = _displayMesh(rec.vid);
+  const live = g.cars.get(k);
+  if (!m || !live || live !== rec) return;                        // slot changed or garage gone while loading
+  // show the damage the car really has: darker body when hurt (materials cloned — GLB models share them)
+  const hp = getVehHp(rec.vid);
+  if (hp < 100) {
+    const shade = 1 - 0.55 * (100 - hp) / 100;
+    m.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+      const list = Array.isArray(o.material) ? o.material : [o.material];
+      const next = list.map((mat) => { const c = mat.clone(); if (c.color) c.color.multiplyScalar(shade); return c; });
+      o.material = Array.isArray(o.material) ? next : next[0];
+    });
+  }
+  rec.mesh.add(m);
 }
 
 function _displayMesh(vid) {
@@ -264,6 +285,13 @@ export function tickGarage(px, pz, dt, riding) {
 function _doTakeOut(g, slot) {
   const vid = (_contents[g.key] || {})[slot];
   if (!vid || !_takeOut) return;
+  // you can only drive out a car you still OWN (a sold car must never come back for free)
+  const _ownedNow = Object.keys(getOwned() || {}).length > 0;
+  if (_ownedNow && !ownsVehicle(vid)) {
+    const next0 = { ...(_contents[g.key] || {}) }; delete next0[slot]; _writeGarage(g.key, next0);
+    return;
+  }
+  if (!_ownedNow) return;                                     // ownership still loading — try again in a second
   const coss = Math.cos(g.grp.rotation.y), sinn = Math.sin(g.grp.rotation.y);
   const lx = 0, lz = g.D / 2 + 3.0;                          // pull out to just outside the mouth
   const wx = g.cx + lx * coss + lz * sinn, wz = g.cz - lx * sinn + lz * coss;
@@ -298,8 +326,18 @@ export function garageZoneAt(px, pz) {
 }
 
 export function garageContains(vehicleId) {
-  for (const c of Object.values(_contents)) for (const k of SLOT_KEYS) if (c && c[k] === vehicleId) return true;
+  for (const key of _garages.keys()) { const c = _contents[key]; if (c) for (const k of SLOT_KEYS) if (c[k] === vehicleId) return true; }
   return false;
+}
+
+// a vehicle was sold: take it out of every garage so it can never be driven out again
+export function garageForget(vehicleId) {
+  for (const key of Object.keys(_contents)) {
+    const c = _contents[key]; if (!c) continue;
+    let hit = false; const next = { ...c };
+    for (const k of SLOT_KEYS) if (next[k] === vehicleId) { delete next[k]; hit = true; }
+    if (hit) _writeGarage(key, next);
+  }
 }
 
 export function garageCount() { return _garages.size; }
@@ -321,6 +359,8 @@ function _disposeGarage(key) {
   const g = _garages.get(key);
   if (!g) return;
   for (const c of g.cols) { const i = _cols.indexOf(c); if (i >= 0) _cols.splice(i, 1); }
+  for (const c of g.cars.values()) g.grp.remove(c.mesh);
+  g.cars.clear();
   _scene.remove(g.grp);
   g.grp.traverse((o) => { if (o.geometry) { try { o.geometry.dispose(); } catch (e) {} } if (o.material) { try { o.material.dispose(); } catch (e) {} } });
   _garages.delete(key);
