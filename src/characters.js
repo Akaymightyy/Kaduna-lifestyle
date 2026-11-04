@@ -596,7 +596,7 @@ export async function createCharacter(opts = {}) {
   const hair = lk.hair || opts.hair || pick(HAIRS);
   const shoes = lk.shoes || opts.shoes || (R() < 0.5 ? "#f2f2ee" : "#222222");
   const fullLook = { top, bottom, skin, hair, shoes, topStyle: lk.topStyle || outfit, bottomStyle: lk.bottomStyle || "trousers", gender: lk0, build: lk.build || "normal", created: !!lk.created, owned: lk.owned || [], worn: lk.worn || {}, base: lk.base || null };
-  for (const k of ["pattern", "pattern2", "accent", "under", "tie", "hat", "hatColor", "skirtColor", "jewel"]) if (lk[k] != null) fullLook[k] = lk[k];   // outfit design extras (src/outfits.js)
+  for (const k of ["pattern", "pattern2", "accent", "under", "tie", "hat", "hatColor", "skirtColor", "jewel", "hairStyle", "beard"]) if (lk[k] != null) fullLook[k] = lk[k];   // outfit design extras (src/outfits.js)
 
   const model = cloneSkinned(src);
   const height = opts.height || 1.75;
