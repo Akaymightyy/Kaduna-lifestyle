@@ -11,7 +11,7 @@ import { KSR_CATALOG, buildKsrMesh } from "./ksr_cars.js";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { db } from "./firebase.js";
-import { ref, get, set, update, onValue } from "firebase/database";
+import { ref, get, set, update, onValue, runTransaction } from "firebase/database";
 import { resetRideDamage, clearRideDamage } from "./damage.js";
 
 // ---- Catalog ----
@@ -80,12 +80,18 @@ export async function buyVehicle(vehicleId, gameState, toast) {
   if ((gameState.money || 0) < v.price) { toast?.("Not enough money — need ₦" + v.price.toLocaleString()); return false; }
   const before = gameState.money;
   try {
-    // ONE atomic write: money and the vehicle go together or not at all
-    const newBal = Math.max(0, Math.floor(before - v.price));
-    await update(ref(db, "/"), {
-      ["economy/" + _uid + "/balance"]: newBal,
-      ["players/" + _uid + "/vehicles/" + vehicleId]: true,
+    // 🛡 ANTI-CHEAT (Nov 4): the balance now moves through a runTransaction on the
+    // SERVER copy — the money leaves only if the REAL balance can pay. Before, the
+    // new balance was computed from the device copy and written back wholesale, so a
+    // player who edited localStorage could mint money by buying anything.
+    const txn = await runTransaction(ref(db, "economy/" + _uid + "/balance"), (cur) => {
+      const bal = cur || 0;
+      if (bal < v.price) return;                       // cannot afford — abort (transaction retries with undefined)
+      return bal - v.price;
     });
+    if (!txn.committed) { toast?.("Not enough money — need ₦" + v.price.toLocaleString()); return false; }
+    const newBal = txn.snapshot.val() || 0;
+    await update(ref(db, "players/" + _uid + "/vehicles/" + vehicleId), true);
     gameState.money = newBal;
     _owned[vehicleId] = true;
     toast?.("🎉 Bought " + v.name + "! Find it in your Garage.");
@@ -111,11 +117,11 @@ export async function sellVehicle(vehicleId, gameState, toast) {
   if (price <= 0) { toast?.(v.name + " is a free starter — can't be sold"); return false; }
   const before = gameState.money || 0;
   try {
-    const newBal = Math.floor(before + price);
-    await update(ref(db, "/"), {
-      ["economy/" + _uid + "/balance"]: newBal,
-      ["players/" + _uid + "/vehicles/" + vehicleId]: null,
-    });
+    // 🛡 ANTI-CHEAT (Nov 4): server-side transaction, not a device-computed write
+    const txn = await runTransaction(ref(db, "economy/" + _uid + "/balance"), (cur) => Math.min(999999999, (cur || 0) + price));
+    if (!txn.committed) { toast?.("Sell failed — try again"); return false; }
+    const newBal = txn.snapshot.val() || 0;
+    await update(ref(db, "players/" + _uid + "/vehicles/" + vehicleId), null);
     gameState.money = newBal;
     delete _owned[vehicleId];
     toast?.("💰 Sold " + v.name + " for ₦" + price.toLocaleString());
@@ -154,9 +160,14 @@ export async function repairVehicle(vehicleId, gameState, toast) {
   const before = gameState.money || 0;
   if (before < cost) { toast?.("Not enough money — repair na ₦" + cost.toLocaleString()); return false; }
   try {
-    const newBal = Math.floor(before - cost);
-    await update(ref(db, "/"), { ["economy/" + _uid + "/balance"]: newBal });
-    gameState.money = newBal;
+    // 🛡 ANTI-CHEAT (Nov 4): pay the mechanic through a server transaction too
+    const txn = await runTransaction(ref(db, "economy/" + _uid + "/balance"), (cur) => {
+      const bal = cur || 0;
+      if (bal < cost) return;
+      return bal - cost;
+    });
+    if (!txn.committed) { toast?.("Not enough money — repair na ₦" + cost.toLocaleString()); return false; }
+    gameState.money = txn.snapshot.val() || 0;
     setVehHp(vehicleId, 100);
     toast?.("🔧 " + v.name + " don fresh again! (₦" + cost.toLocaleString() + ")");
     return true;
@@ -429,9 +440,10 @@ export function despawnRideVehicle() {
 }
 
 // ---- Update the ride vehicle position (called from main.js every frame) ----
-export function tickRideVehicle(playerPos, playerHeading) {
+// yOff = altitude for the KSR flying cars (Tesla / Ghost).
+export function tickRideVehicle(playerPos, playerHeading, yOff = 0) {
   if (!_riding) return;
-  _riding.mesh.position.set(playerPos.x, 0, playerPos.z);
+  _riding.mesh.position.set(playerPos.x, yOff || 0, playerPos.z);
   _riding.mesh.rotation.y = pivotRotY(playerHeading);
 }
 

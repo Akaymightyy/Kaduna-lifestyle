@@ -6,6 +6,8 @@ import { onAuthStateChanged } from "firebase/auth";
 import { buildRemoteVehicleMesh, getSeat } from "./vehicles.js";
 import { createCharacter } from "./characters.js";
 import { setDyn, vehBoxOf } from "./collision.js";
+import { rideHp } from "./damage.js";
+import { emitSmoke, emitFire } from "./particles.js";
 
 
 let _uid=null, _name="Guest", _players={}, _meshes={}, _scene=null, _sendT=null, _onCount=null, _onChat=null;
@@ -79,8 +81,12 @@ export function sendPosition(x,z,heading) {
   if(!_uid) return;
   if(_sendT) return; _sendT=setTimeout(()=>{_sendT=null;},200);
   update(ref(db,"players/"+_uid),{x,z,heading,ts:serverTimestamp()});
-  if (_liveOk) update(ref(db,"live/"+_uid),{x,z,heading,place:_myPlace,online:true,ts:Date.now(),riding:_myRiding||null,passengerOf:_myPassengerOf||null}).catch(()=>{ _liveOk=false; });
+  if (_liveOk) update(ref(db,"live/"+_uid),{x,z,heading,place:_myPlace,online:true,ts:Date.now(),riding:_myRiding||null,passengerOf:_myPassengerOf||null,vehHp:_myRiding?rideHp():null,flyY:_myFlyY||0}).catch(()=>{ _liveOk=false; });
 }
+// DAMAGE SYNC (Nov 4): my current flight altitude (0 = on the ground) so other
+// players see the flying Tesla/Ghost float above the city instead of clipping the road.
+let _myFlyY = 0;
+export function setMyFlyY(y) { _myFlyY = Math.max(0, y || 0); }
 // Which room am I in? "" = outside in the city, "home:<ownerUid>" = inside that player's house, otherwise the place id.
 // Other players only show up for me when we are in the SAME room (before, someone inside a house stood in the road
 // for people outside, and nobody inside a house could be seen).
@@ -129,7 +135,8 @@ function createAvatarFor(uid, d) {
 // keep only plain colour / style strings so one odd saved field can never stop a character from being built
 function _cleanLook(l) {
   const o = {}; l = l || {};
-  for (const k of ["top", "bottom", "skin", "hair", "shoes", "topStyle", "bottomStyle", "gender", "build", "pattern", "pattern2", "accent", "under", "tie", "hat", "hatColor", "skirtColor", "jewel"]) if (typeof l[k] === "string") o[k] = l[k];
+  // SALON (Nov 4): hairStyle (full/bald/fade) + beard (full/shaved/grey) travel with the look
+  for (const k of ["top", "bottom", "skin", "hair", "shoes", "topStyle", "bottomStyle", "gender", "build", "pattern", "pattern2", "accent", "under", "tie", "hat", "hatColor", "skirtColor", "jewel", "hairStyle", "beard"]) if (typeof l[k] === "string") o[k] = l[k];
   return o;
 }
 function _disposeMesh(uid) {
@@ -247,6 +254,11 @@ function updateAvatars() {
       continue;
     }
     m.group.visible = true;
+    // FLY SYNC (Nov 4): a remote player flying their Tesla/Ghost hovers above the city
+    m.flyY = d.flyY || 0;
+    // DAMAGE SYNC (Nov 4): remember the hp their ride reported (null/undefined = fresh)
+    m.vehHp = typeof d.vehHp === "number" ? d.vehHp : 100;
+    if (m.vehicleMesh && m.vehHpApplied !== m.vehHp) { m.vehHpApplied = m.vehHp; _applyRemoteDamage(m); }
     // SMOOTH MOVEMENT (Nov 1): Firebase delivers positions in ~5Hz steps, so
     // snapping straight to them made remote players GLITCH-TELEPORT (the
     // choppy movement in the user's video). Now this function only stores the
@@ -314,6 +326,42 @@ export function tickRemotePlayers(dt) {
       setDyn("mp:" + uid, nx, nz, 0.45, true);
     }
     if (m.walker) m.walker.animate(dt, Math.min(3, speed), moved > 0.0025);
+    // FLY SYNC (Nov 4): glide the whole avatar (vehicle included) to their altitude
+    m.group.position.y += ((m.flyY || 0) - m.group.position.y) * k;
+    // DAMAGE SYNC (Nov 4): their hurt ride smokes / burns from a distance too
+    if (m.vehicleMesh && m.vehHp != null && m.vehHp < 30) {
+      m.smokeT = (m.smokeT || 0) - dt;
+      if (m.smokeT <= 0) {
+        m.smokeT = m.vehHp <= 0 ? 0.22 : 0.5;
+        const p = new THREE.Vector3(); m.vehicleMesh.getWorldPosition(p); p.y += 0.9;
+        try { emitSmoke(p, m.vehHp <= 0 ? 1 : 0.7); } catch (e) {}
+        if (m.vehHp <= 0) { try { emitFire(new THREE.Vector3(p.x, p.y + 0.15, p.z)); } catch (e) {} }
+      }
+    }
+  }
+}
+
+// DAMAGE SYNC (Nov 4): darken a remote player's vehicle mesh by how hurt their ride is,
+// like damage.js does for your own ride. Materials are CLONED once (GLB models share
+// materials with the cache — tinting the shared ones would darken every future ride).
+function _applyRemoteDamage(m) {
+  const mesh = m.vehicleMesh; if (!mesh) return;
+  const hp = Math.max(0, Math.min(100, m.vehHp == null ? 100 : m.vehHp));
+  if (!mesh.userData._dmg) {
+    const seen = new Set(), mats = [];
+    mesh.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+      const list = Array.isArray(o.material) ? o.material : [o.material];
+      const next = list.map((mat) => { if (seen.has(mat)) return mat; seen.add(mat); const c = mat.clone(); mats.push(c); return c; });
+      o.material = Array.isArray(o.material) ? next : next[0];
+    });
+    mesh.userData._dmg = mats;
+  }
+  const hurt = (100 - hp) / 100, shade = 1 - 0.55 * hurt;
+  for (const mat of mesh.userData._dmg) {
+    if (!mat.color) continue;
+    if (mat.userData._baseR == null) mat.userData._baseR = mat.color.r, mat.userData._baseG = mat.color.g, mat.userData._baseB = mat.color.b;
+    mat.color.setRGB(mat.userData._baseR * shade, mat.userData._baseG * shade, mat.userData._baseB * shade);
   }
 }
 
@@ -352,6 +400,8 @@ function _swapRidingMesh(m, oldRiding) {
     m.ch.model.visible = true;
     m.ch.model.position.set(0, 0, 0);
   }
+  // Fresh vehicle: clear any damage tint state from the previous one
+  m.vehHpApplied = null; m.smokeT = 0;
   // If the player is no longer riding, we're done — they walk again
   if (!m.riding) return;
   // Don't fire duplicate builds
@@ -402,6 +452,8 @@ function _swapRidingMesh(m, oldRiding) {
     // Center the vehicle at the player's feet, nose pointing forward (+Z group)
     mesh.position.set(0, 0, 0);
     mesh.rotation.y = -Math.PI / 2;      // the model's nose is +X, the avatar group's forward is (sin h, cos h)
+    // DAMAGE SYNC (Nov 4): if their ride arrived already hurt, tint it straight away
+    if (m.vehHp != null && m.vehHp < 100) { m.vehHpApplied = m.vehHp; _applyRemoteDamage(m); }
   }).catch((e) => {
     if (uid) _ridingBuildInFlight.delete(uid);
     console.warn("[multiplayer] vehicle build error:", e.message);

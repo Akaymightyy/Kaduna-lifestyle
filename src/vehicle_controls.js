@@ -16,7 +16,7 @@
 //   resetVehInput()      — force-release everything (call on dismount)
 //   setVehicleControlsVisible(v) — show/hide the overlay
 
-export const vehInput = { steer: 0, gas: 0, brake: 0, drift: 0, boost: 0 };
+export const vehInput = { steer: 0, gas: 0, brake: 0, drift: 0, boost: 0, up: 0, down: 0 };
 
 let _root = null;
 const held = new Map(); // pointerId -> "gas" | "brake" | "drift" | "boost"
@@ -81,13 +81,27 @@ export function ensureVehicleControls() {
   _root.appendChild(brakeBtn);
   _root.appendChild(driftBtn);
   _root.appendChild(nitroBtn);
+
+  // KSR FLYING (Nov 4): Tesla + Ghost can take off. A separate cluster appears
+  // only while riding a fly-capable car: ✈ toggles flight, ▲ / ▼ control altitude
+  // (desktop: F toggles, SHIFT = up, SPACE = down — same actions).
+  _flyCluster = document.createElement("div");
+  _flyCluster.style.cssText = "position:absolute;left:18px;bottom:calc(130px + env(safe-area-inset-bottom));display:none;gap:8px;align-items:center;pointer-events:auto;";
+  const flyToggle = document.createElement("button");
+  flyToggle.innerHTML = '<div style="line-height:1;font-size:22px;font-weight:800;">✈</div><div style="font:800 8px Poppins,sans-serif;margin-top:2px">FLY</div>';
+  flyToggle.style.cssText = "width:58px;height:58px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;touch-action:none;border-radius:50%;border:3px solid #fff;box-shadow:0 4px 12px rgba(0,0,0,.4);background:#0f766e;color:#fff;user-select:none;";
+  flyToggle.addEventListener("pointerdown", (e) => { e.preventDefault(); try { window._ksrFlyToggle && window._ksrFlyToggle(); } catch (err) {} });
+  const upBtn = makeBtn("▲", "UP", "up", "width:56px;height:56px;background:#16a34a;");
+  const downBtn = makeBtn("▼", "DOWN", "down", "width:56px;height:56px;background:#b45309;");
+  _flyCluster.appendChild(flyToggle); _flyCluster.appendChild(upBtn); _flyCluster.appendChild(downBtn);
+  _root.appendChild(_flyCluster);
   document.body.appendChild(_root);
 
   // KSR reset: if the tab loses focus or is hidden mid-press, release everything
   // (a finger held across a background/foreground must not stay "on").
   const reset = () => {
     held.clear();
-    vehInput.gas = 0; vehInput.brake = 0; vehInput.drift = 0; vehInput.boost = 0;
+    vehInput.gas = 0; vehInput.brake = 0; vehInput.drift = 0; vehInput.boost = 0; vehInput.up = 0; vehInput.down = 0;
     _root.querySelectorAll(".on").forEach((n) => { n.classList.remove("on"); n.style.transform = "scale(1)"; });
   };
   addEventListener("blur", reset);
@@ -99,8 +113,14 @@ export function setVehicleControlsVisible(v) {
   if (_root) _root.style.display = v ? "block" : "none";
 }
 
+// KSR FLYING (Nov 4): show/hide the ✈ ▲ ▼ cluster (only for fly-capable rides)
+let _flyCluster = null;
+export function setVehicleFlyVisible(v) {
+  if (_flyCluster) _flyCluster.style.display = v ? "flex" : "none";
+}
+
 export function resetVehInput() {
   held.clear();
-  vehInput.gas = 0; vehInput.brake = 0; vehInput.steer = 0; vehInput.drift = 0; vehInput.boost = 0;
+  vehInput.gas = 0; vehInput.brake = 0; vehInput.steer = 0; vehInput.drift = 0; vehInput.boost = 0; vehInput.up = 0; vehInput.down = 0;
   if (_root) _root.querySelectorAll(".on").forEach((n) => { n.classList.remove("on"); n.style.transform = "scale(1)"; });
 }

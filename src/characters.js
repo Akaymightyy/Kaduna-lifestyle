@@ -629,6 +629,16 @@ function _applyLook(model, look) {
   const top = new THREE.Color(look.top || "#1f7a5a"), bottom = new THREE.Color(look.bottom || "#2b3a55");
   const skin = new THREE.Color(look.skin || "#8a5a3c"), hair = new THREE.Color(look.hair || "#111111");
   const shoes = new THREE.Color(look.shoes || "#222222");
+  // SALON (Nov 4): real hairstyle + beard options painted at the vertex level.
+  //   hairStyle "bald" -> every hair vertex is painted skin (the head shape stays, the hair colour goes).
+  //   hairStyle "fade" -> hair vertices low on the head (the sides/back) are painted a much darker shade,
+  //                       like a fresh Nigerian barbing fade; the top keeps the chosen colour.
+  //   beard "shaved"   -> the beard region of the hair vertices (same spatial test characters.js uses
+  //                       to strip beards off women) is painted skin — a clean shave.
+  //   beard "grey"     -> the beard region is painted grey (a distinguished elder look).
+  const hs = look.hairStyle || "full", bd = look.beard || "full";
+  const hairDark = hair.clone().multiplyScalar(0.42);
+  const greyBeard = new THREE.Color("#b9b5ae");
   const reach = reachOf(look.topStyle);
   const kaftan = look.topStyle === "kaftan" || reach === -1;
   if (look.bottomStyle === "skirt") bottom.copy(skin);      // bare legs under a skirt
@@ -652,9 +662,32 @@ function _applyLook(model, look) {
       o.geometry = g = ng;
     }
     const { hy, pt } = o.userData._own, col = g.attributes.color.array, n = hy.length;
+    // One-time beard mask for this mesh: which HAIR vertices sit over the jaw/mouth area.
+    // Same spatial test as splitBeard (u in 0.76..0.96, front half of z, narrow |x| band).
+    if (!o.userData._beard && (hs === "fade" || bd !== "full")) {
+      try {
+        const pos = g.attributes.position, beard = new Uint8Array(n);
+        if (pos) {
+          g.computeBoundingBox();
+          const bb = g.boundingBox, H = Math.max(1e-6, bb.max.y - bb.min.y), z0 = (bb.min.z + bb.max.z) / 2;
+          for (let i = 0; i < n; i++) {
+            if ((pt[i] | 0) !== 3) continue;
+            const u = hy[i];
+            if (u > 0.76 && u < 0.96 && pos.getZ(i) > z0 - 0.10 * H && Math.abs(pos.getX(i)) < 0.12 * H) beard[i] = 1;
+          }
+        }
+        o.userData._beard = beard;
+      } catch (e) { o.userData._beard = null; }
+    }
+    const beard = o.userData._beard;
     for (let i = 0; i < n; i++) {
       const p = pt[i] | 0;
-      const c = p === 0 ? (kaftan || hy[i] > hipFrac ? top : bottom) : p === 2 ? skin : cols[p];
+      let c = p === 0 ? (kaftan || hy[i] > hipFrac ? top : bottom) : p === 2 ? skin : cols[p];
+      if (p === 3 && c === hair) {
+        if (beard && beard[i] && bd !== "full") c = bd === "grey" ? greyBeard : skin;
+        else if (hs === "bald") c = skin;
+        else if (hs === "fade" && hy[i] < 0.885) c = hairDark;
+      }
       col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
     }
     g.attributes.color.needsUpdate = true;

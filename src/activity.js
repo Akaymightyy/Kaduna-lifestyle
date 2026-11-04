@@ -253,6 +253,17 @@ export function placeSpec(placeId, eid, handle, player, onDone) {
     if (eid === "costume_parade") return { ...base, label: "Masquerade parade!...", icon: "🥳", anim: "dance", seconds: 8, face: player.heading };
     if (eid === "fireworks") return { ...base, label: "Watching fireworks!...", icon: "🎆", anim: "point", seconds: 6, face: player.heading, cancelOnMove: false };
   }
+  // MECHANIC (Nov 4): Sani Motors — open the repair bay menu / gist with the oga
+  if (placeId === "mechanic") {
+    if (eid === "repair_menu") return { ...base, label: "Opening the repair bay...", icon: "🔧", anim: "point", seconds: 2.5, face: player.heading };
+    if (eid === "mechanic_chat") return { ...base, label: "Gisting with Sani...", icon: "💬", anim: "sitwatch", seconds: 4, props: ["stool"], face: player.heading, cancelOnMove: false };
+  }
+  // HUSTLE GIGS (Nov 4): okada rider / POS agent / suya seller — work a short uniform
+  // shift on the spot. The PAY + UNIFORM are applied by the place's onUIEvent when the
+  // shift finishes (sendUIEvent fires after the busy timer completes).
+  if (eid === "suya_gig") return { ...base, label: "Grilling suya for Audu...", icon: "🍢", anim: "point", seconds: 6, face: player.heading };
+  if (eid === "pos_gig") return { ...base, label: "Attending POS customers...", icon: "🏧", anim: "sitwatch", seconds: 6, props: ["stool"], face: player.heading, cancelOnMove: false };
+  if (eid === "okada_gig") return { ...base, label: "Carrying passengers on your okada...", icon: "🛵", anim: "point", seconds: 6, face: player.heading };
   if (EAT_IDS.has(eid)) return { ...base, label: "Eating...", icon: "🍛", anim: "eat", seconds: 6, props: ["stool", "table"], face: player.heading };
   if (DRINK_IDS.has(eid)) return { ...base, label: "Drinking...", icon: "🥤", anim: "drink", seconds: 3.5, face: player.heading };
   if (eid === "dance") return { ...base, label: "Dancing...", icon: "💃", anim: "dance", seconds: 6, face: player.heading };

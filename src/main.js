@@ -14,8 +14,8 @@ import { createGameState, getGameUid } from "./needs.js";
 import { auth, db } from "./firebase.js";
 import { initAuth, showAuthModal, wireAuthUI, logout, isAuthed } from "./auth.js";
 import { driveStep, ksrDriveStep } from "./drive.js";
-import { vehInput, ensureVehicleControls, setVehicleControlsVisible, resetVehInput } from "./vehicle_controls.js";
-import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition, getRemotePlayers, setMyPlace, setMyLook, setBlockedUids, setMyRiding, setMyPassengerOf, getPassengerUids, getRemotePlayerData, getMyPlace, getPlayersInRoom, tickRemotePlayers } from "./multiplayer.js";
+import { vehInput, ensureVehicleControls, setVehicleControlsVisible, setVehicleFlyVisible, resetVehInput } from "./vehicle_controls.js";
+import { initMultiplayer, sendPosition, sendChat, getMyUid, getMyName, setMyPosition, getRemotePlayers, setMyPlace, setMyLook, setMyFlyY, setBlockedUids, setMyRiding, setMyPassengerOf, getPassengerUids, getRemotePlayerData, getMyPlace, getPlayersInRoom, tickRemotePlayers } from "./multiplayer.js";
 import { startRide, travelToZone, travelToPlace, getDestinations } from "./travel.js";
 import { subscribeRichList } from "./economy.js";
 import { createNPCs } from "./npcs.js";
@@ -24,7 +24,8 @@ import { checkDailyReward, getDailyStatus, claimQuestReward } from "./daily.js";
 import { ref, get, onValue, update, set } from "firebase/database";
 import { openCreator } from "./creator.js";
 import { mountPreview, setPreviewLook } from "./charpreview.js";
-import { outfitsFor, BUILDS, SHOP, SLOT_KEYS, applyOutfit } from "./outfits.js";
+import { outfitsFor, BUILDS, SHOP, SLOT_KEYS, applyOutfit, HAIRS } from "./outfits.js";
+import { gigCooldownLeft } from "./gigs.js";
 import { tickContext, showContext, isContextShown, hideContext } from "./contextmenu.js";
 import { initRoute, tickRoute } from "./route.js";
 import { peekWorld, initPlaceManager, tickEntrancePrompt, updateActive, bindInteractKey, getActivePlace, enterPlace, enterPlaceAsVisitor, exitPlace, sendUIEvent } from "./places/manager.js";
@@ -1304,8 +1305,8 @@ function _showPhoneApp(appId) {
     // THE WARDROBE — change clothes live with colour swatches + style cards
     const look = game.state.look;
     const colours = ["#1f7a5a","#c0392b","#f2f2ee","#1d5fa8","#d98e2b","#6b4a8a","#2e2e2e","#e8c547","#3c8dbc","#a23b72","#f4efe4","#9fc2d9","#c9b38a","#7aa58a","#2d3a4a","#d9c7a0","#8a9bb5","#2b3a55","#1f2a36","#6b5a45"];
-    const skinColours = ["#8a5a3c","#6b4429","#a5714a","#5a3825","#c28a5c","#7a4b2e"];
-    const hairColours = ["#111111","#1b1b1b","#2a1e14"];
+    const skinColours = ["#f1c9a5","#8a5a3c","#6b4429","#a5714a","#5a3825","#c28a5c","#7a4b2e","#3d2517"];
+    const hairColours = HAIRS;   // SALON (Nov 4): the full 8-colour palette (was 3)
     const shoeColours = ["#f2f2ee","#222222","#8a5a3c","#c0392b"];
     const swatch = (col, current, key) => '<div onclick="window._setLook(\''+key+'\',\''+col+'\')" style="width:28px;height:28px;border-radius:50%;background:'+col+';cursor:pointer;border:'+(current===col?'3px solid var(--green)':'1px solid #ddd')+';display:inline-block;margin:2px;"></div>';
     const styleCard = (label, val, key) => '<div onclick="window._setLook(\''+key+'\',\''+val+'\')" style="padding:6px 12px;background:'+(look[key]===val?'var(--green)':'var(--cream)')+';color:'+(look[key]===val?'#fff':'var(--green)')+';border-radius:8px;cursor:pointer;font-size:11px;font-weight:600;margin:2px;display:inline-block;">'+label+'</div>';
@@ -1318,7 +1319,8 @@ function _showPhoneApp(appId) {
       '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">👖 Bottom Colour</div><div style="display:flex;flex-wrap:wrap;">'+colours.map(c=>swatch(c,look.bottom,"bottom")).join("")+'</div></div>'+
       '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">🧦 Shoes</div><div style="display:flex;flex-wrap:wrap;">'+shoeColours.map(c=>swatch(c,look.shoes,"shoes")).join("")+'</div></div>'+
       '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">🧑 Skin Tone</div><div style="display:flex;flex-wrap:wrap;">'+skinColours.map(c=>swatch(c,look.skin,"skin")).join("")+'</div></div>'+
-      '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">💇 Hair</div><div style="display:flex;flex-wrap:wrap;">'+hairColours.map(c=>swatch(c,look.hair,"hair")).join("")+'</div></div>'+
+      '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">💇 Hair Colour</div><div style="display:flex;flex-wrap:wrap;">'+hairColours.map(c=>swatch(c,look.hair,"hair")).join("")+'</div></div>'+
+      '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">✂️ Hair Style</div>'+styleCard("Full","full","hairStyle")+styleCard("Fade","fade","hairStyle")+styleCard("Bald","bald","hairStyle")+(gOn==="female"?"":'</div><div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">🧔 Beard</div>'+styleCard("Full beard","full","beard")+styleCard("Clean shave","shaved","beard")+styleCard("Grey","grey","beard"))+'</div>'+
       '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">👔 Top Style</div>'+styleCard("Casual","casual","topStyle")+styleCard("Kaftan","kaftan","topStyle")+'</div>'+
       '<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:12px;font-weight:600;margin-bottom:6px;">👖 Bottom Style</div>'+styleCard("Trousers","trousers","bottomStyle")+styleCard("Shorts","shorts","bottomStyle")+'</div>'+
       '<button onclick="window._saveLook()" style="width:100%;background:var(--green);color:#fff;border:none;border-radius:10px;padding:14px;cursor:pointer;font-size:14px;font-weight:700;margin-top:6px;">✓ Save Outfit</button>'+
@@ -2061,6 +2063,16 @@ window.buyMed=(id)=>{
   showPhoneApp("health");
 };
 function _pushLook(){ setMyLook(game.state.look); clearTimeout(window._lookT); window._lookT=setTimeout(()=>{const u=getMyUid(); if(u) update(ref(db,"players/"+u+"/look"),game.state.look).catch(()=>{});},300); }
+// HUSTLE GIGS (Nov 4): paint a job uniform onto the current look (used by gigs.js).
+// Same live pipeline as the wardrobe: apply + save + Firebase + recolor + broadcast.
+window._applyUniform = (uni) => {
+  if (!uni || !uni.patch) return;
+  applyOutfit(game.state.look, uni.patch);
+  game.state.look.uniformId = uni.id || null;
+  game.save?.();
+  _pushLook();
+  if (rig?.recolor) rig.recolor(game.state.look);
+};
 window.buyClothing=(id)=>{
   const it=SHOP.find(x=>x.id===id); if(!it) return;
   const L=game.state.look; L.owned=L.owned||[];
@@ -2850,6 +2862,19 @@ window._rideVehicle = async (vehicleId) => {
 // FEATURE: Dismount vehicle (despawn mesh + remove speed boost)
 // GARAGE (Nov 2): the ride is parked into a garage slot — into the garage you
 // are standing at, otherwise it drives itself home to your first garage.
+// KSR FLYING (Nov 4): state for the Tesla/Ghost flight mode (see the riding block).
+let _flyMode = false, _flyY = 0;
+function _resetFly() { _flyMode = false; _flyY = 0; if (player) player.pos.y = 0; }
+window._ksrFlyToggle = () => {
+  if (!isRiding()) { toast("Enter a car first"); return false; }
+  const id = getRideId();
+  if (id !== "ksr_tesla" && id !== "ksr_ghost") { toast("✈ Na only the KSR Tesla and Ghost dey fly"); return false; }
+  _flyMode = !_flyMode;
+  if (!_flyMode) _flyY = 0;
+  toast(_flyMode ? "🚀 Take off! SHIFT/▲ = up, SPACE/▼ = down, F = land" : "🛬 Landed — F to fly again");
+  try { sfx.click(); } catch (e) {}
+  return _flyMode;
+};
 function _parkOrStoreRide() {
   const vid = getRideId(); if (!vid) return;
   const zone = garageZoneAt(player.pos.x, player.pos.z);
@@ -2861,6 +2886,7 @@ window._dismountVehicle = () => {
   const _dId = getRideId(), _dHp = _dId ? vehHealth(_dId).hp : 100;
   despawnRideVehicle();
   resetVehInput();  // KSR: never carry a held pedal into the next ride
+  _resetFly();      // KSR FLYING: never keep flying into a walk
   toast(_dHp < 55 ? "🚶 Dismounted. Your car dey bad (" + _dHp + "%) — Phone → Cars → 🔧 Fix am." : "🚶 Dismounted. Walking now.");
   try { sfx.engine(false); } catch (e) {}
   setMyRiding(null);  // SYNC: tell other players I'm on foot again
@@ -4427,6 +4453,8 @@ function _frame() {
   } else {
     if (_getoffBtnEl) _getoffBtnEl.style.display = "none";
     setVehicleControlsVisible(!!_riding);
+    // KSR FLYING (Nov 4): the ✈ ▲ ▼ cluster only shows for fly-capable rides
+    try { setVehicleFlyVisible(!!_riding && (getRideId() === "ksr_tesla" || getRideId() === "ksr_ghost")); } catch (e) {}
   }
   if (_riding) {
     // KSR-STYLE VEHICLE CONTROL (Oct 31, copied from Kay Super Racing):
@@ -4440,6 +4468,16 @@ function _frame() {
     const _gas = vehInput.gas || k["w"] || k["arrowup"], _brk = vehInput.brake || k["s"] || k["arrowdown"];
     let throttle = _brk ? -1 : (_gas ? 1 : 0);   // BRAKE always wins over gas
     const _drift = !!(vehInput.drift || k[" "]), _boost = !!(vehInput.boost || k["shift"]);
+    // KSR FLYING (Nov 4): Tesla + Ghost take off with F (or the ✈ button).
+    const _canFly = getRideId() === "ksr_tesla" || getRideId() === "ksr_ghost";
+    if (k["f"] && !player._fEdge) { player._fEdge = true; try { window._ksrFlyToggle(); } catch (e) {} }
+    if (!k["f"]) player._fEdge = false;
+    if (!_canFly && _flyMode) _resetFly();
+    if (_flyMode) {
+      const _upI = (vehInput.up || k["shift"]) ? 1 : 0, _dnI = (vehInput.down || k[" "]) ? 1 : 0;
+      _flyY = Math.max(0, Math.min(60, _flyY + (_upI - _dnI) * 8 * dt));
+      if (_flyY <= 0.001 && _dnI) _flyMode = false;   // touched down while holding DOWN
+    }
     if (!player._wasRiding) { player.kvel = null; player.speed = 0; player._wreckTold = false; }   // fresh ride: never inherit an old velocity (this was the "drives by itself" bug)
     // VEHICLE DAMAGE (Nov 2): a wrecked ride is going nowhere — the engine is dead.
     if (rideDead()) {
@@ -4482,9 +4520,12 @@ function _frame() {
     }
     }
   }
+  // KSR FLYING (Nov 4): the altitude lives on player.pos.y — the camera follows it,
+  // tickRideVehicle lifts the car mesh with it, and remote players receive it via setMyFlyY.
+  player.pos.y = _flyMode ? _flyY : 0;
   const active = getActivePlace();
   // SAFETY: auto-dismount vehicle when entering a place (can't ride inside a shop)
-  if (active && isRiding()) { _parkOrStoreRide(); despawnRideVehicle(); resetVehInput(); toast("🚶 Dismounted (entered building)"); }
+  if (active && isRiding()) { _parkOrStoreRide(); _resetFly(); despawnRideVehicle(); resetVehInput(); toast("🚶 Dismounted (entered building)"); }
   // ---- SOLID WORLD (Nov 1): everything collides now ----
   // Walking: the body circle vs every static collider (windowed hot list) plus
   // every character (remote players, NPCs, pedestrians).
@@ -4494,8 +4535,8 @@ function _frame() {
   // Passengers skip this: their position is owned by the driver every frame.
   if (!active && !isBusy() && !_myPassengerUid) {
     const _preSpd = _riding ? (Math.hypot(player.kvel ? player.kvel.x : 0, player.kvel ? player.kvel.z : 0) || Math.abs(player.speed || 0)) : 0;
-    if (_riding) resolveVehicleMove(player, getRideId(), dt);
-    else resolvePlayerMove(player.pos, 0.55);
+    if (_riding && _flyY < 0.4) resolveVehicleMove(player, getRideId(), dt);   // KSR FLYING: no ground collisions in the air
+    else if (!_riding) resolvePlayerMove(player.pos, 0.55);
     // VEHICLE DAMAGE (Nov 2, v2): damage comes from the CLOSING SPEED into what you hit (not from speed lost per frame).
     // Scraping a wall / tapping a pole = nothing. A real crash = dents, smoke, and if it is hard enough the car is wrecked.
     if (_riding) {
@@ -4633,7 +4674,7 @@ function _frame() {
     }
   }
   // FEATURE: update the ride vehicle mesh to follow the player
-  tickRideVehicle(player.pos, player.heading);
+  tickRideVehicle(player.pos, player.heading, player.pos.y);   // KSR FLYING: mesh lifts with the player
   // VEHICLE DAMAGE (Nov 2): your ride smokes when hurt, burns when wrecked — and so do the traffic wrecks around you.
   if (isRiding()) {
     const _ds = tickRideDamage(dt, player.pos, player.heading);
@@ -4772,6 +4813,7 @@ function _frame() {
   else if (_currentPlotInfo) _onPlotPromptUpdate(null); // inside a place: hide the "Enter X's Home" box
   if (!active) savePos(dt);
   setMyPlace(active ? (active.id === "home" ? "home:" + (placeCtx.visitingHouse?.ownerUid || getMyUid() || "me") : active.id) : "");
+  setMyFlyY(_flyMode ? _flyY : 0);   // KSR FLYING: altitude rides along with the position packet
   sendPosition(player.pos.x, player.pos.z, player.heading);
   setMyPosition(player.pos.x, player.pos.z);
   tickRemotePlayers(dt);   // SMOOTH MOVEMENT (Nov 1): glide remote avatars toward their latest Firebase positions every frame
@@ -4861,6 +4903,6 @@ Promise.all([loadPlayer(manager, scene, game.state.look), addCity(scene, world, 
   const _hideLoading = () => $("loading").classList.add("done");
   if (window.__authReady || window.__bypassAuth) _hideLoading();
   else { window.addEventListener("kaduna-auth-ready", _hideLoading, { once: true }); setTimeout(_hideLoading, 20000); }
-  window.__dbg = { getOwned, vehHealth, repairCost, cols: world.colliders, lifePos: () => lifeTrafficPositions(), rideHp: () => rideHp(), lastImpact, traffic, ride: (id) => { initVehicles(scene, null, () => {}); return spawnRideVehicle(id, player.pos, player.heading, toast); }, player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig, cullStats, trafficCars: () => traffic.positions.length, trafficPos: () => traffic.positions.slice(0, 8), col: () => collisionStats(), probe: (x, z, r) => probeBlocked(x, z, r), probeBox: (x, z, r) => firstHit(x, z, r), vehBox: (id) => vehBoxOf(id), rideHp: () => rideHp(), rideDead: () => rideDead(), hitRide: (n) => hitRide(n), crashHits: () => vehHits().map((h) => ({ depth: +h.depth.toFixed(2), wrecked: !!(h.car && h.car.wrecked), hp: h.car ? Math.round(h.car.hp) : null })), trafficHp: () => traffic.cars.map((c) => Math.round(c.hp || 0)), garage: () => garageDbg(), fixCar: (id) => setVehHp(id, 100), isRiding: () => isRiding(), garageSync: (homes) => garageSyncHomes(homes), garageParkTest: (vid, key) => garagePark(key || null, vid), garageZone: (x, z) => garageZoneAt(x, z), garageHomes: () => _garageHomes(), posDbg: () => ({ key: _posKey(), uid: getGameUid(), restored: _posRestored, saved: (() => { try { return JSON.parse(localStorage.getItem(_posKey()) || "null"); } catch (e) { return "parse-error"; } })(), at: { x: +player.pos.x.toFixed(1), z: +player.pos.z.toFixed(1), h: +player.heading.toFixed(2) }, doors: listPlaces().filter((p) => Number.isFinite(p.entranceX)).map((p) => [p.id, +p.entranceX.toFixed(1), +p.entranceZ.toFixed(1)]) }), lampDebug: () => ({ hasPos: Array.isArray(world.lampPositions), n: world.lampPositions ? world.lampPositions.length : -1, lights: world.lampLights.map((l) => [Math.round(l.position.x), Math.round(l.position.z)]) }) };
+  window.__dbg = { getOwned, vehHealth, repairCost, cols: world.colliders, lifePos: () => lifeTrafficPositions(), rideHp: () => rideHp(), lastImpact, traffic, ride: (id) => { initVehicles(scene, null, () => {}); return spawnRideVehicle(id, player.pos, player.heading, toast); }, player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig, cullStats, enterPlace: (id) => enterPlace(id, { pos: player.pos, heading: player.heading }), exitPlace: () => exitPlace({ pos: player.pos, heading: player.heading }), cullStats2: null, trafficCars: () => traffic.positions.length, trafficPos: () => traffic.positions.slice(0, 8), col: () => collisionStats(), probe: (x, z, r) => probeBlocked(x, z, r), probeBox: (x, z, r) => firstHit(x, z, r), vehBox: (id) => vehBoxOf(id), rideHp: () => rideHp(), rideDead: () => rideDead(), hitRide: (n) => hitRide(n), crashHits: () => vehHits().map((h) => ({ depth: +h.depth.toFixed(2), wrecked: !!(h.car && h.car.wrecked), hp: h.car ? Math.round(h.car.hp) : null })), trafficHp: () => traffic.cars.map((c) => Math.round(c.hp || 0)), garage: () => garageDbg(), fixCar: (id) => setVehHp(id, 100), isRiding: () => isRiding(), garageSync: (homes) => garageSyncHomes(homes), garageParkTest: (vid, key) => garagePark(key || null, vid), garageZone: (x, z) => garageZoneAt(x, z), garageHomes: () => _garageHomes(), posDbg: () => ({ key: _posKey(), uid: getGameUid(), restored: _posRestored, saved: (() => { try { return JSON.parse(localStorage.getItem(_posKey()) || "null"); } catch (e) { return "parse-error"; } })(), at: { x: +player.pos.x.toFixed(1), z: +player.pos.z.toFixed(1), h: +player.heading.toFixed(2) }, doors: listPlaces().filter((p) => Number.isFinite(p.entranceX)).map((p) => [p.id, +p.entranceX.toFixed(1), +p.entranceZ.toFixed(1)]) }), lampDebug: () => ({ hasPos: Array.isArray(world.lampPositions), n: world.lampPositions ? world.lampPositions.length : -1, lights: world.lampLights.map((l) => [Math.round(l.position.x), Math.round(l.position.z)]) }), fly: () => ({ fly: _flyMode, y: +_flyY.toFixed(2), yPos: +player.pos.y.toFixed(2) }), flyToggle: () => window._ksrFlyToggle && window._ksrFlyToggle(), setVehHp: (id, hp) => setVehHp(id, hp), repairVeh: (id) => repairVehicle(id, game.state, toast), placeEvent: (eid) => sendUIEvent(eid, {}), gigs: () => ({ suya: gigCooldownLeft("suya_gig"), pos: gigCooldownLeft("pos_gig"), okada: gigCooldownLeft("okada_gig") }), uniform: () => game.state.look.uniformId || null };
   window.__ready = true;
 }).catch((e) => showError("Could not load the game: " + e.message));

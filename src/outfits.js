@@ -63,6 +63,25 @@ export const WOMEN_OUTFITS = [
 export const outfitsFor = (gender) => (gender === "female" ? WOMEN_OUTFITS : MEN_OUTFITS);
 export const SKINS = ["#f1c9a5", "#c28a5c", "#a5714a", "#8a5a3c", "#7a4b2e", "#6b4429", "#5a3825", "#3d2517"];
 export const HAIRS = ["#111111", "#2a1e14", "#4a3322", "#7a5a3a", "#c9b38a", "#a23b72", "#1d5fa8", "#f2f2ee"];
+
+// ---- HUSTLE GIG UNIFORMS (Nov 4) ----
+// Each world gig (suya_spot / central_market / kawo_park) pays cash AND puts you in
+// the job's uniform for the day — the "different outfit like a uniform" ask. Applied
+// over the current look via window._applyUniform(); switch back anytime in Wardrobe.
+export const GIG_UNIFORMS = {
+  suya_gig: {
+    id: "u-suya", name: "Suya Apron",
+    patch: { top: "#f4efe4", bottom: "#3b3b3b", topStyle: "casual", bottomStyle: "trousers", shoes: "#8a5a3c", pattern: "wax", accent: "#c0392b" },
+  },
+  pos_gig: {
+    id: "u-pos", name: "POS Agent Polo",
+    patch: { top: "#1d5fa8", bottom: "#1f2a36", topStyle: "casual", bottomStyle: "trousers", shoes: "#222222", under: "#f2f2ee" },
+  },
+  okada_gig: {
+    id: "u-okada", name: "Okada Rider Vest",
+    patch: { top: "#c8d92e", bottom: "#2a2a2a", topStyle: "casual", bottomStyle: "trousers", shoes: "#15171a" },
+  },
+};
 export const BUILDS = [
   { id: "slim", label: "Slim" },
   { id: "normal", label: "Normal" },
