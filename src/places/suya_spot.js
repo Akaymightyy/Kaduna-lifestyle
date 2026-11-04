@@ -8,6 +8,7 @@
 import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, smokeSystem, stripLight, disposeGroup } from "./_helpers.js";
 import { rng } from "../config.js";
+import { runGig } from "../gigs.js";
 
 let _built = false;
 let _cache = null;
@@ -243,6 +244,7 @@ export async function build(scene, ctx) {
     },
     onUIEvent(eventId, payload) {
       if (eventId === "order") _orderSuya(payload?.item, ctx);
+      if (eventId === "suya_gig") runGig("suya_gig", ctx);
     },
     colliders,
   };

@@ -28,6 +28,7 @@ import * as barber_mod from "./barber.js";
 import * as nightclub_mod from "./nightclub.js";
 import * as home_mod from "./home.js";
 import * as dealership_mod from "./dealership.js";
+import * as mechanic_mod from "./mechanic.js";
 import * as arena_mod from "./arena.js";
 import { enhanceInterior } from "../interior_enhance.js";
 
@@ -50,6 +51,7 @@ const MODULES = {
   nightclub: nightclub_mod,
   home: home_mod,
   dealership: dealership_mod,
+  mechanic: mechanic_mod,
   arena: arena_mod,
 };
 
@@ -73,6 +75,7 @@ const PLACE_DEFS = [
     activities: [
       { id: "haggle", label: "Haggle for fabric", desc: "Try to get the best price from Mama Nkechi" },
       { id: "buy_spices", label: "Buy spices", desc: "Stock up on dried pepper and curry" },
+      { id: "pos_gig", label: "🏧 POS agent shift", desc: "Serve customers — ₦1,200 + agent polo" },
       { id: "tailor", label: "Tailor an outfit", desc: "Get measured by Aunty Bisi" },
       { id: "eat", label: "Eat at food corner", desc: "Hot tuwo and miyan kuka" },
     ],
@@ -95,6 +98,7 @@ const PLACE_DEFS = [
     activities: [
       { id: "order_suya", label: "Order suya", desc: "Beef or chicken suya with yaji pepper" },
       { id: "drink_zobo", label: "Buy zobo", desc: "Chilled zobo with cucumber" },
+      { id: "suya_gig", label: "🍢 Suya gig — grill with Audu", desc: "8 min uniform shift — ₦1,500 + apron" },
       { id: "chat", label: "Gist with the boys", desc: "Talk football and politics" },
     ],
   },
@@ -138,6 +142,7 @@ const PLACE_DEFS = [
       { id: "board_bus", label: "Board bus to Zaria", desc: "Travel north — ₦800" },
       { id: "hire_keke", label: "Hire keke", desc: "Quick ride into town — ₦200" },
       { id: "hire_okada", label: "Hire okada", desc: "Fastest through traffic — ₦400" },
+      { id: "okada_gig", label: "🛵 Okada rider gig", desc: "Carry passengers — ₦1,800 + rider vest" },
       { id: "eat_park", label: "Eat at park vendor", desc: "Hot kunu and kosai — ₦300" },
     ],
   },
@@ -446,7 +451,27 @@ const PLACE_DEFS = [
       { id: "haircut", label: "Get a haircut", desc: "Hygiene +20, fun +10 — ₦500" },
       { id: "beard_trim", label: "Trim beard", desc: "Hygiene +10 — ₦300" },
       { id: "shave", label: "Clean shave", desc: "Hygiene +25 — ₦400" },
+      { id: "salon", label: "💇 Salon — change your look", desc: "Hairstyles, beard, skin tone — ₦500" },
       { id: "gossip", label: "Gist with Musa", desc: "Social +15, hear news" },
+    ],
+  },
+  {
+    id: "mechanic",
+    name: "Sani Motors Workshop",
+    type: "interior",
+    worldX: 85, worldZ: 38,
+    entranceX: 85, entranceZ: 35,
+    entranceFacing: Math.PI,
+    minimapIcon: "🔧",
+    minimapColor: 0xe8741c,
+    hours: { open: 7, close: 21 },
+    ambientSound: null,
+    npcList: [
+      { id: "mech1", name: "Sani", outfit: "casual", role: "mechanic" },
+    ],
+    activities: [
+      { id: "repair_menu", label: "🔧 Repair my cars", desc: "Fix any damaged or wrecked ride — pay per damage" },
+      { id: "mechanic_chat", label: "💬 Gist with Sani", desc: "Free advice, social +10" },
     ],
   },
   {

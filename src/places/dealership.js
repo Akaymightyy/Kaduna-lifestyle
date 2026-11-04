@@ -21,6 +21,7 @@ import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "
 import { getShowroomCars } from "../dealership_catalog.js";
 import { openDealershipUI, initDealershipUI } from "../dealership_ui.js";
 import { buildRemoteVehicleMesh } from "../vehicles.js";
+import { KSR_CATALOG, buildKsrMesh } from "../ksr_cars.js";
 
 let _built = false;
 let _cache = null;
@@ -233,6 +234,53 @@ export async function build(scene, ctx) {
   for (const pp of pedestalPositions) {
     colliders.push({ minX: pp.x - 2.3, maxX: pp.x + 2.3, minZ: pp.z - 2.3, maxZ: pp.z + 2.3 });
   }
+
+  // ---- KSR RACING WING (Nov 4): the 12 Kay Super Racing cars join the showroom ----
+  // Two rows at the back of the showroom (z = -6.5 and -12), 6 pedestals each,
+  // real KSR code-built meshes (buildKsrMesh). Tap/walk-close opens the same
+  // catalogue overlay — Buy / Test Drive use the normal vehicle flows.
+  const KSR_ROWS = [-6.5, -12];
+  const ksrCars = KSR_CATALOG;
+  for (let r = 0; r < KSR_ROWS.length; r++) {
+    for (let i = 0; i < 6; i++) {
+      const src = ksrCars[r * 6 + i];
+      if (!src) continue;
+      const px = -12.5 + i * 5, pz = KSR_ROWS[r];
+      const ped = new THREE.Group();
+      ped.position.set(px, 0, pz);
+      const disc = new THREE.Mesh(new THREE.CylinderGeometry(1.9, 1.9, 0.1, 20), new THREE.MeshLambertMaterial({ color: 0x1a1a1a }));
+      disc.position.y = 0.05; ped.add(disc);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(1.9, 0.05, 8, 28), new THREE.MeshBasicMaterial({ color: 0xe11d48 }));
+      ring.position.y = 0.11; ring.rotation.x = Math.PI / 2; ped.add(ring);
+      const plate = signMesh(src.name, 3.4, 0.45, { bg: "#0a0a0a", fg: "#e11d48", size: 15, border: false });
+      plate.position.set(0, 0.18, 2.2); ped.add(plate);
+      const pricePlate = signMesh("₦" + src.price.toLocaleString(), 2.6, 0.36, { bg: "#0a0a0a", fg: "#4ade80", size: 14, border: false });
+      pricePlate.position.set(0, 0.18, 2.75); ped.add(pricePlate);
+      group.add(ped);
+      const carGroup = new THREE.Group();
+      carGroup.position.set(px, 0.15, pz);
+      try {
+        const mesh = buildKsrMesh(src.id);
+        if (mesh) { mesh.scale.setScalar(0.85); carGroup.add(mesh); }
+      } catch (e) { console.warn("[dealership] KSR mesh failed", src.id, e.message); }
+      group.add(carGroup);
+      // catalog adapter for the shared view-car UI (openDealershipUI reads price/emoji/desc/specs)
+      const car = {
+        id: src.id, name: src.name, emoji: src.emoji || "🏎️", price: src.price,
+        desc: src.desc || "KSR racing machine.", type: "KSR Racing",
+        specs: src.stats ? { engine: "KSR race engine", topSpeed: src.stats.top + " km/h", range: "Steer " + src.stats.steer + " · Drift " + src.stats.drift } : null,
+      };
+      _carMeshes.push({ car, group: carGroup, pedestal: ped });
+      colliders.push({ minX: px - 1.8, maxX: px + 1.8, minZ: pz - 1.8, maxZ: pz + 1.8 });
+    }
+  }
+  // wing sign
+  const wingSign = signMesh("KSR RACING WING", 9, 0.8, { bg: "#0a0a0a", fg: "#e11d48", size: 26, border: true });
+  wingSign.position.set(0, 3.4, -14.8);
+  wingSign.material.side = THREE.DoubleSide;
+  group.add(wingSign);
+  // test hook: how many view-cars does the showroom hold (4 luxury + 12 KSR)
+  window.__ksrWingCount = _carMeshes.length;
 
   scene.add(group);
 

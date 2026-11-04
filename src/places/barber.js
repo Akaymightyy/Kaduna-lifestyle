@@ -3,8 +3,109 @@ import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { rng } from "../config.js";
 import { spawnPeople, getNamedDialogue, getDialogue } from "./people.js";
+import { HAIRS, SKINS } from "../outfits.js";
 
 let _built = false, _cache = null;
+
+// ---- SALON (Nov 4): real look changes, not just needs boosts ----
+// Hairstyle (full / bald / fade), beard (full / clean shave / grey) and skin tone —
+// the SAME look keys the character renderer paints (characters.js _applyLook), applied
+// through the live wardrobe pipeline (window._setLook: save + Firebase + recolor).
+// The salon service costs ₦500 flat — money needs a reason to exist.
+const SALON_FEE = 500;
+let _salonEl = null, _salonCtx = null, _salonPick = null;
+
+function _salonPill(label, on, fn) {
+  return '<div onclick="' + fn + '" style="padding:7px 13px;background:' + (on ? "#f2b134" : "rgba(255,255,255,.1)") + ';color:' + (on ? "#14181c" : "#e8f0ea") + ';border-radius:9px;cursor:pointer;font-size:11.5px;font-weight:700;margin:3px;display:inline-block;">' + label + "</div>";
+}
+function _salonSwatch(col, current, key) {
+  return '<div onclick="window._salonPick(\'' + key + '\',\'' + col + '\')" style="width:30px;height:30px;border-radius:50%;background:' + col + ';cursor:pointer;border:' + (current === col ? "3px solid #f2b134" : "1.5px solid rgba(255,255,255,.35)") + ';display:inline-block;margin:3px;"></div>';
+}
+
+function _openSalon(ctx) {
+  _salonCtx = ctx;
+  const look = (ctx?.game?.state?.look) || {};
+  if (!_salonPick) _salonPick = {};
+  if (!_salonEl) {
+    _salonEl = document.createElement("div");
+    _salonEl.id = "salon-overlay";
+    _salonEl.style.cssText =
+      "position:fixed;inset:0;z-index:46;display:none;flex-direction:column;" +
+      "background:rgba(18,16,26,.97);color:#fff;font-family:Poppins,system-ui,sans-serif;" +
+      "overflow-y:auto;-webkit-overflow-scrolling:touch;";
+    document.body.appendChild(_salonEl);
+    window._salonPick = (key, val) => { _salonPick[key] = val; _renderSalon(); };
+  }
+  _renderSalon();
+}
+
+function _renderSalon() {
+  if (!_salonEl) return;
+  const ctx = _salonCtx;
+  const look = (ctx?.game?.state?.look) || {};
+  const P = { hair: look.hair || "#111111", hairStyle: look.hairStyle || "full", beard: look.beard || "full", skin: look.skin || "#8a5a3c", ..._salonPick };
+  const female = (look.gender || "male") === "female";
+  _salonEl.innerHTML =
+    '<div style="max-width:520px;width:100%;margin:0 auto;padding:18px 16px calc(20px + env(safe-area-inset-bottom));">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">' +
+        '<div style="font-size:17px;font-weight:800;">💈 Musa\'s Salon</div>' +
+        '<button id="salon-close" style="background:rgba(255,255,255,.15);color:#fff;border:none;border-radius:8px;padding:7px 12px;cursor:pointer;font:600 12px Poppins,sans-serif;">✕ Close</button>' +
+      "</div>" +
+      '<div style="background:rgba(242,177,52,.12);border-left:3px solid #f2b134;border-radius:8px;padding:9px 12px;font-size:11.5px;color:#d1d5db;margin-bottom:12px;">"Pick your style — one payment covers everything you change today." — Musa</div>' +
+      '<div style="background:rgba(255,255,255,.05);border-radius:12px;padding:12px;margin-bottom:10px;">' +
+        '<div style="font-size:12px;font-weight:700;margin-bottom:8px;">✂️ Hair Style</div>' +
+        _salonPill("Full hair", P.hairStyle === "full", "window._salonPick('hairStyle','full')") +
+        _salonPill("Fade", P.hairStyle === "fade", "window._salonPick('hairStyle','fade')") +
+        _salonPill("Bald", P.hairStyle === "bald", "window._salonPick('hairStyle','bald')") +
+      "</div>" +
+      '<div style="background:rgba(255,255,255,.05);border-radius:12px;padding:12px;margin-bottom:10px;">' +
+        '<div style="font-size:12px;font-weight:700;margin-bottom:8px;">🎨 Hair Colour</div>' +
+        HAIRS.map((c) => _salonSwatch(c, P.hair, "hair")).join("") +
+      "</div>" +
+      (female ? "" :
+      '<div style="background:rgba(255,255,255,.05);border-radius:12px;padding:12px;margin-bottom:10px;">' +
+        '<div style="font-size:12px;font-weight:700;margin-bottom:8px;">🧔 Beard</div>' +
+        _salonPill("Full beard", P.beard === "full", "window._salonPick('beard','full')") +
+        _salonPill("Clean shave", P.beard === "shaved", "window._salonPick('beard','shaved')") +
+        _salonPill("Grey beard", P.beard === "grey", "window._salonPick('beard','grey')") +
+      "</div>") +
+      '<div style="background:rgba(255,255,255,.05);border-radius:12px;padding:12px;margin-bottom:14px;">' +
+        '<div style="font-size:12px;font-weight:700;margin-bottom:8px;">🧑 Skin Tone</div>' +
+        SKINS.map((c) => _salonSwatch(c, P.skin, "skin")).join("") +
+      "</div>" +
+      '<button id="salon-apply" style="width:100%;background:linear-gradient(145deg,#f2b134,#d98e2b);color:#14181c;border:none;border-radius:12px;padding:14px;cursor:pointer;font:800 14px Poppins,sans-serif;">✂️ Pay ₦' + SALON_FEE.toLocaleString() + " & Apply</button>" +
+    "</div>";
+  _salonEl.style.display = "flex";
+  _salonEl.querySelector("#salon-close").onclick = _closeSalon;
+  _salonEl.querySelector("#salon-apply").onclick = _applySalon;
+}
+
+function _closeSalon() {
+  if (_salonEl) { _salonEl.style.display = "none"; _salonEl.innerHTML = ""; }
+  _salonPick = {};
+}
+
+function _applySalon() {
+  const ctx = _salonCtx;
+  if (!ctx?.game) return;
+  const s = ctx.game.state;
+  if ((s.money || 0) < SALON_FEE) { ctx.toast?.("Need ₦" + SALON_FEE.toLocaleString() + " for the salon"); return; }
+  const look = s.look || {};
+  const changed = [];
+  for (const k of ["hair", "hairStyle", "beard", "skin"]) {
+    if (_salonPick[k] != null && _salonPick[k] !== (look[k] || (k === "hairStyle" || k === "beard" ? "full" : undefined))) changed.push([k, _salonPick[k]]);
+  }
+  if (!changed.length) { ctx.toast?.("You no change anything o 😄"); return; }
+  s.money -= SALON_FEE;
+  s.needs.hygiene = Math.min(100, (s.needs.hygiene || 0) + 15);
+  s.needs.fun = Math.min(100, (s.needs.fun || 0) + 10);
+  ctx.game.save?.();
+  ctx.updateHUD?.();
+  for (const [k, v] of changed) { try { window._setLook(k, v); } catch (e) { look[k] = v; } }
+  try { window._saveLook?.(); } catch (e) {}
+  ctx.toast?.("💈 Fresh look! Musa don finish work. (₦" + SALON_FEE + ")");
+  _closeSalon();
+}
 
 export async function build(scene, ctx) {
   if (_built) return _cache;
@@ -78,13 +179,14 @@ export async function build(scene, ctx) {
     group, colliders,
     enter(ps) { ps.pos.set(0, 0, 8); ps.heading = Math.PI; },
     exit() {}, update(dt, now, px, pz) { if (_people) _people.update(dt, now, px, pz); },
-    dispose() { if (_people) _people.dispose(); scene.remove(group); disposeGroup(group); _built = false; _cache = null; },
+    dispose() { _closeSalon(); if (_people) _people.dispose(); scene.remove(group); disposeGroup(group); _built = false; _cache = null; },
     people: () => _people,
     onUIEvent(eid) {
       if (eid === "talk" && arguments[1]?.personId) _talk(ctx, arguments[1].personId);
       if (eid === "haircut") _act(ctx, 500, "✂️ Fresh haircut! Hygiene +20, Fun +10", { hygiene: 20, fun: 10 });
       else if (eid === "beard_trim") _act(ctx, 300, "🧔 Beard trimmed. Hygiene +10", { hygiene: 10 });
       else if (eid === "shave") _act(ctx, 400, "🪒 Clean shave! Hygiene +25", { hygiene: 25 });
+      else if (eid === "salon") _openSalon(ctx);
       else if (eid === "gossip") _act(ctx, 0, "🗣️ Gisted with Musa. Social +15", { social: 15 });
     },
   };

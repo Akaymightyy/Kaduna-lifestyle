@@ -8,6 +8,7 @@
 import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { rng } from "../config.js";
+import { runGig } from "../gigs.js";
 
 let _built = false;
 
@@ -162,6 +163,7 @@ export async function build(scene, ctx) {
     },
     onUIEvent(eventId, payload) {
       if (eventId === "haggle") _startHaggle(ctx);
+      if (eventId === "pos_gig") runGig("pos_gig", ctx);
     },
     colliders,
   };

@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "./_helpers.js";
 import { rng } from "../config.js";
 import { spawnPeople, getNamedDialogue, getDialogue } from "./people.js";
+import { runGig } from "../gigs.js";
 
 let _built = false, _cache = null;
 
@@ -121,6 +122,7 @@ export async function build(scene, ctx) {
       if (eid === "board_bus") _act(ctx, 800, "🚌 Bus to Zaria boarded!", { energy: -10 });
       else if (eid === "hire_keke") _act(ctx, 200, "🛺 Keke hired!", {});
       else if (eid === "hire_okada") _act(ctx, 400, "🏍️ Okada hired!", {});
+      else if (eid === "okada_gig") runGig("okada_gig", ctx);
       else if (eid === "eat_park") _act(ctx, 300, "🥣 Kunu and kosai! Hunger +35", { hunger: 35, fun: 5 });
     },
   };
