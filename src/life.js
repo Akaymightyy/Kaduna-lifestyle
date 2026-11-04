@@ -209,11 +209,14 @@ export function initLife(scene, colliders = []) {
   // people: 6 per district — 4 walkers on the pavements + 2 neighbours standing to chat.
   // Every walker has swinging legs and arms, a different height, and one of 3 outfits (shirt & trousers, kaftan, gown & hijab).
   const PP = personParts(), PER = 22, N = AREAS.length * PER;
-  const SKINS = [0x3b2418, 0x5a3a26, 0x7a4e32, 0x2a1810, 0x9a6a46, 0x6b4429];
-  const SHIRTS = [0xe8e2d0, 0x2f6fb5, 0xc0392b, 0x2e7d4f, 0xf2b134, 0x6b4a8a, 0x1f1f24, 0xd98e2b, 0x3aa6a0];
-  const TROUS = [0x1f2a36, 0x2a2a2e, 0x4a3b2a, 0x3b4f72, 0x5a5a5e];
-  const ROBES = [0xf4f1ea, 0xe8dcc0, 0x3b4a8a, 0x6a4a2a, 0x2e5d4a, 0x8a8f96];
-  const GOWNS = [0xd98e2b, 0xa23b72, 0x1a8a7a, 0xe06a5a, 0x6b4a8a, 0xc0392b, 0x3b7ac0];
+  // Nov 4 CROWD CLOTHES REFRESH: the background crowd wore the old dull
+  // palette while near NPCs got the new wardrobe. Same hexes as the wardrobe
+  // palette in main.js (_showPhoneApp colours list) + market-day brights.
+  const SKINS = [0x3b2418, 0x5a3a26, 0x7a4e32, 0x2a1810, 0x9a6a46, 0x6b4429, 0xc28a5c];
+  const SHIRTS = [0x1f7a5a, 0xc0392b, 0xf2f2ee, 0x1d5fa8, 0xd98e2b, 0x6b4a8a, 0xe8c547, 0x3c8dbc, 0xa23b72, 0x2e2e2e, 0x3aa6a0, 0xf4efe4];
+  const TROUS = [0x1f2a36, 0x2a2a2e, 0x15171a, 0x3b4f72, 0x6b5a45, 0x2e5d4a];
+  const ROBES = [0xf4f1ea, 0xf4efe4, 0x1d5fa8, 0x6a4a2a, 0x1f7a5a, 0x8a9bb5, 0xc9b38a];
+  const GOWNS = [0xd98e2b, 0xa23b72, 0x1a8a7a, 0xe06a5a, 0x6b4a8a, 0xc0392b, 0xe8c547, 0x3c8dbc];
   const pick = (arr, a, b) => arr[Math.floor(hash2(a, b) * arr.length) % arr.length];
   let pi = 0;
   for (const a of AREAS) {

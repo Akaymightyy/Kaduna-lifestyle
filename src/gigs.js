@@ -12,9 +12,10 @@
 import { GIG_UNIFORMS } from "./outfits.js";
 
 export const GIGS = {
-  suya_gig:  { pay: 1500, energy: 12, cd: 600, place: "suya_spot",     boss: "Mallam Audu" },
-  pos_gig:   { pay: 1200, energy: 10, cd: 600, place: "central_market", boss: "Mama Nkechi" },
-  okada_gig: { pay: 1800, energy: 14, cd: 600, place: "kawo_park",      boss: "Alhaji Tanko" },
+  suya_gig:     { pay: 1500, energy: 12, cd: 600, place: "suya_spot",      boss: "Mallam Audu" },
+  pos_gig:      { pay: 1200, energy: 10, cd: 600, place: "central_market", boss: "Mama Nkechi" },
+  okada_gig:    { pay: 1800, energy: 14, cd: 600, place: "kawo_park",      boss: "Alhaji Tanko" },
+  mechanic_gig: { pay: 2200, energy: 15, cd: 600, place: "mechanic",       boss: "Sani" },   // Nov 4: daily jobs with uniforms
 };
 
 const _key = (eid) => "kl_gig_" + eid;
@@ -35,7 +36,15 @@ export function runGig(eid, ctx) {
   if (gigCooldownLeft(eid) > 0) { ctx.toast?.("Ease small — " + g.boss + " no need you again yet. Come back later."); return; }
   try { localStorage.setItem(_key(eid), String(Date.now())); } catch (e) {}
   const s = ctx.game.state;
-  s.money += g.pay;
+  // DAILY DOUBLE (Nov 4): the FIRST shift of each gig each day pays ×2 —
+  // "daily jobs" the player can plan around. The next shifts pay the normal rate.
+  let pay = g.pay, dbl = false;
+  try {
+    const dk = "kl_gig2x_" + new Date().toISOString().slice(0, 10);
+    const done = JSON.parse(localStorage.getItem(dk) || "[]");
+    if (!done.includes(eid)) { done.push(eid); localStorage.setItem(dk, JSON.stringify(done)); pay = g.pay * 2; dbl = true; }
+  } catch (e) {}
+  s.money += pay;
   s.needs.energy = Math.max(0, (s.needs.energy || 0) - g.energy);
   s.needs.fun = Math.max(0, Math.min(100, (s.needs.fun || 0) + 4));
   s.needs.social = Math.max(0, Math.min(100, (s.needs.social || 0) + 6));
@@ -43,5 +52,5 @@ export function runGig(eid, ctx) {
   ctx.updateHUD?.();
   // the uniform: paint it on through the live look pipeline (save + Firebase + recolor)
   if (uni && typeof window !== "undefined" && window._applyUniform) window._applyUniform(uni);
-  ctx.toast?.("💼 " + (uni ? uni.name : "Shift") + " done — ₦" + g.pay.toLocaleString() + " earned!" + (uni ? " You dey wear the uniform — change am for Wardrobe anytime." : ""));
+  ctx.toast?.("💼 " + (uni ? uni.name : "Shift") + " done — ₦" + pay.toLocaleString() + " earned!" + (dbl ? " (DAILY DOUBLE ×2 🔥)" : "") + (uni ? " You dey wear the uniform — change am for Wardrobe anytime." : ""));
 }

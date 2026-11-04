@@ -81,6 +81,10 @@ export const GIG_UNIFORMS = {
     id: "u-okada", name: "Okada Rider Vest",
     patch: { top: "#c8d92e", bottom: "#2a2a2a", topStyle: "casual", bottomStyle: "trousers", shoes: "#15171a" },
   },
+  mechanic_gig: {
+    id: "u-mech", name: "Sani's Workshop Overall",
+    patch: { top: "#e8741c", bottom: "#1f2a36", topStyle: "casual", bottomStyle: "trousers", shoes: "#222222", accent: "#15171a" },
+  },
 };
 export const BUILDS = [
   { id: "slim", label: "Slim" },

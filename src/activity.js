@@ -264,6 +264,7 @@ export function placeSpec(placeId, eid, handle, player, onDone) {
   if (eid === "suya_gig") return { ...base, label: "Grilling suya for Audu...", icon: "🍢", anim: "point", seconds: 6, face: player.heading };
   if (eid === "pos_gig") return { ...base, label: "Attending POS customers...", icon: "🏧", anim: "sitwatch", seconds: 6, props: ["stool"], face: player.heading, cancelOnMove: false };
   if (eid === "okada_gig") return { ...base, label: "Carrying passengers on your okada...", icon: "🛵", anim: "point", seconds: 6, face: player.heading };
+  if (eid === "mechanic_gig") return { ...base, label: "Fixing engines on Sani's floor...", icon: "🔧", anim: "point", seconds: 6, face: player.heading };
   if (EAT_IDS.has(eid)) return { ...base, label: "Eating...", icon: "🍛", anim: "eat", seconds: 6, props: ["stool", "table"], face: player.heading };
   if (DRINK_IDS.has(eid)) return { ...base, label: "Drinking...", icon: "🥤", anim: "drink", seconds: 3.5, face: player.heading };
   if (eid === "dance") return { ...base, label: "Dancing...", icon: "💃", anim: "dance", seconds: 6, face: player.heading };

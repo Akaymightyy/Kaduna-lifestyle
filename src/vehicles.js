@@ -13,6 +13,7 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import { db } from "./firebase.js";
 import { ref, get, set, update, onValue, runTransaction } from "firebase/database";
 import { resetRideDamage, clearRideDamage } from "./damage.js";
+import { serverSpend, serverCredit, adoptMoney } from "./moneyapi.js";   // MONEY PROTECTION (Nov 4)
 
 // ---- Catalog ----
 // glbPath = path to a real 3D model (loaded lazily via GLTFLoader on first ride)
@@ -80,27 +81,34 @@ export async function buyVehicle(vehicleId, gameState, toast) {
   if ((gameState.money || 0) < v.price) { toast?.("Not enough money — need ₦" + v.price.toLocaleString()); return false; }
   const before = gameState.money;
   try {
-    // 🛡 ANTI-CHEAT (Nov 4): the balance now moves through a runTransaction on the
-    // SERVER copy — the money leaves only if the REAL balance can pay. Before, the
-    // new balance was computed from the device copy and written back wholesale, so a
-    // player who edited localStorage could mint money by buying anything.
-    let paid = false;                                  // true only when the LAST run really took the money (a null "guess" run must never count)
-    const txn = await runTransaction(ref(db, "economy/" + _uid + "/balance"), (cur) => {
-      paid = false;
-      if (cur === null) return 0;                      // first run before the server value arrives: make a guess, Firebase re-runs us with the REAL balance
-      if (cur < v.price) return;                       // really cannot afford — abort
-      paid = true;
-      return cur - v.price;
-    });
-    if (!txn.committed || !paid) { toast?.("Not enough money — need ₦" + v.price.toLocaleString()); return false; }
-    const newBal = txn.snapshot.val() || 0;
+    // 🛡 ANTI-CHEAT (Nov 4): the money leaves only if the REAL balance can pay.
+    // Protected mode: /api/money (server-checked spend). Legacy mode (API not
+    // deployed yet): a runTransaction on the server copy — a player who edited
+    // localStorage could mint money by buying anything, so the API is preferred.
+    let newBal = null;
+    const viaApi = await serverSpend(v.price, "buy_vehicle");
+    if (viaApi) {
+      if (!viaApi.ok) { toast?.("Not enough money — need ₦" + v.price.toLocaleString()); if (typeof viaApi.balance === "number") { adoptMoney(viaApi.balance, gameState, true); } return false; }
+      newBal = viaApi.balance;
+    } else {
+      let paid = false;                                // true only when the LAST run really took the money (a null "guess" run must never count)
+      const txn = await runTransaction(ref(db, "economy/" + _uid + "/balance"), (cur) => {
+        paid = false;
+        if (cur === null) return 0;                    // first run before the server value arrives: make a guess, Firebase re-runs us with the REAL balance
+        if (cur < v.price) return;                     // really cannot afford — abort
+        paid = true;
+        return cur - v.price;
+      });
+      if (!txn.committed || !paid) { toast?.("Not enough money — need ₦" + v.price.toLocaleString()); return false; }
+      newBal = txn.snapshot.val() || 0;
+    }
     await update(ref(db, "players/" + _uid + "/vehicles/" + vehicleId), true);
-    gameState.money = newBal;
+    adoptMoney(newBal, gameState, true);
     _owned[vehicleId] = true;
     toast?.("🎉 Bought " + v.name + "! Find it in your Garage.");
     return true;
   } catch (e) {
-    gameState.money = before;            // nothing was taken
+    adoptMoney(before, gameState, true);   // nothing was taken
     console.warn("[vehicles] buy failed:", e && e.message);
     toast?.("Buy failed: " + String((e && (e.code || e.message)) || "unknown").slice(0, 80));
     return false;
@@ -120,17 +128,25 @@ export async function sellVehicle(vehicleId, gameState, toast) {
   if (price <= 0) { toast?.(v.name + " is a free starter — can't be sold"); return false; }
   const before = gameState.money || 0;
   try {
-    // 🛡 ANTI-CHEAT (Nov 4): server-side transaction, not a device-computed write
-    const txn = await runTransaction(ref(db, "economy/" + _uid + "/balance"), (cur) => Math.min(999999999, (cur || 0) + price));
-    if (!txn.committed) { toast?.("Sell failed — try again"); return false; }
-    const newBal = txn.snapshot.val() || 0;
+    // 🛡 ANTI-CHEAT (Nov 4): server-side credit — /api/money first, legacy
+    // runTransaction as fallback while the API is not deployed.
+    let newBal = null;
+    const viaApi = await serverCredit(price, "sell_vehicle");
+    if (viaApi) {
+      if (!viaApi.ok) { toast?.("Sell failed — try again"); if (typeof viaApi.balance === "number") { adoptMoney(viaApi.balance, gameState, true); } return false; }
+      newBal = viaApi.balance;
+    } else {
+      const txn = await runTransaction(ref(db, "economy/" + _uid + "/balance"), (cur) => Math.min(999999999, (cur || 0) + price));
+      if (!txn.committed) { toast?.("Sell failed — try again"); return false; }
+      newBal = txn.snapshot.val() || 0;
+    }
     await update(ref(db, "players/" + _uid + "/vehicles/" + vehicleId), null);
-    gameState.money = newBal;
+    adoptMoney(newBal, gameState, true);
     delete _owned[vehicleId];
     toast?.("💰 Sold " + v.name + " for ₦" + price.toLocaleString());
     return true;
   } catch (e) {
-    gameState.money = before;
+    adoptMoney(before, gameState, true);
     console.warn("[vehicles] sell failed:", e && e.message);
     toast?.("Sell failed: " + String((e && (e.code || e.message)) || "unknown").slice(0, 80));
     return false;
@@ -144,6 +160,45 @@ export function getVehHp(id) { const h = _hpAll()[id]; return typeof h === "numb
 export function setVehHp(id, hp) {
   try { const a = _hpAll(); if (hp >= 100) delete a[id]; else a[id] = Math.round(hp); localStorage.setItem(_hpKey(), JSON.stringify(a)); } catch (e) {}
 }
+
+// ---- FULL RESPRAY (Nov 4, home service) --------------------------------
+// players/{uid}/vehicleColors/{vid} = "#rrggbb" — persists across devices,
+// applied to the ride mesh on spawn, and driveway/garage displays listen to
+// the kl_vehcolor event to repaint themselves.
+const _colKey = () => "kl_vehcol_" + (_uid || "guest");
+let _colors = null;
+function _colAll() {
+  if (_colors) return _colors;
+  try { _colors = JSON.parse(localStorage.getItem(_colKey()) || "{}") || {}; } catch (e) { _colors = {}; }
+  return _colors;
+}
+export function getVehColor(id) { return _colAll()[id] || null; }
+export function setVehColor(id, hex) {
+  const all = _colAll();
+  if (hex) all[id] = hex; else delete all[id];
+  try { localStorage.setItem(_colKey(), JSON.stringify(all)); } catch (e) {}
+  if (_uid && db) update(ref(db, "players/" + _uid + "/vehicleColors/" + id), hex || null).catch(() => {});
+  try { window.dispatchEvent(new CustomEvent("kl_vehcolor", { detail: { vid: id, color: hex } })); } catch (e) {}
+  if (_riding && _riding.vehicleId === id && _riding.mesh) _paintMesh(_riding.mesh, hex);   // live respray on the car you're in
+}
+
+// paint every mesh in the group that looks like bodywork (skip dark glass/tyres)
+function _paintMesh(group, hex) {
+  if (!hex || !group) return;
+  const target = new THREE.Color(hex);
+  group.traverse((o) => {
+    if (!o.isMesh || !o.material) return;
+    const list = Array.isArray(o.material) ? o.material : [o.material];
+    const next = list.map((m) => {
+      if (!m.color) return m;
+      const lum = 0.299 * m.color.r + 0.587 * m.color.g + 0.114 * m.color.b;
+      if (lum < 0.12) return m;                    // tyres, grills, dark glass stay
+      const c = m.clone(); c.color.copy(target); return c;
+    });
+    o.material = Array.isArray(o.material) ? next : next[0];
+  });
+}
+
 export function vehHealth(id) { const hp = getVehHp(id); return { hp, label: hp <= 0 ? "Wrecked" : hp < 30 ? "Smoking" : hp < 55 ? "Dented" : hp < 100 ? "Scratched" : "Perfect" }; }
 // price grows with damage; wrecks cost extra; free starters still cost a little
 export function repairCost(id) {
@@ -163,22 +218,31 @@ export async function repairVehicle(vehicleId, gameState, toast) {
   const before = gameState.money || 0;
   if (before < cost) { toast?.("Not enough money — repair na ₦" + cost.toLocaleString()); return false; }
   try {
-    // 🛡 ANTI-CHEAT (Nov 4): pay the mechanic through a server transaction too
-    let paid = false;
-    const txn = await runTransaction(ref(db, "economy/" + _uid + "/balance"), (cur) => {
-      paid = false;
-      if (cur === null) return 0;                      // guess first, Firebase re-runs with the real balance
-      if (cur < cost) return;
-      paid = true;
-      return cur - cost;
-    });
-    if (!txn.committed || !paid) { toast?.("Not enough money — repair na ₦" + cost.toLocaleString()); return false; }
-    gameState.money = txn.snapshot.val() || 0;
+    // 🛡 ANTI-CHEAT (Nov 4): pay the mechanic server-side too — /api/money
+    // first, legacy runTransaction as fallback while the API is not deployed.
+    let newBal = null;
+    const viaApi = await serverSpend(cost, "repair");
+    if (viaApi) {
+      if (!viaApi.ok) { toast?.("Not enough money — repair na ₦" + cost.toLocaleString()); if (typeof viaApi.balance === "number") { adoptMoney(viaApi.balance, gameState, true); } return false; }
+      newBal = viaApi.balance;
+    } else {
+      let paid = false;
+      const txn = await runTransaction(ref(db, "economy/" + _uid + "/balance"), (cur) => {
+        paid = false;
+        if (cur === null) return 0;                    // guess first, Firebase re-runs with the real balance
+        if (cur < cost) return;
+        paid = true;
+        return cur - cost;
+      });
+      if (!txn.committed || !paid) { toast?.("Not enough money — repair na ₦" + cost.toLocaleString()); return false; }
+      newBal = txn.snapshot.val() || 0;
+    }
+    adoptMoney(newBal, gameState, true);
     setVehHp(vehicleId, 100);
     toast?.("🔧 " + v.name + " don fresh again! (₦" + cost.toLocaleString() + ")");
     return true;
   } catch (e) {
-    gameState.money = before;
+    adoptMoney(before, gameState, true);
     toast?.("Repair failed: " + String((e && (e.code || e.message)) || "unknown").slice(0, 80));
     return false;
   }
@@ -428,6 +492,8 @@ export async function spawnRideVehicle(vehicleId, playerPos, playerHeading, toas
 
   mesh.position.set(playerPos.x, 0, playerPos.z);
   mesh.rotation.y = pivotRotY(playerHeading);
+  const _spray = getVehColor(vehicleId);
+  if (_spray) _paintMesh(mesh, _spray);          // home respray follows the car onto the road
   _scene.add(mesh);
   _riding = { vehicleId, speed: v.speed, mesh, own };
   resetRideDamage(mesh, getVehHp(vehicleId), (hp) => setVehHp(vehicleId, hp));   // damage now STAYS until you pay the mechanic

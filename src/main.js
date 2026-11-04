@@ -85,6 +85,13 @@ import { getSeat, VEHICLE_CATALOG, getVehicle, initVehicles, buyVehicle, getOwne
 // GTA-STYLE GARAGE (Nov 2): owned houses tier 5+ get a garage block — roller door
 // opens on approach, owned cars park inside, walk to a car + Enter to bring it out.
 import { initGarage, tickGarage, garageSetUid, garageSyncHomes, garagePark, garageZoneAt, garageContains, garageCount, garageForget, garageDbg } from "./garage.js";
+// MONEY PROTECTION (Nov 4): balance dey live for server — client get guard + queue.
+import { installMoneyGuard, initMoneyApi, moneyBoot, moneyDbg, adoptMoney, earnMoney as apiEarn, __flushNow } from "./moneyapi.js";
+// DRIVEWAY + HOME SERVICE (Nov 4): see your cars outside your house + repaint/fix at home.
+import { initDriveway, tickDriveway, drivewaySetUid, drivewayDbg } from "./driveway.js";
+import { initHomeService, tickHomeService, closeHomeService, homeServiceDbg } from "./homeservice.js";
+// STREET RACE (Nov 4): KSR-style checkpoint race on the main road.
+import { initRace, tickRace, raceDbg, raceLeaderboard } from "./race.js";
 import { hitRide, tickRideDamage, rideHp, rideDead, crashCooldown } from "./damage.js";
 import { extendCatalog } from "./dealership_catalog.js";
 import { buildStreetDetail, makeBlobShadows } from "./street.js";
@@ -184,23 +191,14 @@ addEventListener("popstate", (e) => {
 // would be lost on logout. Armed once per session (after first sign-in).
 let _beforeUnloadArmed = false;
 function _armBeforeUnload(uid) {
+  // MONEY PROTECTION (Nov 4): the old beforeunload/visibilitychange balance
+  // pushes are GONE — the client no longer writes the balance to Firebase at
+  // all. Pending money deltas flush to /api/money instead (see moneyapi.js),
+  // so hiding the tab can never "mint" a wallet.
   if (_beforeUnloadArmed) return;
   _beforeUnloadArmed = true;
-  addEventListener("beforeunload", () => {
-    try {
-      const u = uid || getMyUid();
-      if (!u) return;
-      update(ref(db, "economy/" + u), { balance: game.state.money });
-    } catch (e) { /* non-critical */ }
-  });
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") {
-      try {
-        const u = uid || getMyUid();
-        if (!u) return;
-        update(ref(db, "economy/" + u), { balance: game.state.money });
-      } catch (e) { /* non-critical */ }
-    }
+    if (document.visibilityState === "hidden") { try { __flushNow(); } catch (e) { /* non-critical */ } }
   });
 }
 
@@ -232,21 +230,9 @@ function _ensureGetoffBtn() {
 // ---- FEATURE: Periodic Firebase balance pusher ----
 // Pushes the balance to Firebase every 5 seconds IF it changed since last push.
 // More reliable than beforeunload on mobile (which can be unreliable).
-let _lastPushedMoney = null;
-let _balancePushT = null;
-function _armBalancePusher(uid) {
-  if (_balancePushT) return;
-  _balancePushT = setInterval(() => {
-    try {
-      const u = uid || getMyUid();
-      if (!u || !game.state) return;
-      if (_lastPushedMoney !== game.state.money) {
-        _lastPushedMoney = game.state.money;
-        update(ref(db, "economy/" + u), { balance: game.state.money });
-      }
-    } catch (e) { /* non-critical */ }
-  }, 5000);
-}
+// MONEY PROTECTION (Nov 4): the 5-second Firebase balance pusher is GONE.
+// The client never writes the balance anymore — queued deltas go to
+// /api/money (moneyapi.js) and the server balance is pulled back as truth.
 
 let tipI = 0;
 $("ltip").textContent = TIPS[0];
@@ -496,7 +482,7 @@ function _handleWorldTap(clientX, clientY) {
         if (r.tier) game.state.homeTier = r.tier;
         game.save?.();
         _syncHomeEntrance();
-        update(ref(db, "economy/" + uid), { balance: game.state.money });
+        ;
         update(ref(db, "players/" + uid), { homeArea: ud.areaId, homePlot: r.plotNo, homeTier: game.state.homeTier });
         toast("🎉 Plot " + r.plotNo + " in " + ud.areaName + " is yours!");
         const pos = getPlotPosition(area, r.plotNo);
@@ -518,7 +504,7 @@ function _handleWorldTap(clientX, clientY) {
       if (game.state.money < info.price) { toast("Need ₦" + info.price.toLocaleString()); return; }
       if (!confirm("Place ad on " + info.name + " for ₦" + info.price.toLocaleString() + "?\nRuns for 7 days.")) return;
       buyBillboardAd(ud.billboardId, uid, getMyName() || "Player", imageUrl, text, game.state, toast).then((ok) => {
-        if (ok) { updateHUD(); const u = getMyUid(); if (u) update(ref(db, "economy/" + u), { balance: game.state.money }); }
+        if (ok) { updateHUD(); const u = getMyUid();  }
       });
     } else {
       // Billboard has an active ad — show info
@@ -550,6 +536,20 @@ initGarage({ scene, colliders: world.colliders, getHomes: _garageHomes, onTakeOu
     if (ok) { toast("🚗 " + (getVehicle(vid)?.name || vid) + " don come out — enjoy!"); try { sfx.engine(true, 0.4); } catch (e) {} setMyRiding(vid); }
   });
 } });
+// DRIVEWAY (Nov 4): cars that aren't in the garage rest OUTSIDE your house —
+// walk up + E brings them out through the same take-out pipeline as the garage.
+initDriveway({ scene, colliders: world.colliders, getHomes: _garageHomes, onTakeOut: (vid, pos, heading) => {
+  player.pos.x = pos.x; player.pos.z = pos.z; player.heading = heading;
+  if (!vehiclesReady()) initVehicles(scene, getMyUid(), () => {});
+  spawnRideVehicle(vid, player.pos, player.heading, toast).then((ok) => {
+    if (ok) { toast("🚗 " + (getVehicle(vid)?.name || vid) + " don come out from driveway!"); try { sfx.engine(true, 0.4); } catch (e) {} setMyRiding(vid); }
+  });
+} });
+// HOME SERVICE (Nov 4): stand near any house you own → repaint or fix your cars.
+// game/player are created LATER in this file (TDZ) — pass lazy getters, never the value.
+initHomeService({ getGame: () => game, toast, updateHUD, getHomes: _garageHomes });
+// STREET RACE (Nov 4): checkpoint drag race on the main street.
+initRace({ scene, getPlayer: () => player, isRiding, toast, getGame: () => game, updateHUD, getName: getMyName, getUid: getMyUid });
 world.world.add(buildStreetDetail(scene, world.colliders));
 const _pShadow = makeBlobShadows(scene, 1);
 addScenery(scene, world);
@@ -599,6 +599,13 @@ initOsmCity(world).then((s) => { if (s) console.log("[osmCity] city density read
 initCityFill(world).then((s) => { if (s) console.log("[cityFill] city density ready"); });
 const ctl = createControls(canvas, camera, { joy: $("joy"), knob: $("knob") });
 const game = createGameState();
+// MONEY PROTECTION (Nov 4): the guard lives on game.state.money from this line on.
+//   • any single jump above ₦10M is rejected on the device (mint attempt)
+//   • every accepted change is queued to /api/money (the server applies caps
+//     and writes the balance with admin power — the client can't touch it)
+//   • the server balance is adopted back, so a tampered localStorage self-heals
+installMoneyGuard(game, { onBlocked: (d) => toast("🛡 Money jump of ₦" + Math.abs(d).toLocaleString() + " blocked — that one no be legit.") });
+initMoneyApi({ game, toast, updateHUD });
 // Oct 25 FIX ("characters walk through buildings"): NPCs now get the world
 // colliders so they physically push out of houses/kiosks instead of ghosting.
 const npcs = createNPCs(scene, world.colliders);
@@ -987,7 +994,12 @@ function _showPhoneApp(appId) {
   }
   if(appId==="bank"){
     const rank=game.getRank();
-    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">🏦 Kaduna Bank</div><div style="text-align:center;padding:18px 0;background:linear-gradient(135deg,var(--green),#1a1a2e);color:#fff;border-radius:14px;margin-bottom:14px;"><div style="font-size:11px;opacity:0.8;">Your Balance</div><div style="font-size:30px;font-weight:800;margin-top:4px;">₦'+game.state.money.toLocaleString()+'</div><div style="margin-top:8px;font-size:11px;opacity:0.9;">Rank: <span style="color:'+rank.color+';font-weight:600;">'+rank.name+'</span></div></div><div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:11px;color:#666;">Next rank:</div>'+(rank.id==="bigoga"?'<div style="font-size:13px;font-weight:600;">Maximum rank achieved 🏆</div>':'<div style="font-size:13px;font-weight:600;color:var(--green);">'+RANKS[RANKS.findIndex(r=>r.id===rank.id)+1].name+' at ₦'+RANKS[RANKS.findIndex(r=>r.id===rank.id)+1].minMoney.toLocaleString()+'</div>')+'</div>'+backBtn;
+    // MONEY PROTECTION (Nov 4): show the owner whether the money server is live
+    const _md = moneyDbg();
+    const _shield = _md.serverMode === true
+      ? '<div style="background:#14251f;border:1px solid #2e7d4f;color:#4ade80;border-radius:10px;padding:8px 10px;font-size:11px;font-weight:600;margin-bottom:8px;">🛡 Money protection: ACTIVE — balance dey live for server, minting don blocked.</div>'
+      : '<div style="background:#2a1a12;border:1px solid #b45309;color:#fbbf24;border-radius:10px;padding:8px 10px;font-size:11px;font-weight:600;margin-bottom:8px;">🛡 Money protection: setup pending — device guard dey work, but finish MONEY-SETUP.md steps make the server hold the balance.</div>';
+    c.innerHTML='<div style="font-size:14px;margin-bottom:10px;font-weight:700;color:var(--green);">🏦 Kaduna Bank</div><div style="text-align:center;padding:18px 0;background:linear-gradient(135deg,var(--green),#1a1a2e);color:#fff;border-radius:14px;margin-bottom:14px;"><div style="font-size:11px;opacity:0.8;">Your Balance</div><div style="font-size:30px;font-weight:800;margin-top:4px;">₦'+game.state.money.toLocaleString()+'</div><div style="margin-top:8px;font-size:11px;opacity:0.9;">Rank: <span style="color:'+rank.color+';font-weight:600;">'+rank.name+'</span></div></div>'+ _shield +'<div style="background:var(--cream);border-radius:10px;padding:10px;margin-bottom:8px;"><div style="font-size:11px;color:#666;">Next rank:</div>'+(rank.id==="bigoga"?'<div style="font-size:13px;font-weight:600;">Maximum rank achieved 🏆</div>':'<div style="font-size:13px;font-weight:600;color:var(--green);">'+RANKS[RANKS.findIndex(r=>r.id===rank.id)+1].name+' at ₦'+RANKS[RANKS.findIndex(r=>r.id===rank.id)+1].minMoney.toLocaleString()+'</div>')+'</div>'+backBtn;
     return;
   }
   if(appId==="ride"){
@@ -2163,7 +2175,6 @@ window.travelToArea=(areaId)=>{
   game.state.money -= AREA_TRAVEL_FARE;
   game.save?.();
   const uid = getMyUid();
-  if (uid) update(ref(db, "economy/" + uid), { balance: game.state.money });
   // arrive on the district's own road, west end, facing east
   player.pos.x = a.x - 48; player.pos.z = a.z;
   ctl.yaw = -Math.PI / 2 + Math.PI;
@@ -2278,7 +2289,6 @@ window._buyFurniture = async (itemId) => {
   game.save?.();
   // Save money to Firebase — update() requires an object, not a number.
   const uid = getMyUid();
-  if (uid) update(ref(db, "economy/" + uid), { balance: game.state.money });
   // Add to storage in Firebase
   if (uid) {
     import("firebase/database").then(({ ref, get, set }) => {
@@ -2305,7 +2315,7 @@ window._buyHouse = async (tier, price, name) => {
   const uid = getMyUid();
   if (uid) {
     // update() requires an object, not a number — wrap balance in an object.
-    update(ref(db, "economy/" + uid), { balance: game.state.money });
+    ;
     update(ref(db, "players/" + uid), { homeTier: tier });
   }
   missionState.lastAction = "buyHouse";
@@ -2336,7 +2346,7 @@ window._pickOrigin = (originId) => {
       // — passing a NUMBER as the second arg to update(). update() requires an OBJECT,
       // so it threw "values argument must be an object containing the children to replace"
       // and the origin sheet never got removed. Wrap the value in an object.
-      update(ref(db, "economy/" + uid), { balance: game.state.money });
+      ;
       update(ref(db, "players/" + uid), { homeTier: game.state.homeTier, origin: game.state.origin, lastRentPaid: game.state.lastRentPaid });
       if (r.origin.starterFurniture.length) {
         import("firebase/database").then(({ ref, get, set }) => {
@@ -2797,7 +2807,7 @@ window._moveToArea = async (areaId) => {
   if (r.tier) game.state.homeTier = r.tier;
   game.state.lastRentPaid = Date.now(); game.save?.();
   _syncHomeEntrance();
-  await update(ref(db, "economy/" + uid), { balance: game.state.money });
+  ;
   await update(ref(db, "players/" + uid), { homeArea: areaId, homePlot: r.plotNo, homeTier: game.state.homeTier, lastRentPaid: game.state.lastRentPaid });
   toast("📦 Moved to " + area.name + "! Furniture in storage.");
   celebrate("🏠 " + area.name, "Plot " + r.plotNo);
@@ -2938,7 +2948,7 @@ function _settleInvestments() {
   }
   if (!changed) return;
   game.state.investments = keep; game.save?.(); updateHUD();
-  const uid = getMyUid(); if (uid) update(ref(db, "economy/" + uid), { balance: game.state.money });
+  const uid = getMyUid();
 }
 window._invest = (id, min, rate, days) => {
   if (game.state.money < min) { toast("Need ₦" + min.toLocaleString()); return; }
@@ -2950,7 +2960,7 @@ window._invest = (id, min, rate, days) => {
   const ret = win ? Math.floor(min * rate) : Math.floor(min * 0.5);
   game.state.investments = (game.state.investments || []).concat([{ id, amt: min, ret, dueAt: Date.now() + days * DAY_MS }]);
   game.save?.(); updateHUD();
-  const uid = getMyUid(); if (uid) update(ref(db, "economy/" + uid), { balance: game.state.money });
+  const uid = getMyUid();
   toast("💰 Invested ₦" + min.toLocaleString() + ". Ready in " + days + " day(s).");
   showPhoneApp("invest");
 };
@@ -3021,7 +3031,6 @@ function _onFunActivityTap() {
     game.state.needs[act.need] = Math.min(100, (game.state.needs[act.need] || 0) + act.amount);
     game.save?.(); updateHUD();
     const uid = getMyUid();
-    if (uid && act.cost > 0) update(ref(db, "economy/" + uid), { balance: game.state.money });
     toast(act.icon + " " + act.label + "! " + act.need + " +" + act.amount + (act.cost > 0 ? " (−₦" + act.cost.toLocaleString() + ")" : " (free)"));
   };
   if (!rig) { finish(true); return; }
@@ -3458,6 +3467,7 @@ initAuth((user) => {
   // FEATURE: init the vehicles system (subscribes to owned vehicles from Firebase)
   initVehicles(scene, user.uid, () => {});
   garageSetUid(user.uid);   // GARAGE: subscribe to players/{uid}/garage contents
+  drivewaySetUid(user.uid); // DRIVEWAY (Nov 4): subscribe to vehicle colours for the displays
   // KADUNA MOTORS (Oct 20): extend VEHICLE_CATALOG with dealership-only luxury
   // cars (Lexus RX, Tesla, G-Wagon, Range Rover, etc). This MUST run after
   // initVehicles so the existing catalog is in place. Idempotent (uses a Set
@@ -3704,7 +3714,7 @@ initAuth((user) => {
     spendLocal: (amt) => {
       if (game.state.money < amt) return false;
       game.state.money -= amt; game.save?.();
-      const u = getMyUid(); if (u) update(ref(db, "economy/" + u), { balance: game.state.money });
+      const u = getMyUid();
       return true;
     },
     toast,
@@ -3746,35 +3756,15 @@ initAuth((user) => {
   checkDailyReward(user.uid).then((reward) => {
     if (reward) { game.state.money += reward.money; updateHUD(); toast(reward.label+'! Welcome back.'); }
   });
-  // ---- SYNC: listen to Firebase economy/{uid}/balance so admin credits work ----
-  // When admin credits/deducts money, the player's game detects it and updates.
-  let _lastFirebaseBal = null;
+  // ---- SYNC (MONEY PROTECTION, Nov 4): admin credits seen on the legacy
+  // balance node are adopted as TRUSTED (no re-queue, no drift). The client
+  // itself never writes this node anymore — /api/money is the only writer
+  // once FIREBASE_RULES_SECURE.json is published.
   onValue(ref(db, "economy/" + user.uid + "/balance"), (snap) => {
     const fbBal = snap.val();
-    if (fbBal == null) {
-      // FEATURE: Firebase has no balance entry yet (new account or first login
-      // after the rules update). Write the local balance (5000 starting money,
-      // or whatever localStorage had) to Firebase so it persists across
-      // devices + logout. Without this, the balance stayed local-only and
-      // was lost on logout (the user's "amount doesn't stay" complaint).
-      if (_lastFirebaseBal === null) {
-        update(ref(db, "economy/" + user.uid), { balance: game.state.money }).catch(() => {});
-      }
-      return;
-    }
-    if (_lastFirebaseBal === null) {
-      // First load — if Firebase has a balance, use it (admin may have set it)
-      _lastFirebaseBal = fbBal;
-      if (fbBal !== game.state.money) {
-        game.state.money = fbBal;
-        game.save?.();
-        updateHUD();
-      }
-    } else if (fbBal !== _lastFirebaseBal) {
-      // Balance changed in Firebase (admin credited/deducted)
-      _lastFirebaseBal = fbBal;
-      game.state.money = fbBal;
-      game.save?.();
+    if (typeof fbBal !== "number") return;
+    if (fbBal !== game.state.money && moneyDbg().queued === 0) {
+      adoptMoney(fbBal);
       updateHUD();
       toast("💰 Balance updated to ₦" + fbBal.toLocaleString());
     }
@@ -3790,7 +3780,8 @@ initAuth((user) => {
   // current balance gets pushed to Firebase when the user closes the tab,
   // refreshes, or backgrounds the app.
   _armBeforeUnload(user.uid);
-  _armBalancePusher(user.uid);
+  // MONEY PROTECTION (Nov 4): adopt the server balance + start the flush loop.
+  moneyBoot();
   _ensureVehicleControls();
   _ensureGetoffBtn();   // (Oct 19) passenger "Get off ride" button
   // FEATURE: emote FAB — expandable button on the RIGHT side (not covering joystick)
@@ -3956,7 +3947,7 @@ window._upgradeHouse = async (a, p) => {
   game.state.money -= cost; e.t = cur + 1;
   if (game.state.homeArea === a && game.state.homePlot === p) game.state.homeTier = cur + 1;
   game.save?.(); updateHUD();
-  try { await update(ref(db, "houses/" + a + "/" + p), { tier: cur + 1 }); await update(ref(db, "economy/" + uid), { balance: game.state.money }); if (game.state.homeArea === a && game.state.homePlot === p) await update(ref(db, "players/" + uid), { homeTier: cur + 1 }); } catch (err) { console.warn(err); }
+  try { await update(ref(db, "houses/" + a + "/" + p), { tier: cur + 1 }); if (game.state.homeArea === a && game.state.homePlot === p) await update(ref(db, "players/" + uid), { homeTier: cur + 1 }); } catch (err) { console.warn(err); }
   celebrate(next.emoji + " " + next.name, "Upgraded! Look at your house outside."); showPhoneApp("realestate");
 };
 window._buyOutHouse = async (a, p) => {
@@ -3967,7 +3958,7 @@ window._buyOutHouse = async (a, p) => {
   if (!confirm("Buy this " + t.name + " for ₦" + t.buyPrice.toLocaleString() + "? No more rent after that.")) return;
   game.state.money -= t.buyPrice; e.own = true; if (game.state.homeArea === a && game.state.homePlot === p) game.state.homeOwned = true;
   game.save?.(); updateHUD();
-  try { await update(ref(db, "houses/" + a + "/" + p), { tenure: "own" }); await update(ref(db, "economy/" + uid), { balance: game.state.money }); } catch (err) { console.warn(err); }
+  try { await update(ref(db, "houses/" + a + "/" + p), { tenure: "own" }); } catch (err) { console.warn(err); }
   celebrate("🔑 " + t.name, "You own it now — no more rent!"); showPhoneApp("realestate");
 };
 function _tierFor(areaId, fallback) { const a = getArea(areaId); return fallback || (a ? (a.tier === "rich" ? 5 : a.tier === "middle" ? 3 : 1) : 1); }
@@ -4597,6 +4588,9 @@ function _frame() {
   tickEntrancePrompt(player.pos.x, player.pos.z, _gameHour());
   // GARAGE (Nov 2): roller doors, parked-car prompt, homes diff-sync
   try { tickGarage(player.pos.x, player.pos.z, dt, _riding); } catch (e) {}
+  try { tickDriveway(player.pos.x, player.pos.z, dt, _riding); } catch (e) {}   // Nov 4: cars outside your house
+  try { tickHomeService(player.pos.x, player.pos.z, dt); } catch (e) {}         // Nov 4: repaint/fix at home
+  try { tickRace(player.pos.x, player.pos.z, dt, performance.now()); } catch (e) {}   // Nov 4: street race
 
   // Hide traffic when inside a place (fixes "cars inside buildings" bug)
   traffic.setVisible?.(!active);
@@ -4905,6 +4899,9 @@ Promise.all([loadPlayer(manager, scene, game.state.look), addCity(scene, world, 
   if (window.__authReady || window.__bypassAuth) _hideLoading();
   else { window.addEventListener("kaduna-auth-ready", _hideLoading, { once: true }); setTimeout(_hideLoading, 20000); }
   // 🛡 (Nov 4) debug handle: only in the dev server or a bypass-auth test boot — never in the live game (it exposed game.state.money etc.)
-  if (import.meta.env.DEV || window.__bypassAuth) window.__dbg = { getOwned, vehHealth, repairCost, cols: world.colliders, lifePos: () => lifeTrafficPositions(), rideHp: () => rideHp(), lastImpact, traffic, ride: (id) => { initVehicles(scene, null, () => {}); return spawnRideVehicle(id, player.pos, player.heading, toast); }, player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig, cullStats, enterPlace: (id) => enterPlace(id, { pos: player.pos, heading: player.heading }), exitPlace: () => exitPlace({ pos: player.pos, heading: player.heading }), cullStats2: null, trafficCars: () => traffic.positions.length, trafficPos: () => traffic.positions.slice(0, 8), col: () => collisionStats(), probe: (x, z, r) => probeBlocked(x, z, r), probeBox: (x, z, r) => firstHit(x, z, r), vehBox: (id) => vehBoxOf(id), rideHp: () => rideHp(), rideDead: () => rideDead(), hitRide: (n) => hitRide(n), crashHits: () => vehHits().map((h) => ({ depth: +h.depth.toFixed(2), wrecked: !!(h.car && h.car.wrecked), hp: h.car ? Math.round(h.car.hp) : null })), trafficHp: () => traffic.cars.map((c) => Math.round(c.hp || 0)), garage: () => garageDbg(), fixCar: (id) => setVehHp(id, 100), isRiding: () => isRiding(), garageSync: (homes) => garageSyncHomes(homes), garageForgetTest: (v) => garageForget(v), garageParkTest: (vid, key) => garagePark(key || null, vid), garageZone: (x, z) => garageZoneAt(x, z), garageHomes: () => _garageHomes(), posDbg: () => ({ key: _posKey(), uid: getGameUid(), restored: _posRestored, saved: (() => { try { return JSON.parse(localStorage.getItem(_posKey()) || "null"); } catch (e) { return "parse-error"; } })(), at: { x: +player.pos.x.toFixed(1), z: +player.pos.z.toFixed(1), h: +player.heading.toFixed(2) }, doors: listPlaces().filter((p) => Number.isFinite(p.entranceX)).map((p) => [p.id, +p.entranceX.toFixed(1), +p.entranceZ.toFixed(1)]) }), lampDebug: () => ({ hasPos: Array.isArray(world.lampPositions), n: world.lampPositions ? world.lampPositions.length : -1, lights: world.lampLights.map((l) => [Math.round(l.position.x), Math.round(l.position.z)]) }), fly: () => ({ fly: _flyMode, y: +_flyY.toFixed(2), yPos: +player.pos.y.toFixed(2) }), flyToggle: () => window._ksrFlyToggle && window._ksrFlyToggle(), setVehHp: (id, hp) => setVehHp(id, hp), repairVeh: (id) => repairVehicle(id, game.state, toast), placeEvent: (eid) => sendUIEvent(eid, {}), gigs: () => ({ suya: gigCooldownLeft("suya_gig"), pos: gigCooldownLeft("pos_gig"), okada: gigCooldownLeft("okada_gig") }), uniform: () => game.state.look.uniformId || null };
+  if (import.meta.env.DEV || window.__bypassAuth) window.__dbg = { getOwned, vehHealth, repairCost, cols: world.colliders, lifePos: () => lifeTrafficPositions(), rideHp: () => rideHp(), lastImpact, traffic, ride: (id) => { initVehicles(scene, null, () => {}); return spawnRideVehicle(id, player.pos, player.heading, toast); }, player, ctl, npcs, renderer, scene, game, startActivity, placeSpec, funSpec, getRig: () => rig, cullStats, enterPlace: (id) => enterPlace(id, { pos: player.pos, heading: player.heading }), exitPlace: () => exitPlace({ pos: player.pos, heading: player.heading }), cullStats2: null, trafficCars: () => traffic.positions.length, trafficPos: () => traffic.positions.slice(0, 8), col: () => collisionStats(), probe: (x, z, r) => probeBlocked(x, z, r), probeBox: (x, z, r) => firstHit(x, z, r), vehBox: (id) => vehBoxOf(id), rideHp: () => rideHp(), rideDead: () => rideDead(), hitRide: (n) => hitRide(n), crashHits: () => vehHits().map((h) => ({ depth: +h.depth.toFixed(2), wrecked: !!(h.car && h.car.wrecked), hp: h.car ? Math.round(h.car.hp) : null })), trafficHp: () => traffic.cars.map((c) => Math.round(c.hp || 0)), garage: () => garageDbg(), fixCar: (id) => setVehHp(id, 100), isRiding: () => isRiding(), garageSync: (homes) => garageSyncHomes(homes), garageForgetTest: (v) => garageForget(v), garageParkTest: (vid, key) => garagePark(key || null, vid), garageZone: (x, z) => garageZoneAt(x, z), garageHomes: () => _garageHomes(), posDbg: () => ({ key: _posKey(), uid: getGameUid(), restored: _posRestored, saved: (() => { try { return JSON.parse(localStorage.getItem(_posKey()) || "null"); } catch (e) { return "parse-error"; } })(), at: { x: +player.pos.x.toFixed(1), z: +player.pos.z.toFixed(1), h: +player.heading.toFixed(2) }, doors: listPlaces().filter((p) => Number.isFinite(p.entranceX)).map((p) => [p.id, +p.entranceX.toFixed(1), +p.entranceZ.toFixed(1)]) }), lampDebug: () => ({ hasPos: Array.isArray(world.lampPositions), n: world.lampPositions ? world.lampPositions.length : -1, lights: world.lampLights.map((l) => [Math.round(l.position.x), Math.round(l.position.z)]) }), fly: () => ({ fly: _flyMode, y: +_flyY.toFixed(2), yPos: +player.pos.y.toFixed(2) }), flyToggle: () => window._ksrFlyToggle && window._ksrFlyToggle(), setVehHp: (id, hp) => setVehHp(id, hp), repairVeh: (id) => repairVehicle(id, game.state, toast), placeEvent: (eid) => sendUIEvent(eid, {}), gigs: () => ({ suya: gigCooldownLeft("suya_gig"), pos: gigCooldownLeft("pos_gig"), okada: gigCooldownLeft("okada_gig") }), uniform: () => game.state.look.uniformId || null,
+    money: () => moneyDbg(), driveway: () => drivewayDbg(), homeService: () => homeServiceDbg(), race: () => raceDbg(),
+    raceBoard: () => raceLeaderboard(), mechanicGig: () => gigCooldownLeft("mechanic_gig"), flushMoney: () => __flushNow(),
+    hsOpen: () => document.getElementById("homeservice-overlay") ? "open-exists" : "no-overlay" };
   window.__ready = true;
 }).catch((e) => showError("Could not load the game: " + e.message));
