@@ -17,6 +17,7 @@ import { box, mergedMesh, signMesh, floor, interiorLights, disposeGroup } from "
 import { rng } from "../config.js";
 import { spawnPeople } from "./people.js";
 import { getOwned, vehHealth, repairCost, repairVehicle, getVehicle } from "../vehicles.js";
+import { runGig } from "../gigs.js";   // Nov 4: daily mechanic gig
 
 let _built = false, _cache = null;
 let _overlayEl = null, _overlayCtx = null;
@@ -247,7 +248,8 @@ export async function build(scene, ctx) {
     },
     people: () => _people,
     onUIEvent(eid) {
-      if (eid === "repair_menu") { _ensureOverlay(ctx); _renderOverlay(); }
+      if (eid === "mechanic_gig") runGig("mechanic_gig", ctx);
+      else if (eid === "repair_menu") { _ensureOverlay(ctx); _renderOverlay(); }
       else if (eid === "mechanic_chat" && ctx) {
         const lines = [
           "🗣️ Sani: 'Your shock absorber don weak — drive small small o!'",

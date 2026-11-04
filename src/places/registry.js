@@ -472,6 +472,7 @@ const PLACE_DEFS = [
     activities: [
       { id: "repair_menu", label: "🔧 Repair my cars", desc: "Fix any damaged or wrecked ride — pay per damage" },
       { id: "mechanic_chat", label: "💬 Gist with Sani", desc: "Free advice, social +10" },
+      { id: "mechanic_gig", label: "🔧 Mechanic gig — work Sani's floor", desc: "8 min uniform shift — ₦2,200 + overall" },
     ],
   },
   {
