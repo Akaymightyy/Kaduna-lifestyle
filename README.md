@@ -29,6 +29,7 @@ Deploy = upload changed files into the repo (keep the folder structure: `src/…
 - **Main world**: Ahmadu Bello Way with real traffic, day/night, street lamps, billboards
 - **Places** (walk in, press **E**): Central Market, Mai Suya Spot, Central Mosque, Mechanic (Sani), Barber (Musa), Boutique, Bank, Carnival, Arena games and more — each with own interior, NPCs, activities
 - **Money**: jobs, gigs, missions, money hunt, daily rewards, car sales, races — every naira now server-guarded (see below)
+- **Build a house for real**: buy land → plan → hire contractor → 4 paid stages → a real owned house (see below)
 - **Cars**: dealership (KSR showroom incl. Tesla & Ghost flying cars), garage, damage + mechanic repair, paint/respray, **driveway** (your cars park outside your house)
 - **Home**: buy/rent houses, furniture, upgrade tiers, rent due, house parties, knock/visit
 - **Social**: friends list, DMs + groups (Messages app), world chat, private DM chat, send money in chat, money spray, challenges (dice/tennis/penalty/sniper/okada dash), weekly election
@@ -42,6 +43,21 @@ Deploy = upload changed files into the repo (keep the folder structure: `src/…
 3. **👕 Street crowd refreshed** — background people now wear the new wardrobe palette.
 4. **🔧 Mechanic gig** — daily uniform job at Sani's (₦2,200 + workshop overall); the FIRST shift of each gig each day pays ×2.
 5. **🏁 Street race** — 🏁 beacon on the main street, 7 checkpoints, countdown + timer, PB saved, leaderboard on Firebase, ₦20,000 first daily win (₦2,000 after).
+
+## What's new (Nov 5 — 🏗️ Build a House update)
+
+**Real house building — no be "click buy" again:**
+
+1. **🧱 Build app** (phone) — buy land in **Sabon Tasha (₦6M) / Ungwan Rimi (₦14M) / Barnawa (₦18M)**, 6 plots per area. Your plot shows orange pegs + a signboard with your name for everybody.
+2. **Plan before you pay** — pick Bungalow / Duplex / Mansion + rooms + one of 5 contractors (Manasseh Block Works → BuildRight Nig. Ltd). The app shows the FULL cost and time before you confirm anything. Cheap contractor = slow, dear = fast + high rating.
+3. **4 stages, pay one at a time** — Foundation → Walls → Roof → Finishing. No money for the next stage? The house just waits half-built — e no go spoil.
+4. **Workers no dey sleep** — progress lives on the server as timestamps (`stageStartedAt` + `stageDuration`), so the build keeps going while the game is closed. Come back and pay the next stage.
+5. **Real site visuals** — slab grows, walls rise storey by storey, trusses + zinc roof, paint + windows at Finishing. 2–4 workers dey on site while a stage dey run; block/cement piles shrink as the work goes. Every player wey pass sees the stage (public `build` record).
+6. **Finishing done = real house** — the plot enters the normal Houses system: enter, decorate, invite, upgrade, driveway — everything just works. Celebration + confetti on hand-over.
+
+Money follows the same guard as everything else: `serverSpend()` first (if the Vercel API dey live), otherwise a confirmed read-modify-write on `economy/{uid}/balance`. If the spend no go through, NO stage starts and NO money moves.
+
+> Note: `api/money.js` was removed from the repo by the owner — the game runs the legacy (client-confirmed) money mode until e comes back. Everything still works; the shield in Bank will show LOCAL instead of ACTIVE.
 
 ---
 
@@ -126,6 +142,8 @@ src/social/spray.js       Money spray (server-checked debit + validated records)
 src/messages.js           DMs, groups, send money (server transfer)
 src/social.js             Friends, relationship levels, visit links
 src/how_to_play.js        First-login guide overlay
+src/building.js           🏗️ Build a House: land, plan, contractors, 4 paid stages, hand-over
+src/building_vis.js       Construction-site visuals (stages, workers, signs, colliders)
 src/places/…              Every interior place (registry.js + manager.js + one file per place)
 src/multiplayer.js        Live positions + remote avatars
 src/life.js               Street crowd (walkers, neighbours)

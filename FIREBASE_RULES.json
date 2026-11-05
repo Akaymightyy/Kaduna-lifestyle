@@ -40,6 +40,15 @@
             "contractorId": {
               ".validate": "newData.isString() && newData.val().length <= 32"
             },
+            "contractorName": {
+              ".validate": "newData.isString() && newData.val().length <= 48"
+            },
+            "areaName": {
+              ".validate": "newData.isString() && newData.val().length <= 32"
+            },
+            "speed": {
+              ".validate": "newData.isNumber() && newData.val() >= 0.1 && newData.val() <= 5"
+            },
             "stage": {
               ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 4"
             },
