@@ -415,6 +415,7 @@ function _updateArea(area, playerX, playerZ, distToArea, range) {
     const dx = pos.x - playerX, dz = pos.z - playerZ, d2 = dx * dx + dz * dz;
     if (d2 > r2) continue;
     const rec = occupied[plotNo];
+    if (rec && rec.build) continue;   // BUILDING: plot dey under construction — building_vis.js draws the site, not us
     const tier = (rec && rec.tier >= 1 && rec.tier <= 6) ? Math.round(rec.tier) : npcTier(area, plotNo), a = tier - 1;
     _v.set(pos.x, 0, pos.z); _q.setFromAxisAngle(_up, pos.rot || 0); _m4.compose(_v, _q, _scl);
     const slot = counts[a]++;

@@ -247,10 +247,14 @@ export function tickPlotDoors(playerX, playerZ) {
     if (lp.plotId !== plotId) {
       // Redraw the label
       const isMyHouse = p.house.ownerUid === _myUid;
+      // BUILDING (Phase 1): a plot with a live `build` record is a construction site — show 🏗️ instead of 🏠
+      const isBuildSite = !!p.house.build;
       // HOUSE PARTY (Oct 25): a live party shows on the door sign 🎉
       const partyLive = p.house.party && p.house.party.name && (!p.house.party.until || Date.now() < p.house.party.until);
-      const label = (isMyHouse ? "🏠 My Home" : ("🏠 " + (p.house.ownerName || "Owner"))) + (partyLive ? "  " + (p.house.party.emoji || "🎉") + " " + p.house.party.name : "");
-      _drawLabel(lp.canvas, lp.ctx, label, isMyHouse ? "#4ade80" : (partyLive ? "#f2b134" : "#f2b134"));
+      const label = isBuildSite
+        ? ((isMyHouse ? "🏗️ My Site" : "🏗️ " + (p.house.ownerName || "Builder")) + " · dey build")
+        : (isMyHouse ? "🏠 My Home" : ("🏠 " + (p.house.ownerName || "Owner"))) + (partyLive ? "  " + (p.house.party.emoji || "🎉") + " " + p.house.party.name : "");
+      _drawLabel(lp.canvas, lp.ctx, label, isBuildSite ? "#f97316" : (isMyHouse ? "#4ade80" : (partyLive ? "#f2b134" : "#f2b134")));
       lp.texture.needsUpdate = true;
       lp.plotId = plotId;
       lp.areaId = p.areaId;

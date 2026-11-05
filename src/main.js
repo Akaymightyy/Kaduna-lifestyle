@@ -45,6 +45,7 @@ import { initPoolUI } from "./pool_ui.js";
 import { initOkadaDashUI } from "./okada_dash_ui.js";
 import { initSceneCulling, tickSceneCulling, cullStats } from "./scene_culling.js";
 import { initHowToPlay, showHowToPlay } from "./how_to_play.js";
+import { initBuilding, buildingSetUid, tickBuilding, renderBuildsApp, startBuildsAppRefresher } from "./building.js";
 import { initSpyMissions, getSpyMissions, getMyUnlockTag } from "./spy_missions.js";
 import { initSpyMissionsUI, renderSpyMissionsApp, openMission as openSpyMission } from "./spy_mission_ui.js";
 import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
@@ -603,6 +604,11 @@ const game = createGameState();
 // colliders so they physically push out of houses/kiosks instead of ghosting.
 const npcs = createNPCs(scene, world.colliders);
 const missionState = createMissionState();
+// REAL HOUSE BUILDING (Phase 1): land → plan → contractor → 4 paid stages → a real
+// owned house in the existing houses system. Scene-side init here; per-login data
+// hooks run in buildingSetUid() inside the auth handler below.
+initBuilding({ scene, colliders: world.colliders, getState: () => game.state, getName: getMyName, toast, updateHUD: () => updateHUD(), celebrate });
+startBuildsAppRefresher();
 let _activeMission = null;
 
 // ---- day/night (real cycle, not forced daytime) ----
@@ -927,6 +933,7 @@ window.closePhone=closePhone;
 function _showPhoneApp(appId) {
   const c=$("phone-content");
   _showingApp = appId;
+  window._showingApp = appId;   // BUILDING: the builds app refresher checks this
   { const _mxLight = appId === "messages"; $("phone-card")?.classList.toggle("msg-kd", _mxLight); c.classList.toggle("msg-kd", _mxLight); }
   const backBtn='<button onclick="window.showApp(\'home\')" style="margin-top:14px;background:transparent;border:none;color:var(--green);cursor:pointer;font-size:13px;font-weight:600;">← Back to Phone</button>';
   if(appId==="home"){
@@ -946,6 +953,7 @@ function _showPhoneApp(appId) {
       {id:"events",icon:"🎉",label:"Events"},
       {id:"news",icon:"📰",label:"Gist"},
       {id:"realestate",icon:"🏡",label:"Houses"},
+      {id:"builds",icon:"🧱",label:"Build"},
       {id:"homestore",icon:"🛋️",label:"HomeStore"},
       {id:"storage",icon:"📦",label:"Storage"},
       {id:"hunt",icon:"💎",label:"Hunt"},
@@ -969,7 +977,7 @@ function _showPhoneApp(appId) {
       {id:"settings",icon:"⚙️",label:"Settings"}
     ];
     if(isAdmin()) apps.push({id:"admin",icon:"🔐",label:"Admin"});
-    const COL={food:["#f59e0b","#f97316"],jobs:["#8b5cf6","#6366f1"],bank:["#3b82f6","#2563eb"],ride:["#10b981","#059669"],cars:["#6366f1","#4f46e5"],map:["#06b6d4","#0891b2"],daily:["#ec4899","#db2777"],health:["#ef4444","#dc2626"],richlist:["#f59e0b","#d97706"],profile:["#6366f1","#4f46e5"],events:["#d946ef","#c026d3"],news:["#64748b","#475569"],boutique:["#d946ef","#a855f7"],myoutfits:["#f97316","#ea580c"],wardrobe:["#14b8a6","#0d9488"],contacts:["#6366f1","#818cf8"],wallet:["#f59e0b","#d97706"],tunes:["#a855f7","#9333ea"],gallery:["#06b6d4","#0891b2"],invest:["#10b981","#059669"],settings:["#64748b","#475569"],admin:["#ef4444","#b91c1c"],hunt:["#f2b134","#d97706"],missions:["#dc2626","#b91c1c"],realestate:["#16a34a","#15803d"],homestore:["#ea580c","#c2410c"],storage:["#0891b2","#0e7490"],messages:["#22c55e","#16a34a"],nepa:["#facc15","#ca8a04"],company:["#1e40af","#1e3a8a"],spymissions:["#0a0a0a","#f2b134"]};
+    const COL={food:["#f59e0b","#f97316"],jobs:["#8b5cf6","#6366f1"],bank:["#3b82f6","#2563eb"],ride:["#10b981","#059669"],cars:["#6366f1","#4f46e5"],map:["#06b6d4","#0891b2"],daily:["#ec4899","#db2777"],health:["#ef4444","#dc2626"],richlist:["#f59e0b","#d97706"],profile:["#6366f1","#4f46e5"],events:["#d946ef","#c026d3"],news:["#64748b","#475569"],boutique:["#d946ef","#a855f7"],myoutfits:["#f97316","#ea580c"],wardrobe:["#14b8a6","#0d9488"],contacts:["#6366f1","#818cf8"],wallet:["#f59e0b","#d97706"],tunes:["#a855f7","#9333ea"],gallery:["#06b6d4","#0891b2"],invest:["#10b981","#059669"],settings:["#64748b","#475569"],admin:["#ef4444","#b91c1c"],hunt:["#f2b134","#d97706"],missions:["#dc2626","#b91c1c"],realestate:["#16a34a","#15803d"],builds:["#b45309","#78350f"],homestore:["#ea580c","#c2410c"],storage:["#0891b2","#0e7490"],messages:["#22c55e","#16a34a"],nepa:["#facc15","#ca8a04"],company:["#1e40af","#1e3a8a"],spymissions:["#0a0a0a","#f2b134"]};
     const now=new Date(), hh=String(now.getHours()).padStart(2,"0"), mm=String(now.getMinutes()).padStart(2,"0");
     const dateTxt=now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})+" · Kaduna";
     c.innerHTML='<div class="ph-home-clock">'+hh+':'+mm+'</div><div class="ph-home-date">'+dateTxt+'</div><div class="ph-home-bal"><span>₦'+(game.state.money||0).toLocaleString()+'</span></div>'+
@@ -1337,6 +1345,10 @@ function _showPhoneApp(appId) {
       const el=document.getElementById("contacts-list");
       if(el) el.innerHTML=list.length?list.map(([uid,p])=>{const nm=(p.name||"Player").replace(/'/g,"");return '<div style="display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid #eee;"><div style="width:32px;height:32px;background:var(--green);color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;">'+(p.name||"?").charAt(0).toUpperCase()+'</div><div style="flex:1;"><div style="font-size:13px;font-weight:600;">'+(p.name||"Unknown")+'</div><div style="font-size:10px;color:#999;">'+(p.x||0).toFixed(0)+', '+(p.z||0).toFixed(0)+'</div></div><button onclick="window.sendMessage(\''+uid+'\',\''+nm+'\')" style="background:var(--green);color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;">Wave 👋</button></div>';}).join(""):'<div style="text-align:center;padding:20px;color:#999;">No other players online right now.</div>';
     });
+    return;
+  }
+  if(appId==="builds"){
+    c.innerHTML = renderBuildsApp();
     return;
   }
   if(appId==="realestate"){
@@ -3480,6 +3492,20 @@ initAuth((user) => {
   // FEATURE: init the vehicles system (subscribes to owned vehicles from Firebase)
   initVehicles(scene, user.uid, () => {});
   garageSetUid(user.uid);   // GARAGE: subscribe to players/{uid}/garage contents
+  buildingSetUid(user.uid);   // BUILDING: subscribe to players/{uid}/builds + plots (house construction)
+  // REAL HOUSE BUILDING: a finished build must appear in My Houses / ride list right
+  // away — refresh the local list when the celebration event fires.
+  window.addEventListener("kl_house_built", (ev) => {
+    try {
+      const d = ev.detail || {};
+      game.state.myHouses = game.state.myHouses || [];
+      if (!game.state.myHouses.some(h => h.a === d.a && h.p === d.p)) {
+        game.state.myHouses.push({ a: d.a, p: d.p, t: d.tier || 3, own: true });
+        game.save?.();
+      }
+      _myHomesList();
+    } catch (e) { console.warn("[building] myHouses refresh failed:", e); }
+  });
   // KADUNA MOTORS (Oct 20): extend VEHICLE_CATALOG with dealership-only luxury
   // cars (Lexus RX, Tesla, G-Wagon, Range Rover, etc). This MUST run after
   // initVehicles so the existing catalog is in place. Idempotent (uses a Set
@@ -4023,7 +4049,8 @@ async function _scanMyHouses() {
   try {
     const { ref, get } = await import("firebase/database");
     const found = [];
-    for (const a of AREAS) { const v = (await get(ref(db, "houses/" + a.id))).val(); if (!v) continue; for (const [p, rec] of Object.entries(v)) if (rec && rec.ownerUid === uid) found.push({ a: a.id, p: parseInt(p, 10), t: rec.tier || 1, own: rec.tenure === "own" }); }
+    for (const a of AREAS) { const v = (await get(ref(db, "houses/" + a.id))).val(); if (!v) continue; for (const [p, rec] of Object.entries(v)) { if (!rec || rec.ownerUid !== uid) continue; if (rec.build) continue;   // BUILDING: half-built sites are not houses yet — never move the home door there
+      found.push({ a: a.id, p: parseInt(p, 10), t: rec.tier || 1, own: rec.tenure === "own" }); } }
     game.state.myHouses = found.concat((game.state.myHouses || []).filter(h => !found.some(f => f.a === h.a && f.p === h.p)));
     game.state.housesScanned = uid; game.save?.();
     _syncHomeEntrance();
@@ -4825,6 +4852,8 @@ function _frame() {
   // ---- Plot doors tick: render doors at nearby occupied plots + detect knock range (step 2c) ----
   // Only tick when NOT inside a place (otherwise we waste cycles on doors the player can't see)
   if (!active) tickPlotDoors(player.pos.x, player.pos.z);
+  // REAL HOUSE BUILDING: site visuals (stage growth, workers, signs) + context chip + finish checks
+  if (!active) tickBuilding(player.pos.x, player.pos.z, dt);
   // FEATURE: check if the player is near ANY house they own → update "My Home" entrance
   if (!active) _checkOwnedHouseProximity();
   // FEATURE: check if the player is near a fun place (football pitch, suya spot, etc.)
