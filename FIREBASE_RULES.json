@@ -23,18 +23,27 @@
       ".read": "auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
       "$uid": {
         ".read": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
-        ".write": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
+        ".write": false,
         "balance": {
           ".read": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
-          ".write": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
+          ".write": false,
           ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 999999999"
         },
         "log": {
-          ".read": "auth.uid === $uid",
+          ".read": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
+          ".write": "auth.uid === $uid",
           "$eventId": {
-            ".write": "auth.uid === $uid",
-            ".validate": "newData.child('amount').isNumber() && (!newData.child('reason').exists() || (newData.child('reason').isString() && newData.child('reason').val().length <= 140)) && newData.child('ts').isNumber()"
+            ".write": "auth.uid === $uid && !data.exists()",
+            ".validate": "newData.hasChildren(['ts']) && newData.child('ts').isNumber()"
           }
+        },
+        "day": {
+          ".read": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
+          ".write": false
+        },
+        "nonces": {
+          ".read": false,
+          ".write": false
         }
       }
     },
@@ -266,6 +275,61 @@
       "$id": {
         ".write": "auth != null && !data.exists() && root.child('sprays/' + $id + '/toUid').val() === auth.uid",
         ".validate": "newData.child('uid').val() === auth.uid"
+      }
+    },
+    "races": {
+      ".read": "auth != null",
+      "$board": {
+        ".read": "auth != null",
+        "$uid": {
+          ".read": "auth != null",
+          ".write": "auth != null && auth.uid === $uid",
+          ".validate": "newData.child('name').isString() && newData.child('name').val().length <= 32 && newData.child('best').isNumber() && newData.child('best').val() >= 3000 && newData.child('best').val() <= 3600000 && newData.child('ts').isNumber()"
+        }
+      }
+    },
+    "blocks": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid",
+        "$other": {
+          ".validate": "newData.isBoolean()"
+        }
+      }
+    },
+    "reports": {
+      ".read": "auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
+      "$reportId": {
+        ".write": "auth != null && !data.exists()",
+        ".validate": "newData.child('from').val() === auth.uid && newData.child('against').isString() && newData.child('against').val().length <= 128 && (!newData.child('reason').exists() || newData.child('reason').isString()) && newData.child('ts').isNumber()"
+      }
+    },
+    "election": {
+      ".read": "auth != null",
+      "$week": {
+        ".read": "auth != null",
+        "candidates": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && !data.exists()",
+            ".validate": "newData.child('uid').val() === auth.uid && newData.child('name').isString() && newData.child('name').val().length <= 32 && newData.child('slogan').isString() && newData.child('slogan').val().length <= 80 && newData.child('policy').isString() && newData.child('ts').isNumber()"
+          }
+        },
+        "votes": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && !data.exists()",
+            ".validate": "newData.isString()"
+          }
+        },
+        "winner": {
+          ".write": "auth != null"
+        }
+      }
+    },
+    "transfers": {
+      ".read": "auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
+      "$txId": {
+        ".write": "auth != null && !data.exists()",
+        ".validate": "newData.child('from').val() === auth.uid && newData.child('to').isString() && newData.child('to').val().length <= 128 && newData.child('to').val() !== auth.uid && newData.child('amount').isNumber() && newData.child('amount').val() > 0 && newData.child('amount').val() <= 10000000 && newData.child('ts').isNumber() && (!newData.child('note').exists() || newData.child('note').isString())"
       }
     }
   }
