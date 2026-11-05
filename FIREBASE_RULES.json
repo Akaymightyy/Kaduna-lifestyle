@@ -41,6 +41,13 @@
           ".read": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
           ".write": false
         },
+        "inbox": {
+          ".read": "auth.uid === $uid",
+          "$id": {
+            ".write": "(!data.exists() && newData.exists() && auth != null) || (auth.uid === $uid && data.exists())",
+            ".validate": "newData.child('from').val() === auth.uid && newData.child('amount').isNumber() && newData.child('amount').val() > 0 && newData.child('amount').val() <= 10000000"
+          }
+        },
         "nonces": {
           ".read": false,
           ".write": false
