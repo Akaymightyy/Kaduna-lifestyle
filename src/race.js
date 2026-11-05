@@ -189,6 +189,8 @@ async function _finish(secs) {
     _updateHUD?.();
     _toast?.("💰 ₦" + prize.toLocaleString() + (first ? " — first race win of the day!" : " race bonus!"));
   }
+  // CREW WARS (Nov 2025): finished races give +25 war points to my crew (crew_war.js)
+  try { if (typeof window.KLCrewRaceWin === "function") window.KLCrewRaceWin(secs); } catch (e) {}
   // leaderboard + tag the reason so the server cap is the right one
   _settleLeaderboard(secs);
 }

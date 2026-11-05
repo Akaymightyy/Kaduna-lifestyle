@@ -1,5 +1,6 @@
 import { WORLD_HALF_X, ROAD_HALF, SIDE_STREETS, WIDE_AVENUES_X, WIDE_CROSS_Z, MAP_HALF_X, MAP_HALF_Z } from "./config.js";
 import { AREAS } from "./areas.js";
+import { mapOverlay as crewMapOverlay } from "./territory.js";   // CREW TERRITORY tint
 
 // Pre-baked top-down map (2 px per metre), redrawn rotated around the player ~10x/second.
 export function createMinimap(canvas, shapes) {
@@ -79,6 +80,22 @@ export function createMinimap(canvas, shapes) {
     ctx.scale(sc / S, sc / S);
     ctx.translate(-X(px), -Z(pz));
     ctx.drawImage(base, 0, 0);
+    // CREW TERRITORY (Nov 2025): colour tint + tag for areas wey get owner crew
+    for (const ov of crewMapOverlay()) {
+      if (Math.abs(ov.x - px) > range * 3.2 || Math.abs(ov.z - pz) > range * 3.2) continue;
+      ctx.save();
+      ctx.globalAlpha = 0.42;
+      ctx.fillStyle = /^#[0-9a-fA-F]{6}$/.test(ov.color || "") ? ov.color : "#e11d48";
+      ctx.fillRect(X(ov.x - ov.w / 2), Z(ov.z - ov.d / 2), ov.w * S, ov.d * S);
+      ctx.restore();
+      ctx.save();
+      ctx.fillStyle = /^#[0-9a-fA-F]{6}$/.test(ov.color || "") ? ov.color : "#e11d48";
+      ctx.font = "bold " + (8 * S) + "px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.translate(X(ov.x), Z(ov.z - ov.d / 2 + 9)); ctx.rotate(-(yaw + Math.PI));
+      ctx.strokeStyle = "rgba(0,0,0,.8)"; ctx.lineWidth = 2.4;
+      ctx.strokeText("[" + ov.tag + "]", 0, 0); ctx.fillText("[" + ov.tag + "]", 0, 0);
+      ctx.restore();
+    }
     // district names: drawn here (not baked) and counter-rotated so the words always read upright
     ctx.fillStyle = "#33413a"; ctx.font = "bold " + (9 * S) + "px Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
     for (const a of AREAS) {

@@ -16,6 +16,8 @@ let _myPlace="", _myLook=null, _liveOk=true, _unsubPlayers=null;
 
 import { makeNameTag, tagScale as _tagScale } from "./nametag.js";
 const _badgeOf = (d) => (d && (d.admin || d.isAdmin) ? "Admin" : d && d.homeArea ? "Resident" : "Visitor");
+// CREW (Nov 2025): paint the crew tag on remote players' name tags, e.g. "[KDW] Musa"
+const _crewName = (d) => (d && typeof d.crewTag === "string" && d.crewTag ? d.crewTag + " " : "") + (d.name || "Player");
 
 export function initMultiplayer(scene, onCount, onChat) {
   _scene=scene; _onCount=onCount; _onChat=onChat;
@@ -166,7 +168,7 @@ async function _buildAvatar(uid, d) {
       if (o.isMesh) { o.castShadow = false; o.frustumCulled = true; }
     });
     // Name tag sprite above head
-    const tex = makeNameTag(d.name || "Player", _badgeOf(d));
+    const tex = makeNameTag(_crewName(d), _badgeOf(d));
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
     sp.position.y = 2.05; _tagScale(sp, tex);
     // FEATURE: tag the sprite with userData so the main.js tap-raycaster can
@@ -188,7 +190,7 @@ async function _buildAvatar(uid, d) {
       new THREE.MeshLambertMaterial({ color: d.color || "#e11d48" })
     );
     body.position.y = 0.7; body.castShadow = false; g.add(body);
-    const tex = makeNameTag(d.name || "Player", _badgeOf(d));
+    const tex = makeNameTag(_crewName(d), _badgeOf(d));
     const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false }));
     sp.position.y = 1.8; _tagScale(sp, tex); g.add(sp);
     // FEATURE: tag for tap-raycaster (same as the model-loaded branch above)

@@ -46,6 +46,12 @@ import { initOkadaDashUI } from "./okada_dash_ui.js";
 import { initSceneCulling, tickSceneCulling, cullStats } from "./scene_culling.js";
 import { initHowToPlay, showHowToPlay } from "./how_to_play.js";
 import { initBuilding, buildingSetUid, tickBuilding, renderBuildsApp, startBuildsAppRefresher } from "./building.js";
+// CREW SYSTEM (Clash-style crews + area control + weekly area wars):
+// crews (create/join/roles/bank/XP), crew_chat, crew_war (points/challenges/
+// weekly resolution), territory (8 areas, flags, map tint) + the 🛡️ phone app.
+import { initCrewSystems, crewSetUid, tickCrewSystems, renderCrewApp, startCrewAppRefresher } from "./crew_app.js";
+import { mapOverlay as crewMapOverlay, crewArea as crewAreaById, ownerOf as crewOwnerOf, crewPriceFactor } from "./territory.js";
+import { myCrewId as crewMyCrewId } from "./crews.js";
 import { initSpyMissions, getSpyMissions, getMyUnlockTag } from "./spy_missions.js";
 import { initSpyMissionsUI, renderSpyMissionsApp, openMission as openSpyMission } from "./spy_mission_ui.js";
 import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
@@ -609,6 +615,10 @@ const missionState = createMissionState();
 // hooks run in buildingSetUid() inside the auth handler below.
 initBuilding({ scene, colliders: world.colliders, getState: () => game.state, getName: getMyName, toast, updateHUD: () => updateHUD(), celebrate });
 startBuildsAppRefresher();
+// CREW SYSTEM: territory flags (scene side) + all crew state wiring. Per-login
+// data hooks run in crewSetUid() inside the auth handler below.
+initCrewSystems({ scene, colliders: world.colliders, getState: () => game.state, getName: getMyName, toast, updateHUD: () => updateHUD(), celebrate });
+startCrewAppRefresher();
 let _activeMission = null;
 
 // ---- day/night (real cycle, not forced daytime) ----
@@ -954,6 +964,7 @@ function _showPhoneApp(appId) {
       {id:"news",icon:"📰",label:"Gist"},
       {id:"realestate",icon:"🏡",label:"Houses"},
       {id:"builds",icon:"🧱",label:"Build"},
+      {id:"crew",icon:"🛡️",label:"Crew"},
       {id:"homestore",icon:"🛋️",label:"HomeStore"},
       {id:"storage",icon:"📦",label:"Storage"},
       {id:"hunt",icon:"💎",label:"Hunt"},
@@ -977,7 +988,7 @@ function _showPhoneApp(appId) {
       {id:"settings",icon:"⚙️",label:"Settings"}
     ];
     if(isAdmin()) apps.push({id:"admin",icon:"🔐",label:"Admin"});
-    const COL={food:["#f59e0b","#f97316"],jobs:["#8b5cf6","#6366f1"],bank:["#3b82f6","#2563eb"],ride:["#10b981","#059669"],cars:["#6366f1","#4f46e5"],map:["#06b6d4","#0891b2"],daily:["#ec4899","#db2777"],health:["#ef4444","#dc2626"],richlist:["#f59e0b","#d97706"],profile:["#6366f1","#4f46e5"],events:["#d946ef","#c026d3"],news:["#64748b","#475569"],boutique:["#d946ef","#a855f7"],myoutfits:["#f97316","#ea580c"],wardrobe:["#14b8a6","#0d9488"],contacts:["#6366f1","#818cf8"],wallet:["#f59e0b","#d97706"],tunes:["#a855f7","#9333ea"],gallery:["#06b6d4","#0891b2"],invest:["#10b981","#059669"],settings:["#64748b","#475569"],admin:["#ef4444","#b91c1c"],hunt:["#f2b134","#d97706"],missions:["#dc2626","#b91c1c"],realestate:["#16a34a","#15803d"],builds:["#b45309","#78350f"],homestore:["#ea580c","#c2410c"],storage:["#0891b2","#0e7490"],messages:["#22c55e","#16a34a"],nepa:["#facc15","#ca8a04"],company:["#1e40af","#1e3a8a"],spymissions:["#0a0a0a","#f2b134"]};
+    const COL={food:["#f59e0b","#f97316"],jobs:["#8b5cf6","#6366f1"],bank:["#3b82f6","#2563eb"],ride:["#10b981","#059669"],cars:["#6366f1","#4f46e5"],map:["#06b6d4","#0891b2"],daily:["#ec4899","#db2777"],health:["#ef4444","#dc2626"],richlist:["#f59e0b","#d97706"],profile:["#6366f1","#4f46e5"],events:["#d946ef","#c026d3"],news:["#64748b","#475569"],boutique:["#d946ef","#a855f7"],myoutfits:["#f97316","#ea580c"],wardrobe:["#14b8a6","#0d9488"],contacts:["#6366f1","#818cf8"],wallet:["#f59e0b","#d97706"],tunes:["#a855f7","#9333ea"],gallery:["#06b6d4","#0891b2"],invest:["#10b981","#059669"],settings:["#64748b","#475569"],admin:["#ef4444","#b91c1c"],hunt:["#f2b134","#d97706"],missions:["#dc2626","#b91c1c"],realestate:["#16a34a","#15803d"],builds:["#b45309","#78350f"],crew:["#7f1d1d","#e11d48"],homestore:["#ea580c","#c2410c"],storage:["#0891b2","#0e7490"],messages:["#22c55e","#16a34a"],nepa:["#facc15","#ca8a04"],company:["#1e40af","#1e3a8a"],spymissions:["#0a0a0a","#f2b134"]};
     const now=new Date(), hh=String(now.getHours()).padStart(2,"0"), mm=String(now.getMinutes()).padStart(2,"0");
     const dateTxt=now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})+" · Kaduna";
     c.innerHTML='<div class="ph-home-clock">'+hh+':'+mm+'</div><div class="ph-home-date">'+dateTxt+'</div><div class="ph-home-bal"><span>₦'+(game.state.money||0).toLocaleString()+'</span></div>'+
@@ -1139,6 +1150,12 @@ function _showPhoneApp(appId) {
       svg += '<g style="cursor:pointer;" onclick="window.travelToArea(\''+a.id+'\')">'+
         '<rect x="'+toMapX(a.x-44)+'" y="'+toMapZ(a.z-40)+'" width="'+(88*sx1)+'" height="'+(96*sz1)+'" rx="2" fill="'+fill+'" stroke="#33413a" stroke-width="0.6"/>'+
         '<text x="'+toMapX(a.x)+'" y="'+(toMapZ(a.z+8)+2)+'" text-anchor="middle" font-size="5.5" font-weight="700" fill="#243028">'+a.name+'</text></g>';
+    }
+    // CREW TERRITORY: colour tint + crew tag for every area wey get owner (one crew per area)
+    for (const ov of crewMapOverlay()) {
+      const col = /^#[0-9a-fA-F]{6}$/.test(ov.color || "") ? ov.color : "#e11d48";
+      svg += '<rect x="'+toMapX(ov.x-ov.w/2)+'" y="'+toMapZ(ov.z-ov.d/2)+'" width="'+(ov.w*sx1)+'" height="'+(ov.d*sz1)+'" rx="2" fill="'+col+'" opacity="0.42" pointer-events="none"/>';
+      svg += '<text x="'+toMapX(ov.x)+'" y="'+(toMapZ(ov.z-ov.d/2)+6)+'" text-anchor="middle" font-size="4.5" font-weight="800" fill="'+col+'" style="paint-order:stroke;stroke:#000;stroke-width:1.4;" pointer-events="none">['+ov.tag+']</text>';
     }
     // Place markers (tappable)
     for (const p of places) {
@@ -1349,6 +1366,10 @@ function _showPhoneApp(appId) {
   }
   if(appId==="builds"){
     c.innerHTML = renderBuildsApp();
+    return;
+  }
+  if(appId==="crew"){   // 🛡️ CREW app — crews, territory, wars, chat, rank
+    c.innerHTML = renderCrewApp();
     return;
   }
   if(appId==="realestate"){
@@ -2328,6 +2349,11 @@ window._buyFurniture = async (itemId) => {
 };
 // ---- Real Estate: buy/upgrade house ----
 window._buyHouse = async (tier, price, name) => {
+  // CREW PERK: 10% off houses inside an area your crew controls
+  try {
+    const _f = crewPriceFactor(game.state.homeArea, crewMyCrewId());
+    if (_f < 1) { const _old = price; price = Math.round(price * _f); toast("🛡️ Crew discount — ₦" + (_old - price).toLocaleString() + " off your area house!"); }
+  } catch (e) {}
   if (game.state.money < price) { toast("Not enough money"); return; }
   game.state.money -= price;
   game.state.homeTier = tier;
@@ -3511,6 +3537,7 @@ initAuth((user) => {
   initVehicles(scene, user.uid, () => {});
   garageSetUid(user.uid);   // GARAGE: subscribe to players/{uid}/garage contents
   buildingSetUid(user.uid);   // BUILDING: subscribe to players/{uid}/builds + plots (house construction)
+  crewSetUid(user.uid);       // CREW: subscribe to my crew + members + war dailies
   // REAL HOUSE BUILDING: a finished build must appear in My Houses / ride list right
   // away — refresh the local list when the celebration event fires.
   window.addEventListener("kl_house_built", (ev) => {
@@ -4872,6 +4899,8 @@ function _frame() {
   if (!active) tickPlotDoors(player.pos.x, player.pos.z);
   // REAL HOUSE BUILDING: site visuals (stage growth, workers, signs) + context chip + finish checks
   if (!active) tickBuilding(player.pos.x, player.pos.z, dt);
+  // CREW SYSTEM: banner wave + war activity points + weekly war resolution + area pill
+  if (!active) tickCrewSystems(dt, player.pos.x, player.pos.z);
   // FEATURE: check if the player is near ANY house they own → update "My Home" entrance
   if (!active) _checkOwnedHouseProximity();
   // FEATURE: check if the player is near a fun place (football pitch, suya spot, etc.)
