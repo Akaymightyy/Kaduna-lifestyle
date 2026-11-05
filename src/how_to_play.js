@@ -71,6 +71,17 @@ export function showHowToPlay() {
       ],
     },
     {
+      icon: "🏗️", title: "Build Your Own House",
+      tips: [
+        "Open <b>🧱 Build</b> in your phone → buy land in <b>Sabon Tasha, Ungwan Rimi or Barnawa</b> (better area = dearer land).",
+        "Walk to your plot (orange pegs + your name signboard) → tap <b>📐 Plan</b>.",
+        "Pick house type (<b>Bungalow / Duplex / Mansion</b>), rooms, and a <b>contractor</b> — the app shows the FULL cost + time before you pay anything.",
+        "Construction runs in <b>4 stages</b>: Foundation → Walls → Roof → Finishing. You pay one stage at a time — the house fit wait half-built make you hustle.",
+        "Workers dey work <b>even when the game is closed</b> — come back later, pay the next stage.",
+        "When Finishing don complete, the house enters your <b>Houses</b> list — enter, decorate, invite friends, upgrade, everything.",
+      ],
+    },
+    {
       icon: "🎲", title: "Challenge Anyone (Wager)",
       tips: [
         "Tap the <b>🎲 button</b> (bottom-right, above joystick) to open a challenge.",

@@ -32,7 +32,7 @@ import { serverSpend, serverCredit, adoptMoney } from "./moneyapi.js";
 import { getArea, getPlotPosition } from "./areas.js";
 import { getAreaHouses } from "./plots.js";
 import { initBuildingVis, syncSites, tickBuildingVis } from "./building_vis.js";
-import { showContext } from "./contextmenu.js";
+import { showContext, isContextShown, hideContext } from "./contextmenu.js";
 
 // ---------- LAND (3 Kaduna areas, better area = higher price) ----------
 // Slots are the LAST 6 plot numbers of each area grid: regular signups claim
@@ -118,8 +118,11 @@ let _myBuilds = {};      // buildId -> build record (live from players/{uid}/bui
 let _myPlots = {};       // plotKey -> plot record (live from players/{uid}/plots)
 let _unsubs = [];
 let _finalizing = new Set();   // buildIds already being finalized (guard double-writes)
+let _paying = new Set();       // buildIds with a stage payment in flight (double-tap guard)
+let _buyingLand = false;       // land purchase in flight (double-tap guard)
 let _chipT = 0, _chkT = 0, _px = 0, _pz = 0;
 let _lastCompletedTold = new Set();
+let _chipSig = "";            // guards re-rendering the site chip every 0.5 s (tap-miss risk)
 
 // ---------- init ----------
 export function initBuilding({ scene, colliders, getState, getName, toast, updateHUD, celebrate }) {
@@ -187,7 +190,15 @@ async function _spend(price, reason) {
   const balRef = ref(db, "economy/" + _uid + "/balance");
   let before = null;
   try { before = (await get(balRef)).val(); } catch (e) {}
-  if (typeof before !== "number") return { ok: false, why: "broken" };
+  if (typeof before !== "number") {
+    // First money move on the server: bootstrap the wallet from the device
+    // balance — exactly what every legacy money move in main.js already does
+    // (travelToArea, _buyHouse, _upgradeHouse all push state.money up).
+    const s = _getState && _getState();
+    const local = Math.max(0, Math.min(999999999999, Math.floor((s && s.money) || 0)));
+    try { await set(balRef, local); } catch (e) { return { ok: false, why: "broken" }; }
+    before = local;
+  }
   if (before < price) return { ok: false, why: "broken", balance: before };   // cannot afford — nothing moved
   const next = before - price;
   try {
@@ -217,6 +228,15 @@ async function _refund(price) {
 
 // ---------- 1. BUY LAND ----------
 export async function buyPlot(areaId) {
+  if (_buyingLand) return;                              // double-tap: one purchase at a time
+  _buyingLand = true;
+  try {
+    await _buyPlotInner(areaId);
+  } finally {
+    _buyingLand = false;
+  }
+}
+async function _buyPlotInner(areaId) {
   const estate = estateFor(areaId);
   const area = getArea(areaId);
   if (!estate || !area) { _toast("Unknown area"); return; }
@@ -324,6 +344,15 @@ async function startProject() {
 
 // ---------- 4. PAY ONE STAGE ----------
 export async function payNextStage(buildId) {
+  if (_paying.has(buildId)) return;                     // double-tap guard: one payment at a time
+  _paying.add(buildId);
+  try {
+    await _payNextStageInner(buildId);
+  } finally {
+    _paying.delete(buildId);
+  }
+}
+async function _payNextStageInner(buildId) {
   // The local cache can lag the write by a beat (fresh project) — fall back to a
   // direct read so "confirm plan → pay foundation" never races its own snapshot.
   let b = _myBuilds[buildId];
@@ -465,6 +494,8 @@ export function tickBuilding(px, pz, dt) {
   tickBuildingVis(dt, px, pz);
 
   // 3) Context chip when you stand near a site (small, never blocking).
+  //    Same pattern as main.js npc-talk: show ONCE, re-render only when the
+  //    label actually changes (countdown tick) — never every half-second.
   _chipT -= dt;
   if (_chipT <= 0) {
     _chipT = 0.5;
@@ -474,40 +505,41 @@ export function tickBuilding(px, pz, dt) {
       if (d2 < bd) { bd = d2; best = st; }
     }
     if (best) _showSiteChip(best);
+    else if (_chipSig) { _chipSig = ""; }
   }
 }
 
 function _showSiteChip(st) {
   const at = new THREE.Vector3(st.x, 3.2, st.z);
   const getPlayer = () => ({ x: _px, z: _pz });
+  const key = "kb_" + st.key;
+  // Build the SAME content the chip would show, but only touch the DOM when it
+  // differs from what is already on screen (walking past a site must not reset
+  // the chip while the player aims at a button).
+  const b = _myBuilds[st.areaId + "_" + st.plotNo];
+  let title, actions, sigParts = [key];
   if (st.mine && !st.type) {
-    showContext({
-      key: "kb_" + st.key, at, title: "📌 " + st.areaName + " · Plot #" + st.plotNo, radius: 8, getPlayer,
-      actions: [{ icon: "📐", label: "Plan", run: () => window._kbPlanFor(st.areaId + "_" + st.plotNo) }],
-    });
+    title = "📌 " + st.areaName + " · Plot #" + st.plotNo; sigParts.push(title, "plan");
+    actions = [{ icon: "📐", label: "Plan", run: () => window._kbPlanFor(st.areaId + "_" + st.plotNo) }];
   } else if (st.mine) {
     const next = Math.min(4, st.stage + 1);
-    const b = _myBuilds[st.areaId + "_" + st.plotNo];
     const cost = b ? stageCostOf(b) : 0;
-    const actions = [];
-    if (st.active) actions.push({ icon: "⏳", label: fmtLeft(b), run: () => window.showApp("builds") });
-    else actions.push({ icon: "💰", label: "Pay ₦" + (cost / 1e6).toFixed(1) + "M", run: () => window._kbPay(st.areaId + "_" + st.plotNo) });
+    const left = b ? fmtLeft(b) : "";
+    if (st.active) { sigParts.push(title = "🏗️ " + STAGE_NAMES[st.stage] + " · " + left + " left", "t" + left); actions = [{ icon: "⏳", label: left, run: () => window.showApp("builds") }]; }
+    else { sigParts.push(title = "🏗️ " + STAGE_NAMES[st.stage] + " · dey wait money", "p" + cost); actions = [{ icon: "💰", label: "Pay ₦" + (cost / 1e6).toFixed(1) + "M", run: () => window._kbPay(st.areaId + "_" + st.plotNo) }]; }
     actions.push({ icon: "📋", label: "Projects", run: () => window.showApp("builds") });
-    showContext({
-      key: "kb_" + st.key, at, title: "🏗️ " + STAGE_NAMES[st.stage] + (st.active ? " · " + fmtLeft(b) + " left" : " · dey wait money"), radius: 8, getPlayer,
-      actions,
-    });
   } else if (!st.type) {
-    showContext({
-      key: "kb_" + st.key, at, title: "📌 " + st.ownerName + " get land for " + st.areaName, radius: 8, getPlayer,
-      actions: [{ icon: "👀", label: "Peep", run: () => _toast(st.ownerName + " don buy plot #" + st.plotNo + " for " + st.areaName + " — house go soon start.") }],
-    });
+    title = "📌 " + st.ownerName + " get land for " + st.areaName; sigParts.push(title);
+    actions = [{ icon: "👀", label: "Peep", run: () => _toast(st.ownerName + " don buy plot #" + st.plotNo + " for " + st.areaName + " — house go soon start.") }];
   } else {
-    showContext({
-      key: "kb_" + st.key, at, title: "🏗️ " + st.ownerName + " dey build " + (st.stageName || "house") + " for " + st.areaName, radius: 8, getPlayer,
-      actions: [{ icon: "👀", label: "Peep", run: () => _toast(st.ownerName + " dey build " + (typeFor(st.type)?.name || "house") + " (" + st.rooms + " rooms) — contractor: " + st.contractor) }],
-    });
+    title = "🏗️ " + st.ownerName + " dey build " + (st.stageName || "house") + " for " + st.areaName; sigParts.push(title);
+    actions = [{ icon: "👀", label: "Peep", run: () => _toast(st.ownerName + " dey build " + (typeFor(st.type)?.name || "house") + " (" + st.rooms + " rooms) — contractor: " + st.contractor) }];
   }
+  const sig = sigParts.join("|");
+  if (sig === _chipSig && isContextShown(key)) return;
+  if (_chipSig && _chipSig.split("|")[0] !== key) hideContext();   // switched site — drop the old chip
+  _chipSig = sig;
+  showContext({ key, at, title, radius: 8, getPlayer, actions });
 }
 
 // ---------- PHONE APP (🧱 Build) ----------
@@ -607,11 +639,15 @@ export function renderBuildsApp() {
     const area = getArea(e.areaId);
     const owned = Object.values(_myPlots).filter(p => p.area === e.areaId).length;
     const canAfford = (s.money || 0) >= e.landPrice;
+    // Real free-slot count from the (already subscribed) houses cache — falls
+    // back to the full 6 while the area has never streamed in.
+    const housesHere = area ? (getAreaHouses(e.areaId) || {}) : {};
+    const free = area ? buildSlotNos(area).filter(no => { const r = housesHere[no]; return !r || !r.ownerUid; }).length : SLOTS_PER_ESTATE;
     h += '<div style="display:flex;align-items:center;gap:8px;padding:9px;background:#17181b;border-radius:10px;margin-bottom:5px;">' +
       '<div style="flex:1;"><div style="font-size:12px;font-weight:600;color:#f2f2f4;">' + (e.tier === "rich" ? "💎" : "🏘️") + ' ' + e.name + (owned ? ' <span style="color:#4ade80;font-size:10px;">· you get ' + owned + ' plot' + (owned > 1 ? 's' : '') + '</span>' : '') + '</div>' +
       '<div style="font-size:10px;color:#9b9ba4;">' + e.desc + '</div>' +
-      '<div style="font-size:11px;color:#f2b134;font-weight:700;margin-top:2px;">₦' + e.landPrice.toLocaleString() + ' · plot ' + (area ? buildSlotNos(area).length : SLOTS_PER_ESTATE) + ' left</div></div>' +
-      (canAfford
+      '<div style="font-size:11px;color:' + (free > 0 ? "#f2b134" : "#e11d48") + ';font-weight:700;margin-top:2px;">₦' + e.landPrice.toLocaleString() + ' · ' + (free > 0 ? (free + ' plot' + (free > 1 ? 's' : '') + ' left') : 'land don finish 😢') + '</div></div>' +
+      (canAfford && free > 0
         ? '<button onclick="window._kbBuyLand(\'' + e.areaId + '\')" style="background:#f2b134;color:#000;border:none;border-radius:8px;padding:9px 12px;cursor:pointer;font-size:11px;font-weight:700;">Buy</button>'
         : '<span style="font-size:10px;color:#6b7280;">₦' + e.landPrice.toLocaleString() + '</span>') +
       '</div>';

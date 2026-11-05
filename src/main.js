@@ -2183,6 +2183,24 @@ window.travelToArea=(areaId)=>{
   closePhone?.();
   toast("🛺 Welcome to " + a.name + " (−₦" + AREA_TRAVEL_FARE + ")");
 };
+// BUILDING: "See site" in the 🧱 Build app — drop a map pin on the exact plot and
+// take the player there (keke fare only when the area itself is far away).
+window._travelTo=(areaId, plotNo)=>{
+  try {
+    const area = getArea(areaId); if (!area) return;
+    const pos = getPlotPosition(area, plotNo || 0);
+    const dx = player.pos.x - area.x, dz = player.pos.z - area.z;
+    const far = dx * dx + dz * dz > 220 * 220;
+    closePhone?.();
+    if (far) {
+      window.travelToArea(areaId);          // pays the normal keke fare + teleports to the area road
+      if (getActivePlace()) return;         // travel refused (inside a building) — leave pin alone
+    }
+    window._markedDest = { x: pos.x, z: pos.z, label: "🏗️ Build site" };
+    window._rideDest = "";
+    toast("📍 Pin don drop for the site — follow am (or tap 🗺️ Map → Ride here).");
+  } catch (e) { console.warn("[building] travel failed:", e); }
+};
 window.travelToPlace=(placeId)=>{
   // Called from the map app: open the ride app with this place preselected
   toast("Opening travel to " + (getPlace(placeId)?.name || placeId) + "...");
