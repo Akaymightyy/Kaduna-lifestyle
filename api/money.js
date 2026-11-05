@@ -41,7 +41,7 @@ const CAPS = {
   referral: 200_000,
 };
 const DAILY_GAIN_CAP = 100_000_000;   // total credits per player per day
-const BAL_CAP = 999_999_999;
+const BAL_CAP = 999_999_999_999;
 
 // ---- in-memory rate limit (best effort per lambda instance) ----
 const _hits = new Map();
@@ -201,6 +201,23 @@ export default async function handler(req, res) {
       }
       const bal = await dbGet(balPath0(uid));
       return res.status(200).send(JSON.stringify({ ok: true, balance: typeof bal === "number" ? bal : 0, rejected: rejected.length ? rejected : undefined }));
+    }
+
+    // ---- transfer: move money player -> player (only the server can credit another wallet) ----
+    if (body.action === "transfer") {
+      const to = String(body.to || "");
+      const amt = Math.floor(Number(body.amount) || 0);
+      if (!to || to === uid || to.length > 128 || /[.#$/\[\]]/.test(to)) return res.status(200).send(JSON.stringify({ ok: false, error: "bad-target" }));
+      if (amt <= 0 || amt > 10_000_000) return res.status(200).send(JSON.stringify({ ok: false, error: "bad-amount" }));
+      const out = await applyDelta(uid, -amt, { skipCap: true });
+      if (!out.ok) return res.status(200).send(JSON.stringify({ ok: false, error: out.why || "failed", balance: out.balance }));
+      const inn = await applyDelta(to, amt, { skipCap: true });
+      if (!inn.ok) {
+        await applyDelta(uid, amt, { skipCap: true });            // refund the sender
+        return res.status(200).send(JSON.stringify({ ok: false, error: "recipient-" + (inn.why || "failed") }));
+      }
+      try { await dbPatch(`/transfers/${_pushId()}`, { from: uid, to, amount: amt, ts: Date.now() }); } catch (e) {}
+      return res.status(200).send(JSON.stringify({ ok: true, balance: out.balance }));
     }
 
     return res.status(200).send(JSON.stringify({ ok: false, error: "action" }));
