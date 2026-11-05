@@ -9,11 +9,34 @@ export function initMessages(uid, name, toast, onUpdate) {
   _uid = uid; _name = name || "Player"; _toast = toast; _onUpdate = onUpdate;
   _unsubUserChats = onValue(ref(db, "userChats/" + uid), (snap) => { _userChats = snap.val() || {}; _onUpdate?.(); _resolveMissingProfiles(); });
   _ensureMyProfile(uid, name);
+  _listenMoneyInbox(uid);
   const pRef = ref(db, "presence/" + uid);
   update(pRef, { online: true, lastSeen: Date.now() });
   onDisconnect(pRef).update({ online: false, lastSeen: serverTimestamp() });
 }
 
+
+// Incoming transfers: the sender drops a note in economy/{me}/inbox (rules let anyone add one,
+// only me read/delete it). I claim each note once and credit my own balance. No server needed.
+let _inboxUnsub = null;
+function _listenMoneyInbox(uid) {
+  try { _inboxUnsub?.(); } catch (e) {}
+  _inboxUnsub = onValue(ref(db, "economy/" + uid + "/inbox"), (snap) => {
+    const items = snap.val() || {};
+    for (const id of Object.keys(items)) _claimInbox(uid, id);
+  });
+}
+async function _claimInbox(uid, id) {
+  try {
+    let amt = 0;
+    const itemRef = ref(db, "economy/" + uid + "/inbox/" + id);
+    const t = await runTransaction(itemRef, (cur) => { amt = 0; if (!cur || typeof cur.amount !== "number") return; amt = cur.amount; return null; });
+    if (!t.committed || !(amt > 0)) return;
+    const b = await runTransaction(ref(db, "economy/" + uid + "/balance"), (cur) => (cur || 0) + amt);
+    adoptMoney(b.snapshot.val() || 0, undefined, true);
+    _toast?.("💸 You received ₦" + amt.toLocaleString());
+  } catch (e) { /* retried next time the inbox changes */ }
+}
 
 // Older accounts were created before the public profile existed, so nobody could find them in search.
 // On every login make sure userProfiles/{uid} and the usernames/{name} claim exist (cheap: 1-2 reads).
@@ -279,7 +302,7 @@ export async function sendMoney(chatId, toUid, amount, note, gameState) {
   let senderOk = false;
   try { await runTransaction(senderBalRef, (cur) => { const bal = cur || 0; if (bal < amount) return; senderOk = true; return bal - amount; }); } catch (e) { return { ok: false, msg: "Transfer failed" }; }
   if (!senderOk) return { ok: false, msg: "Insufficient balance" };
-  try { await runTransaction(ref(db, "economy/" + toUid + "/balance"), (cur) => (cur || 0) + amount); } catch (e) {}
+  try { await set(push(ref(db, "economy/" + toUid + "/inbox")), { from: _uid, amount, ts: now }); } catch (e) { await runTransaction(senderBalRef, (cur) => (cur || 0) + amount); return { ok: false, msg: "Transfer failed" }; }
   const logRef = push(ref(db, "transfers"));
   await set(logRef, { from: _uid, to: toUid, amount, ts: now, note: note || "" });
   await sendMessage(chatId, note || "Money transfer", "money", amount);
