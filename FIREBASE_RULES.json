@@ -23,10 +23,10 @@
       ".read": "auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
       "$uid": {
         ".read": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
-        ".write": false,
+        ".write": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
         "balance": {
           ".read": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
-          ".write": false,
+          ".write": "auth.uid === $uid || auth.uid === '6U87PzWq0dU8qwZeXJo7ySLxOFo1'",
           ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 999999999"
         },
         "log": {
