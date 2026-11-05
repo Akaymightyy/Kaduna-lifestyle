@@ -16,6 +16,80 @@
         "vehicles": {
           ".read": "auth.uid === $uid",
           ".write": "auth.uid === $uid"
+        },
+        "builds": {
+          ".read": "auth.uid === $uid",
+          "$buildId": {
+            ".write": "auth.uid === $uid",
+            ".validate": "newData.hasChildren(['plotId', 'area', 'type', 'stage', 'createdAt'])",
+            "plotId": {
+              ".validate": "newData.isString() && newData.val().length <= 64"
+            },
+            "area": {
+              ".validate": "newData.isString() && newData.val().length <= 32"
+            },
+            "plotNo": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 999"
+            },
+            "type": {
+              ".validate": "newData.isString() && newData.val().length <= 24"
+            },
+            "rooms": {
+              ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 5"
+            },
+            "contractorId": {
+              ".validate": "newData.isString() && newData.val().length <= 32"
+            },
+            "stage": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 4"
+            },
+            "stageStartedAt": {
+              ".validate": "newData.isNumber() && newData.val() >= 0"
+            },
+            "stageDuration": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 604800000"
+            },
+            "paidStages": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 4"
+            },
+            "quality": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1"
+            },
+            "createdAt": {
+              ".validate": "newData.isNumber()"
+            },
+            "done": {
+              ".validate": "newData.isBoolean()"
+            },
+            "finishedAt": {
+              ".validate": "newData.isNumber()"
+            },
+            "builtBy": {
+              ".validate": "newData.isString() && newData.val().length <= 48"
+            }
+          }
+        },
+        "plots": {
+          ".read": "auth.uid === $uid",
+          "$plotId": {
+            ".write": "auth.uid === $uid",
+            ".validate": "newData.hasChildren(['area', 'plotNo'])",
+            "area": {
+              ".validate": "newData.isString() && newData.val().length <= 32"
+            },
+            "areaName": {
+              ".validate": "newData.isString() && newData.val().length <= 32"
+            },
+            "plotNo": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 999"
+            },
+            "price": {
+              ".validate": "newData.isNumber() && newData.val() >= 0"
+            },
+            "boughtAt": {
+              ".validate": "newData.isNumber()"
+            }
+          }
         }
       }
     },
@@ -128,6 +202,32 @@
           },
           "party": {
             ".write": "auth != null && root.child('houses/' + $areaId + '/' + $plotNo + '/ownerUid').val() === auth.uid"
+          },
+          "build": {
+            ".read": "auth != null",
+            ".write": "auth != null && root.child('houses/' + $areaId + '/' + $plotNo + '/ownerUid').val() === auth.uid",
+            ".validate": "newData.hasChildren(['stage'])",
+            "type": {
+              ".validate": "newData.isString() && newData.val().length <= 24"
+            },
+            "rooms": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 5"
+            },
+            "stage": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 4"
+            },
+            "stageStartedAt": {
+              ".validate": "newData.isNumber() && newData.val() >= 0"
+            },
+            "stageDuration": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 604800000"
+            },
+            "paidStages": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 4"
+            },
+            "contractor": {
+              ".validate": "newData.isString() && newData.val().length <= 48"
+            }
           }
         }
       }
