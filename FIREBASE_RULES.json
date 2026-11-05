@@ -99,6 +99,63 @@
               ".validate": "newData.isNumber()"
             }
           }
+        },
+        "crew": {
+          ".read": "auth.uid === $uid",
+          ".write": "auth.uid === $uid",
+          ".validate": "newData.hasChildren(['crewId'])",
+          "crewId": {
+            ".validate": "newData.isString() && newData.val().length >= 2 && newData.val().length <= 40"
+          },
+          "name": {
+            ".validate": "newData.isString() && newData.val().length <= 24"
+          },
+          "tag": {
+            ".validate": "newData.isString() && newData.val().length <= 5"
+          },
+          "role": {
+            ".validate": "newData.isString() && newData.val().length <= 10"
+          },
+          "color": {
+            ".validate": "newData.isString() && newData.val().length <= 9"
+          }
+        },
+        "crewTag": {
+          ".read": "auth != null",
+          ".write": "auth.uid === $uid",
+          ".validate": "newData.isString() && newData.val().length >= 2 && newData.val().length <= 7"
+        },
+        "cred": {
+          ".read": "auth != null",
+          ".write": "auth.uid === $uid",
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10000000 && (!data.exists() || newData.val() >= data.val())"
+        },
+        "crewDaily": {
+          ".read": "auth.uid === $uid",
+          "$day": {
+            ".write": "auth.uid === $uid",
+            ".validate": "newData.child('ts').isNumber()",
+            "ts": {
+              ".validate": "newData.isNumber()"
+            },
+            "deposit": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100000000000 && (!data.exists() || newData.val() >= data.val())"
+            },
+            "zoneMin": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 600 && (!data.exists() || newData.val() >= data.val())"
+            },
+            "zonePts": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000 && (!data.exists() || newData.val() >= data.val())"
+            },
+            "race": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100 && (!data.exists() || newData.val() >= data.val())"
+            },
+            "claimed": {
+              "$chId": {
+                ".validate": "newData.isNumber()"
+              }
+            }
+          }
         }
       }
     },
@@ -438,6 +495,167 @@
         },
         "winner": {
           ".write": "auth != null"
+        }
+      }
+    },
+    "crews": {
+      ".read": "auth != null",
+      "$crewId": {
+        ".write": "auth != null && (!data.exists() ? newData.child('leader').val() === auth.uid : root.child('crewMembers/' + $crewId + '/' + auth.uid).exists())",
+        "name": {
+          ".validate": "newData.isString() && newData.val().length >= 3 && newData.val().length <= 24"
+        },
+        "tag": {
+          ".validate": "newData.isString() && newData.val().length >= 2 && newData.val().length <= 5"
+        },
+        "color": {
+          ".validate": "newData.isString() && newData.val().length <= 9"
+        },
+        "desc": {
+          ".validate": "newData.isString() && newData.val().length <= 140"
+        },
+        "leader": {
+          ".write": "auth != null && root.child('crewMembers/' + $crewId + '/' + auth.uid + '/role').val() === 'leader'",
+          ".validate": "newData.isString()"
+        },
+        "leaderName": {
+          ".validate": "newData.isString() && newData.val().length <= 32"
+        },
+        "level": {
+          ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 50"
+        },
+        "xp": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100000000"
+        },
+        "bank": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 999999999999 && (!data.exists() || newData.val() >= data.val() || root.child('crewMembers/' + $crewId + '/' + auth.uid + '/role').val() === 'leader' || root.child('crewMembers/' + $crewId + '/' + auth.uid + '/role').val() === 'coleader')"
+        },
+        "power": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000000000"
+        },
+        "membersCount": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 40"
+        },
+        "totalContributed": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000000000000"
+        },
+        "warTarget": {
+          ".write": "auth != null && (root.child('crewMembers/' + $crewId + '/' + auth.uid + '/role').val() === 'leader' || root.child('crewMembers/' + $crewId + '/' + auth.uid + '/role').val() === 'coleader')",
+          ".validate": "newData.isString() && newData.val().length <= 24"
+        },
+        "createdAt": {
+          ".validate": "newData.isNumber()"
+        }
+      }
+    },
+    "crewMembers": {
+      ".read": "auth != null",
+      "$crewId": {
+        "$uid": {
+          ".write": "auth != null && (auth.uid === $uid || root.child('crewMembers/' + $crewId + '/' + auth.uid + '/role').val() === 'leader' || (root.child('crewMembers/' + $crewId + '/' + auth.uid + '/role').val() === 'coleader' && data.child('role').val() === 'member'))",
+          ".validate": "newData.hasChildren(['name', 'role', 'joinedAt'])",
+          "name": {
+            ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 32"
+          },
+          "role": {
+            ".write": "auth != null && (root.child('crewMembers/' + $crewId + '/' + auth.uid + '/role').val() === 'leader' || (root.child('crewMembers/' + $crewId + '/' + auth.uid + '/role').val() === 'coleader' && data.val() === 'member'))",
+            ".validate": "newData.isString() && newData.val().length <= 10"
+          },
+          "joinedAt": {
+            ".validate": "newData.isNumber()"
+          },
+          "contributed": {
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100000000000 && (!data.exists() || newData.val() >= data.val())"
+          },
+          "cred": {
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10000000 && (!data.exists() || newData.val() >= data.val())"
+          },
+          "weeklyPts": {
+            ".write": "auth != null && auth.uid === $uid",
+            ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000000"
+          }
+        }
+      }
+    },
+    "crewNames": {
+      ".read": "auth != null",
+      "$name": {
+        ".write": "auth != null && !data.exists()",
+        ".validate": "newData.isString() && newData.val().length >= 2 && newData.val().length <= 80"
+      }
+    },
+    "crewTags": {
+      ".read": "auth != null",
+      "$tag": {
+        ".write": "auth != null && !data.exists()",
+        ".validate": "newData.isString() && newData.val().length >= 2 && newData.val().length <= 5"
+      }
+    },
+    "crewChat": {
+      "$crewId": {
+        ".read": "auth != null && root.child('crewMembers/' + $crewId + '/' + auth.uid).exists()",
+        "$msgId": {
+          ".write": "auth != null && root.child('crewMembers/' + $crewId + '/' + auth.uid).exists() && !data.exists()",
+          ".validate": "newData.child('uid').val() === auth.uid && newData.child('name').isString() && newData.child('name').val().length >= 1 && newData.child('name').val().length <= 30 && newData.child('text').isString() && newData.child('text').val().length > 0 && newData.child('text').val().length <= 400 && newData.child('ts').isNumber()"
+        }
+      }
+    },
+    "territory": {
+      ".read": "auth != null",
+      "$areaId": {
+        ".write": "auth != null && (!data.exists() || newData.child('week').val() !== data.child('week').val())",
+        "crewId": {
+          ".validate": "newData.isString() && newData.val().length <= 40"
+        },
+        "crewName": {
+          ".validate": "newData.isString() && newData.val().length <= 24"
+        },
+        "tag": {
+          ".validate": "newData.isString() && newData.val().length <= 5"
+        },
+        "color": {
+          ".validate": "newData.isString() && newData.val().length <= 9"
+        },
+        "since": {
+          ".validate": "newData.isNumber()"
+        },
+        "week": {
+          ".validate": "newData.isString() && newData.val().length <= 12"
+        },
+        "resolvedWeek": {
+          ".validate": "newData.isString() && newData.val().length <= 12"
+        },
+        "war": {
+          "$week": {
+            "$crewId": {
+              ".write": "auth != null && root.child('crewMembers/' + $crewId + '/' + auth.uid).exists()",
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100000000 && (!data.exists() || newData.val() > data.val()) && (!data.exists() || newData.val() - data.val() <= 5000)"
+            }
+          }
+        },
+        "cooldowns": {
+          "$crewId": {
+            ".write": "auth != null && root.child('crewMembers/' + $crewId + '/' + auth.uid).exists()",
+            ".validate": "newData.isNumber()"
+          }
+        },
+        "claims": {
+          "$day": {
+            "$uid": {
+              ".write": "auth != null && auth.uid === $uid && !data.exists() && root.child('players/' + auth.uid + '/crew/crewId').val() === root.child('territory/' + $areaId + '/crewId').val()",
+              ".validate": "newData.hasChildren(['amount', 'ts']) && newData.child('amount').isNumber() && newData.child('amount').val() >= 1000 && newData.child('amount').val() <= 500000 && newData.child('ts').isNumber()"
+            }
+          }
+        },
+        "rewards": {
+          "$week": {
+            "$uid": {
+              ".write": "auth != null && auth.uid === $uid && !data.exists() && root.child('players/' + auth.uid + '/crew/crewId').val() === root.child('territory/' + $areaId + '/crewId').val()",
+              ".validate": "newData.hasChildren(['amount', 'ts']) && newData.child('amount').isNumber() && newData.child('amount').val() >= 1000 && newData.child('amount').val() <= 500000 && newData.child('ts').isNumber()"
+            }
+          }
         }
       }
     },
