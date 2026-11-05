@@ -202,39 +202,51 @@ function loadAdminPlayers() {
 
   // Subscribe to both players and economy in one go for richer rendering
   let _playersCache = {}, _economyCache = {};
+  // 🛡 (Nov 5 fix): "searching then it goes back to all members" — the live listeners
+  // below used to re-render the FULL cache on every Firebase update, wiping out
+  // whatever search/sort the admin had applied. Now the active query + sort are
+  // remembered and reapplied every time fresh data comes in.
+  _adminQuery = ""; _adminSort = null;
   const tryRender = () => {
     window._adminPlayersCache = _playersCache;
     window._adminEconomyCache = _economyCache;
-    renderPlayerList(_playersCache);
+    renderPlayerList(_applyAdminFilter(_playersCache));
   };
   onValue(ref(db, "players"), (snap) => { _playersCache = snap.val() || {}; tryRender(); });
   onValue(ref(db, "economy"), (snap) => { _economyCache = snap.val() || {}; tryRender(); });
 }
 
-window.adminSearchPlayers = function(query) {
-  const players = window._adminPlayersCache || {};
-  if (!query) { renderPlayerList(players); return; }
-  const q = query.toLowerCase();
-  const filtered = {};
-  for (const [uid, p] of Object.entries(players)) {
-    if ((p.name || "").toLowerCase().includes(q) || uid.toLowerCase().includes(q)) {
-      filtered[uid] = p;
+let _adminQuery = "", _adminSort = null;
+function _applyAdminFilter(players) {
+  let out = players;
+  if (_adminQuery) {
+    const q = _adminQuery.toLowerCase(), filtered = {};
+    for (const [uid, p] of Object.entries(out)) {
+      if ((p.name || "").toLowerCase().includes(q) || uid.toLowerCase().includes(q)) filtered[uid] = p;
     }
+    out = filtered;
   }
-  renderPlayerList(filtered);
+  if (_adminSort) {
+    const eco = window._adminEconomyCache || {};
+    const sorted = Object.entries(out).sort(([ua, pa], [ub, pb]) => {
+      if (_adminSort === "name") return (pa.name || "").localeCompare(pb.name || "");
+      if (_adminSort === "money") return (eco[ub]?.balance || 0) - (eco[ua]?.balance || 0);
+      if (_adminSort === "recent") return (pb.ts || 0) - (pa.ts || 0);
+      return 0;
+    });
+    out = Object.fromEntries(sorted);
+  }
+  return out;
+}
+
+window.adminSearchPlayers = function(query) {
+  _adminQuery = query || "";
+  renderPlayerList(_applyAdminFilter(window._adminPlayersCache || {}));
 };
 
 window.adminSortBy = function(field) {
-  const players = window._adminPlayersCache || {};
-  const eco = window._adminEconomyCache || {};
-  const sorted = Object.entries(players).sort(([ua,pa],[ub,pb]) => {
-    if (field === "name") return (pa.name||"").localeCompare(pb.name||"");
-    if (field === "money") return (eco[ub]?.balance||0) - (eco[ua]?.balance||0);
-    if (field === "recent") return (pb.ts||0) - (pa.ts||0);
-    return 0;
-  });
-  const obj = Object.fromEntries(sorted);
-  renderPlayerList(obj);
+  _adminSort = field;
+  renderPlayerList(_applyAdminFilter(window._adminPlayersCache || {}));
 };
 
 function renderPlayerList(players) {
@@ -254,6 +266,9 @@ function renderPlayerList(players) {
         <div style="font-size:10px;color:#6b7280;">UID: ${uid.slice(0,16)}… · ₦${bal.toLocaleString()}${p.suspended?' · 🔇 SUSPENDED':''}${p.banned?' · ⛔ BANNED':''}</div>
       </div>
       <button onclick="window.adminEditPlayer('${uid}')" style="background:#374151;color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;">Edit</button>
+      ${p.suspended
+        ? `<button onclick="window.adminUnsuspendPlayer('${uid}')" style="background:#16a34a;color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;">Lift</button>`
+        : `<button onclick="window.adminSuspendPlayer('${uid}')" style="background:#f59e0b;color:#000;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;">Suspend</button>`}
       ${p.banned
         ? `<button onclick="window.adminUnbanPlayer('${uid}')" style="background:#16a34a;color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;">Unban</button>`
         : `<button onclick="window.adminBanPlayer('${uid}')" style="background:#e11d48;color:#fff;border:none;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:11px;">Ban</button>`}
@@ -312,22 +327,45 @@ window.adminEditPlayer = async function(uid) {
     loadAdminPlayers(); // refresh list
   };
   modal.querySelector("#admin-edit-kick").onclick = async () => {
-    await remove(ref(db, "players/" + uid));
-    toast("👢 " + name + " disconnected.");
+    if (!confirm("Kick " + name + "? They will be disconnected from the live world right now — their account, cars, house and money are NOT touched, and they can log back in.")) return;
+    // 🛡 (Nov 5 fix): this used to delete players/{uid} — their whole save (name, look,
+    // vehicles, house link). That is unrecoverable once gone. Kick now only removes
+    // their LIVE presence, which force-disconnects them without touching their save.
+    await remove(ref(db, "live/" + uid)).catch(() => {});
+    await remove(ref(db, "presence/" + uid)).catch(() => {});
+    toast("👢 " + name + " disconnected from the live world.");
     modal.remove();
     loadAdminPlayers();
   };
 };
 
 window.adminBanPlayer = async function(uid) {
-  if (!confirm("Ban this player? They will be blocked from playing.")) return;
-  await update(ref(db, "players/" + uid), { banned: true });
-  toast("Player banned.");
+  if (!confirm("Ban this player PERMANENTLY? They will be fully blocked from playing until you unban them — use this for serious cases, not a first warning.")) return;
+  await update(ref(db, "players/" + uid), { banned: true, bannedAt: Date.now() });
+  await remove(ref(db, "live/" + uid)).catch(() => {});
+  toast("⛔ Player banned.");
+  loadAdminPlayers();
 };
 window.adminUnbanPlayer = async function(uid) {
   if (!confirm("Unban this player?")) return;
-  await update(ref(db, "players/" + uid), { banned: false });
+  await update(ref(db, "players/" + uid), { banned: false, bannedAt: null });
   toast("Player unbanned.");
+  loadAdminPlayers();
+};
+// SUSPEND (Nov 5): a lighter, temporary block — the account signs back in to a
+// "you are suspended" screen (no play) but nothing is deleted or permanent.
+window.adminSuspendPlayer = async function(uid) {
+  if (!confirm("Suspend this player? They will be blocked from playing until you lift it — good for a warning or a short timeout.")) return;
+  await update(ref(db, "players/" + uid), { suspended: true, suspendedAt: Date.now() });
+  await remove(ref(db, "live/" + uid)).catch(() => {});
+  toast("🔇 Player suspended.");
+  loadAdminPlayers();
+};
+window.adminUnsuspendPlayer = async function(uid) {
+  if (!confirm("Lift this player's suspension?")) return;
+  await update(ref(db, "players/" + uid), { suspended: false, suspendedAt: null });
+  toast("Player unsuspended.");
+  loadAdminPlayers();
 };
 
 // ---- Economy ----
