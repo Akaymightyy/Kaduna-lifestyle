@@ -136,7 +136,7 @@ export async function sellVehicle(vehicleId, gameState, toast) {
       if (!viaApi.ok) { toast?.("Sell failed — try again"); if (typeof viaApi.balance === "number") { adoptMoney(viaApi.balance, gameState, true); } return false; }
       newBal = viaApi.balance;
     } else {
-      const txn = await runTransaction(ref(db, "economy/" + _uid + "/balance"), (cur) => Math.min(999999999, (cur || 0) + price));
+      const txn = await runTransaction(ref(db, "economy/" + _uid + "/balance"), (cur) => Math.min(999999999999, (cur || 0) + price));
       if (!txn.committed) { toast?.("Sell failed — try again"); return false; }
       newBal = txn.snapshot.val() || 0;
     }

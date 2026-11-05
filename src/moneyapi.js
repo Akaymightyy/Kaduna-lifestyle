@@ -72,7 +72,7 @@ export function installMoneyGuard(game, opts = {}) {
         _scheduleFlush();
       }
       _trusted = false;
-      _m = Math.max(0, Math.min(999999999, v));
+      _m = Math.max(0, Math.min(999999999999, v));
     },
   });
   s.__moneyGuarded = true;
@@ -221,6 +221,21 @@ async function _direct(delta, reason) {
       return { ok: true, balance: j.balance };
     }
     return null;
+  } catch (e) { return null; }
+}
+
+// Player -> player transfer. Returns null when the API is not deployed.
+export async function serverTransfer(toUid, amount) {
+  if (!auth?.currentUser) return null;
+  const ok = await probeMoneyApi();
+  if (!ok) return null;
+  const token = await _idToken();
+  if (!token) return null;
+  try {
+    const r = await fetch(API, { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ idToken: token, action: "transfer", to: toUid, amount }) });
+    const j = await r.json().catch(() => null);
+    return j || null;
   } catch (e) { return null; }
 }
 

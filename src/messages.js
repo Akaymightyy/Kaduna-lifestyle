@@ -1,5 +1,6 @@
 // src/messages.js — Messages app: DMs, groups, search users, send money.
 import { db } from "./firebase.js";
+import { serverTransfer, adoptMoney } from "./moneyapi.js";
 import { ref, get, set, update, push, onValue, query, limitToLast, runTransaction, onDisconnect, serverTimestamp, increment } from "firebase/database";
 
 let _uid = null, _name = "Player", _userChats = {}, _openChatId = null, _unsubOpenChat = null, _unsubUserChats = null, _onUpdate = null, _toast = null, _lastMsgTime = 0;
@@ -263,6 +264,17 @@ export async function sendMoney(chatId, toUid, amount, note, gameState) {
   _transferTimes = _transferTimes.filter(t => now - t < 60000);
   if (_transferTimes.length >= MAX_TRANSFERS_PER_MIN) return { ok: false, msg: "Too many transfers. Wait a minute." };
   if ((gameState.money || 0) < amount) return { ok: false, msg: "Insufficient balance" };
+  const viaApi = await serverTransfer(toUid, amount);
+  if (viaApi) {
+    if (!viaApi.ok) {
+      if (typeof viaApi.balance === "number") adoptMoney(viaApi.balance, gameState, true);
+      return { ok: false, msg: viaApi.error === "insufficient" ? "Insufficient balance" : "Transfer failed (" + (viaApi.error || "server") + ")" };
+    }
+    adoptMoney(viaApi.balance, gameState, true);
+    try { await sendMessage(chatId, note || "Money transfer", "money", amount); } catch (e) {}
+    _transferTimes.push(now);
+    return { ok: true, msg: "💸 Sent ₦" + amount.toLocaleString() };
+  }
   const senderBalRef = ref(db, "economy/" + _uid + "/balance");
   let senderOk = false;
   try { await runTransaction(senderBalRef, (cur) => { const bal = cur || 0; if (bal < amount) return; senderOk = true; return bal - amount; }); } catch (e) { return { ok: false, msg: "Transfer failed" }; }

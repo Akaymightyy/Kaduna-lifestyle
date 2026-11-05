@@ -18,7 +18,7 @@ export async function addMoney(uid, amount, reason) {
       if (newBal < 0) return; // reject — can't go negative
       // 🛡 (Oct 25): hard ceiling matching FIREBASE_RULES.json — no wallet
       // ever holds more than ₦999,999,999 (minted billions stay out).
-      if (newBal > 999999999) return;
+      if (newBal > 999999999999) return;
       return newBal;
     });
     // Log the transaction
