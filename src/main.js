@@ -52,6 +52,9 @@ import { initBuilding, buildingSetUid, tickBuilding, renderBuildsApp, startBuild
 import { initCrewSystems, crewSetUid, tickCrewSystems, renderCrewApp, startCrewAppRefresher } from "./crew_app.js";
 import { mapOverlay as crewMapOverlay, crewArea as crewAreaById, ownerOf as crewOwnerOf, crewPriceFactor } from "./territory.js";
 import { myCrewId as crewMyCrewId } from "./crews.js";
+// LETTERS & TIME CAPSULES (Feature 1): bury letters with cash gifts, unlock by
+// days or by a named friend coming near. 3D mounds + context chip + 📬 phone app.
+import { initCapsules, capsulesSetUid, tickCapsules, renderCapsuleApp, startCapsuleAppRefresher } from "./capsules.js";
 import { initSpyMissions, getSpyMissions, getMyUnlockTag } from "./spy_missions.js";
 import { initSpyMissionsUI, renderSpyMissionsApp, openMission as openSpyMission } from "./spy_mission_ui.js";
 import { initMoneyHunt, tickMoneyHunt, getHuntStats, getNearestSpot, getAllSpotsWithState, claimSpot, triggerMoneyRain } from "./moneyhunt.js";
@@ -619,6 +622,10 @@ startBuildsAppRefresher();
 // data hooks run in crewSetUid() inside the auth handler below.
 initCrewSystems({ scene, colliders: world.colliders, getState: () => game.state, getName: getMyName, toast, updateHUD: () => updateHUD(), celebrate });
 startCrewAppRefresher();
+// LETTERS & TIME CAPSULES: one listener on the public meta node + 3D mounds.
+// Per-login hooks run in capsulesSetUid() inside the auth handler below.
+initCapsules({ scene, getState: () => game.state, getName: getMyName, toast, updateHUD: () => updateHUD(), celebrate });
+startCapsuleAppRefresher();
 let _activeMission = null;
 
 // ---- day/night (real cycle, not forced daytime) ----
@@ -965,6 +972,7 @@ function _showPhoneApp(appId) {
       {id:"realestate",icon:"🏡",label:"Houses"},
       {id:"builds",icon:"🧱",label:"Build"},
       {id:"crew",icon:"🛡️",label:"Crew"},
+      {id:"capsule",icon:"📬",label:"Letters"},
       {id:"homestore",icon:"🛋️",label:"HomeStore"},
       {id:"storage",icon:"📦",label:"Storage"},
       {id:"hunt",icon:"💎",label:"Hunt"},
@@ -988,7 +996,7 @@ function _showPhoneApp(appId) {
       {id:"settings",icon:"⚙️",label:"Settings"}
     ];
     if(isAdmin()) apps.push({id:"admin",icon:"🔐",label:"Admin"});
-    const COL={food:["#f59e0b","#f97316"],jobs:["#8b5cf6","#6366f1"],bank:["#3b82f6","#2563eb"],ride:["#10b981","#059669"],cars:["#6366f1","#4f46e5"],map:["#06b6d4","#0891b2"],daily:["#ec4899","#db2777"],health:["#ef4444","#dc2626"],richlist:["#f59e0b","#d97706"],profile:["#6366f1","#4f46e5"],events:["#d946ef","#c026d3"],news:["#64748b","#475569"],boutique:["#d946ef","#a855f7"],myoutfits:["#f97316","#ea580c"],wardrobe:["#14b8a6","#0d9488"],contacts:["#6366f1","#818cf8"],wallet:["#f59e0b","#d97706"],tunes:["#a855f7","#9333ea"],gallery:["#06b6d4","#0891b2"],invest:["#10b981","#059669"],settings:["#64748b","#475569"],admin:["#ef4444","#b91c1c"],hunt:["#f2b134","#d97706"],missions:["#dc2626","#b91c1c"],realestate:["#16a34a","#15803d"],builds:["#b45309","#78350f"],crew:["#7f1d1d","#e11d48"],homestore:["#ea580c","#c2410c"],storage:["#0891b2","#0e7490"],messages:["#22c55e","#16a34a"],nepa:["#facc15","#ca8a04"],company:["#1e40af","#1e3a8a"],spymissions:["#0a0a0a","#f2b134"]};
+    const COL={food:["#f59e0b","#f97316"],jobs:["#8b5cf6","#6366f1"],bank:["#3b82f6","#2563eb"],ride:["#10b981","#059669"],cars:["#6366f1","#4f46e5"],map:["#06b6d4","#0891b2"],daily:["#ec4899","#db2777"],health:["#ef4444","#dc2626"],richlist:["#f59e0b","#d97706"],profile:["#6366f1","#4f46e5"],events:["#d946ef","#c026d3"],news:["#64748b","#475569"],boutique:["#d946ef","#a855f7"],myoutfits:["#f97316","#ea580c"],wardrobe:["#14b8a6","#0d9488"],contacts:["#6366f1","#818cf8"],wallet:["#f59e0b","#d97706"],tunes:["#a855f7","#9333ea"],gallery:["#06b6d4","#0891b2"],invest:["#10b981","#059669"],settings:["#64748b","#475569"],admin:["#ef4444","#b91c1c"],hunt:["#f2b134","#d97706"],missions:["#dc2626","#b91c1c"],realestate:["#16a34a","#15803d"],builds:["#b45309","#78350f"],crew:["#7f1d1d","#e11d48"],capsule:["#92400e","#f2b134"],homestore:["#ea580c","#c2410c"],storage:["#0891b2","#0e7490"],messages:["#22c55e","#16a34a"],nepa:["#facc15","#ca8a04"],company:["#1e40af","#1e3a8a"],spymissions:["#0a0a0a","#f2b134"]};
     const now=new Date(), hh=String(now.getHours()).padStart(2,"0"), mm=String(now.getMinutes()).padStart(2,"0");
     const dateTxt=now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})+" · Kaduna";
     c.innerHTML='<div class="ph-home-clock">'+hh+':'+mm+'</div><div class="ph-home-date">'+dateTxt+'</div><div class="ph-home-bal"><span>₦'+(game.state.money||0).toLocaleString()+'</span></div>'+
@@ -1370,6 +1378,10 @@ function _showPhoneApp(appId) {
   }
   if(appId==="crew"){   // 🛡️ CREW app — crews, territory, wars, chat, rank
     c.innerHTML = renderCrewApp();
+    return;
+  }
+  if(appId==="capsule"){   // 📬 LETTERS & TIME CAPSULES — bury / my letters
+    c.innerHTML = renderCapsuleApp();
     return;
   }
   if(appId==="realestate"){
@@ -3538,6 +3550,7 @@ initAuth((user) => {
   garageSetUid(user.uid);   // GARAGE: subscribe to players/{uid}/garage contents
   buildingSetUid(user.uid);   // BUILDING: subscribe to players/{uid}/builds + plots (house construction)
   crewSetUid(user.uid);       // CREW: subscribe to my crew + members + war dailies
+  capsulesSetUid(user.uid);   // CAPSULES: subscribe to my buried letters + notifications
   // REAL HOUSE BUILDING: a finished build must appear in My Houses / ride list right
   // away — refresh the local list when the celebration event fires.
   window.addEventListener("kl_house_built", (ev) => {
@@ -4901,6 +4914,8 @@ function _frame() {
   if (!active) tickBuilding(player.pos.x, player.pos.z, dt);
   // CREW SYSTEM: banner wave + war activity points + weekly war resolution + area pill
   if (!active) tickCrewSystems(dt, player.pos.x, player.pos.z);
+  // LETTERS & TIME CAPSULES: mound visuals + glow pulse + context chip (no FB reads)
+  if (!active) tickCapsules(dt, player.pos.x, player.pos.z);
   // FEATURE: check if the player is near ANY house they own → update "My Home" entrance
   if (!active) _checkOwnedHouseProximity();
   // FEATURE: check if the player is near a fun place (football pitch, suya spot, etc.)
