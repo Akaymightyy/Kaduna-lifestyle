@@ -58,6 +58,18 @@ Deploy = upload changed files into the repo (keep the folder structure: `src/…
 
 Firebase nodes: `crews`, `crewMembers`, `crewNames`, `crewTags`, `crewChat`, `territory`, `players/{uid}/crew|crewTag|cred|crewDaily`. All in `FIREBASE_RULES.json` — publish the rules before going live.
 
+## Letters & Time Capsules (Nov 2025) — bury word for ground 📬
+
+**Write letter, drop am for ground, make time (or person) unlock am:**
+
+1. **🕳️ Bury a letter** right where you dey stand (📬 Letters phone app): max 300 chars + optional cash gift (max ₦50,000, e leave your pocket AT bury time). Unlock rule na your choice: after **1 / 7 / 30 days**, OR **one named person** (pick from players near you) — only dem fit open am when dem waka within 15m of the mound.
+2. **📰 Mystery mounds** — buried letters show as small glowing mounds on the map for everybody. Locked ones glow dim ("🔒 Opens in 2 days" / "For Musa only"); ready ones glow gold. Walk close → small chip → 📬 Open.
+3. **🎁 One-time claim** — opening dey transaction-guarded, so two players wey tap at once = only one wins the gift. Sender gets "📬 Your letter don land!" the moment e open. Max **5 active capsules** per player.
+4. **↩️ 90-day expiry** — unclaimed capsule after 90 days returns the gift to the sender automatically (computed from timestamps — no server, no timers). Opened/refunded letters fit clear with 🧹.
+5. **⚑ Report** — every opened letter get a Report button (moderation).
+
+Firebase nodes: `capsules` (public meta: coords + unlockAt + status), `capsuleSecrets` (text + gift — readable ONLY by owner / the named friend / after unlock, enforced by rules with server `now`), `players/{uid}/capsules` (my index). Money: bury spend + claim/refund credits go through the server-capped pipeline (`capsule_claim` / `capsule_refund`, ₦50k caps — redeploy the Vercel money API to pick up the new caps).
+
 ## What's new (Nov 5 — 🏗️ Build a House update)
 
 **Real house building — no be "click buy" again:**
@@ -163,6 +175,8 @@ src/crew_chat.js          Crew-only group chat (Firebase, members-locked by rule
 src/crew_war.js           ⚔️ AREA WARS: war points, daily challenges, weekly takeover, cooldowns
 src/territory.js          🚩 Territory: 8 areas, ownership, 3D flags, map tint, area detection
 src/crew_app.js           📱 Crew phone app (Crew/Chat/Areas/War/Rank tabs) + wiring entry
+src/capsules.js           📬 LETTERS & TIME CAPSULES: bury, unlock rules, one-time claim, 3D mounds, phone app
+src/firebase.emu.js       TEST-ONLY firebase init (local RTDB emulator) — never imported by the build
 src/places/…              Every interior place (registry.js + manager.js + one file per place)
 src/multiplayer.js        Live positions + remote avatars
 src/life.js               Street crowd (walkers, neighbours)

@@ -156,6 +156,13 @@
               }
             }
           }
+        },
+        "capsules": {
+          ".read": "auth.uid === $uid",
+          ".write": "auth.uid === $uid",
+          "$id": {
+            ".validate": "newData.isBoolean()"
+          }
         }
       }
     },
@@ -664,6 +671,85 @@
       "$txId": {
         ".write": "auth != null && !data.exists()",
         ".validate": "newData.child('from').val() === auth.uid && newData.child('to').isString() && newData.child('to').val().length <= 128 && newData.child('to').val() !== auth.uid && newData.child('amount').isNumber() && newData.child('amount').val() > 0 && newData.child('amount').val() <= 10000000 && newData.child('ts').isNumber() && (!newData.child('note').exists() || newData.child('note').isString())"
+      }
+    },
+    "capsules": {
+      ".read": "auth != null",
+      "$id": {
+        "owner": {
+          ".write": "auth != null && !data.exists()",
+          ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 40"
+        },
+        "ownerName": {
+          ".write": "auth != null && !data.exists()",
+          ".validate": "newData.isString() && newData.val().length <= 24"
+        },
+        "x": {
+          ".write": "auth != null && !data.exists()",
+          ".validate": "newData.isNumber() && newData.val() >= -100000 && newData.val() <= 100000"
+        },
+        "z": {
+          ".write": "auth != null && !data.exists()",
+          ".validate": "newData.isNumber() && newData.val() >= -100000 && newData.val() <= 100000"
+        },
+        "kind": {
+          ".write": "auth != null && !data.exists()",
+          ".validate": "newData.val() === 'days' || newData.val() === 'friend'"
+        },
+        "forUid": {
+          ".write": "auth != null && !data.exists()",
+          ".validate": "newData.isString() && newData.val().length <= 40"
+        },
+        "forName": {
+          ".write": "auth != null && !data.exists()",
+          ".validate": "newData.isString() && newData.val().length <= 24"
+        },
+        "unlockAt": {
+          ".write": "auth != null && !data.exists()",
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "days": {
+          ".write": "auth != null && !data.exists()",
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 30"
+        },
+        "createdAt": {
+          ".write": "auth != null && !data.exists()",
+          ".validate": "newData.isNumber()"
+        },
+        "refunded": {
+          ".write": "auth != null && !data.exists() && data.parent().child('owner').val() === auth.uid && !data.parent().child('claim').exists()",
+          ".validate": "newData.val() === true"
+        },
+        "notified": {
+          ".write": "auth != null && data.parent().child('owner').val() === auth.uid",
+          ".validate": "newData.val() === true"
+        },
+        "claim": {
+          ".write": "auth != null && (!data.exists() || (data.child('by').val() === auth.uid && data.child('paid').val() === false))",
+          ".validate": "newData.child('by').val() === auth.uid && newData.child('at').isNumber() && (newData.child('paid').val() === true || newData.child('paid').val() === false)",
+          "by": {
+            ".validate": "newData.isString()"
+          },
+          "at": {
+            ".validate": "newData.isNumber()"
+          },
+          "paid": {
+            ".validate": "newData.val() === true || newData.val() === false"
+          }
+        },
+        ".write": "auth != null && newData.val() === null && data.child('owner').val() === auth.uid && (data.child('refunded').val() === true || data.child('claim/paid').val() === true)"
+      }
+    },
+    "capsuleSecrets": {
+      "$id": {
+        ".read": "auth != null && (root.child('capsules/' + $id + '/owner').val() === auth.uid || root.child('capsules/' + $id + '/forUid').val() === auth.uid || (root.child('capsules/' + $id + '/kind').val() === 'days' && now >= root.child('capsules/' + $id + '/unlockAt').val()) || root.child('capsules/' + $id + '/claim').exists())",
+        ".write": "auth != null && ((!data.exists() && newData.hasChildren(['text', 'gift']) && root.child('capsules/' + $id).exists() === false) || (newData.val() === null && root.child('capsules/' + $id + '/owner').val() === auth.uid && (root.child('capsules/' + $id + '/refunded').val() === true || root.child('capsules/' + $id + '/claim/paid').val() === true || root.child('capsules/' + $id).exists() === false)))",
+        "text": {
+          ".validate": "newData.isString() && newData.val().length >= 1 && newData.val().length <= 300"
+        },
+        "gift": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 50000"
+        }
       }
     }
   }
